@@ -16,5 +16,10 @@ if [ "$CLEANUP_FLAG" = true ] ; then
         echo "  Deleting ${INSTALL_PATH}"
         rm -rf $INSTALL_PATH
     fi
+
+    git submodule update --init $SOURCE_PATH
+    cd $SOURCE_PATH
+    git reset --hard
+
     exit 0;
 fi
