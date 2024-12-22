@@ -1,0 +1,25 @@
+################################################################################
+# This file is sourced by the build scripts to configure the build environment
+# for the docker build. For more information, see the config file in the root 
+# directory of the repository.
+################################################################################
+
+export CXX_FLAGS="-fPIC"
+export C_FLAGS="-fPIC"
+# Lots of backwards compatibility flags
+export CUDA_FLAGS="-arch=sm_52 \  
+-gencode=arch=compute_52,code=sm_52 \  
+-gencode=arch=compute_60,code=sm_60 \  
+-gencode=arch=compute_61,code=sm_61 \  
+-gencode=arch=compute_70,code=sm_70 \  
+-gencode=arch=compute_75,code=sm_75 \ 
+-gencode=arch=compute_80,code=sm_80 \ 
+-gencode=arch=compute_86,code=sm_86 \ 
+-gencode=arch=compute_87,code=sm_87 \
+-gencode=arch=compute_90,code=sm_90 \ 
+-gencode=arch=compute_100,code=sm_100 \
+-gencode=arch=compute_100,code=compute_100"
+
+export EXE_LINKER_FLAGS="-fuse-ld=gold"
+
+pythoncmd=python3
