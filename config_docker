@@ -16,9 +16,7 @@ export CUDA_FLAGS="-arch=sm_52 \
 -gencode=arch=compute_80,code=sm_80 \ 
 -gencode=arch=compute_86,code=sm_86 \ 
 -gencode=arch=compute_87,code=sm_87 \
--gencode=arch=compute_90,code=sm_90 \ 
--gencode=arch=compute_100,code=sm_100 \
--gencode=arch=compute_100,code=compute_100"
+-gencode=arch=compute_90,code=sm_90"
 
 export EXE_LINKER_FLAGS="-fuse-ld=gold"
 
