@@ -121,6 +121,7 @@ if [[ ${option_setup_library} != "n" ]] && [[ ${option_setup_library} != "N" ]];
     cmake -DCMAKE_INSTALL_PREFIX=${SCRIPTPATH}/DiFfRG_install \
           ${CUDA_OPT} \
           -DCMAKE_CUDA_FLAGS=${CUDA_FLAGS} \
+          -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES} \
           -DCMAKE_CXX_FLAGS=${CXXFLAGS} \
           -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
           -DDiFfRG_BUILD_TESTS=OFF \

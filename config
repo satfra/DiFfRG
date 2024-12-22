@@ -7,22 +7,23 @@
 # Configure compiler flags for the current machine
 # By default, we simply build with the highest instruction set available on the current machine
 # if you want to use a different instruction set, you can set this in the CXX_FLAGS, CUDA_FLAGS, C_FLAGS,
-# e.g. 
+# e.g.
 #   export CXX_FLAGS="-march=core-avx2 -fPIC"
 #   export C_FLAGS="-march=core-avx2 -fPIC"
 #   export CUDA_FLAGS="-arch=sm_35"
-export CXX_FLAGS="-march=native -fPIC"
-export C_FLAGS="-march=native -fPIC"
-export CUDA_FLAGS="-arch=native"
+export CXX_FLAGS="-march=native -fPIC -flto"
+export C_FLAGS="-march=native -fPIC -flto"
+export CUDA_FLAGS=""
+export CUDA_ARCHITECTURES="native"
 
 # Configure linker flags for the current machine. By default, we use the gold linker
 export EXE_LINKER_FLAGS="-fuse-ld=gold"
 
 # If we detect that we are on a Mac, we need to set the OpenMP_ROOT variable to the correct path
 if [[ "$OSTYPE" =~ ^darwin ]]; then
-    export OpenMP_ROOT=$(brew --prefix)/opt/libomp
-    # On Mac, we use the clang linker by default. If you want to use the gold linker, you can set this here
-    export EXE_LINKER_FLAGS=""
+  export OpenMP_ROOT=$(brew --prefix)/opt/libomp
+  # On Mac, we use the clang linker by default. If you want to use the gold linker, you can set this here
+  export EXE_LINKER_FLAGS=""
 fi
 
 # Also, the name of the python executable may vary for your system. You can set this here
@@ -33,12 +34,15 @@ pythoncmd=python3
 ################################################################################
 
 # check if dnsdomainname is thphys.uni-heidelberg.de, if yes, set some custom flags for deal.II
-if [[ "$(dnsdomainname)" = "thphys.uni-heidelberg.de" ]] || [[ "$(dnsdomainname)" = "itp.uni-heidelberg.de" ]]; then
-  export DEAL_II_CMAKE="
+# first check if dnsdomainname is available
+if command -v dnsdomainname &>/dev/null; then
+  if [[ "$(dnsdomainname)" = "thphys.uni-heidelberg.de" ]] || [[ "$(dnsdomainname)" = "itp.uni-heidelberg.de" ]]; then
+    export DEAL_II_CMAKE="
                       -DLAPACK_LIBRARIES='/usr/lib/x86_64-linux-gnu/libopenblas.so' \
                       -DBLAS_LIBRARIES='/usr/lib/x86_64-linux-gnu/libopenblas.so' \
                       -DDEAL_II_FORCE_BUNDLED_TBB=ON"
-  echo "Using specific flags for thphys.uni-heidelberg.de:"
-  echo ${DEAL_II_CMAKE}
-  echo
+    echo "Using specific flags for thphys.uni-heidelberg.de:"
+    echo ${DEAL_II_CMAKE}
+    echo
+  fi
 fi
