@@ -179,11 +179,11 @@ else
     cd ${BUILDPATH}
     # use make
     cmake -DCMAKE_INSTALL_PREFIX=${idir} . &> /dev/null
-    if [[ -w ${idir} ]] then
+    if [[ -w ${idir} ]]; then
       make install -j ${THREADS} &> ${LOGPATH}/DiFfRG_install.log
       cp -r ${SCRIPTPATH}/python ${idir}/
     else
-      if ((failed_first == 0)) then
+      if ((failed_first == 0)); then
         echo "    Elevated permissions required to write into ${idir}."
       fi
       sudo make install -j ${THREADS} &> ${LOGPATH}/DiFfRG_install.log
