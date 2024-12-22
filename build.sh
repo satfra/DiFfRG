@@ -57,7 +57,7 @@ bash -i ./build_qmc.sh -j ${threads} &>/dev/null || {
   exit 1
 }
 echo "    Building autodiff..."
-bash -i ./build_autodiff.sh -j ${threads} &>/dev/null || {
+bash -i ./build_autodiff.sh -j ${threads} || {
   echo "    Failed to build autodiff, aborting."
   exit 1
 }
