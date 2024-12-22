@@ -35,5 +35,5 @@ cd $SOURCE_PATH
   --with-system \
   --with-thread \
   -j ${THREADS} \
-  cxxflags="-std=c++20" \
+  cxxflags="${CXX_FLAGS} -std=c++20" \
   install | tee $MAKE_LOG_FILE
