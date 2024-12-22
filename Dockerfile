@@ -1,9 +1,9 @@
-ARG base
+ARG base="rockylinux:9"
 
 FROM $base
 
-ARG threads
-ARG cuda
+ARG threads="1"
+ARG cuda=""
 
 # set a directory for the app
 WORKDIR /DiFfRG/
@@ -18,8 +18,5 @@ RUN cat config_docker >config
 SHELL [ "/usr/bin/scl", "enable", "gcc-toolset-12"]
 RUN bash -i build.sh -j $threads -f $cuda -i /opt/DiFfRG
 
-# define the port number the container should expose
-EXPOSE 5000
-
 # run the command
-CMD ["scl enable gcc-toolset-12 bash"]
+CMD ["scl", "enable", "gcc-toolset-12", "bash"]
