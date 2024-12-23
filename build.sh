@@ -106,6 +106,7 @@ if [[ ${install_dir} != "n" ]] && [[ ${install_dir} != "N" ]]; then
   echo "DiFfRG library will be installed in ${idir}"
   
   # Check if the install directory is writable
+  failed_first=0
   mkdir -p ${idir} &>/dev/null && touch ${idir}/_permission_test &>/dev/null || {
     failed_first=1
   }
