@@ -58,13 +58,13 @@ Options:
 threads='1'
 full_inst='n'
 install_dir=''
-cuda=''
+cuda_flag=''
 while getopts :i:j:fc flag; do
   case "${flag}" in
   i) install_dir=${OPTARG} ;;
   j) threads=${OPTARG} ;;
   f) full_inst='y' ;;
-  c) cuda="-c" ;;
+  c) cuda_flag="-c" ;;
   ?)
     printf "${usage_msg}"
     exit 2
@@ -73,10 +73,14 @@ while getopts :i:j:fc flag; do
 done
 
 # Get the path where this script is located
-scriptpath="$(
+SCRIPTPATH="$(
   cd -- "$(dirname "$0")" >/dev/null 2>&1
   pwd -P
 )"
+SOURCEPATH=${SCRIPTPATH}/DiFfRG
+BUILDPATH=${SCRIPTPATH}/DiFfRG_build
+LOGPATH=${SCRIPTPATH}/logs
+mkdir -p ${LOGPATH}
 
 # Obtain possibly user-defined configuration
 source config
@@ -110,16 +114,16 @@ if [[ ${install_dir} != "n" ]] && [[ ${install_dir} != "N" ]]; then
   start=$(date +%s)
   cd ${SCRIPTPATH}/external
   if [[ $failed_first == 0 ]]; then
-    rm ${idir}/_permission_test
+    rm -f ${idir}/_permission_test
     echo
     echo "Installing dependencies..."
-    bash -i ./install.sh -i ${idir}/bundled -j ${THREADS} ${cuda_flag} # &>${LOGPATH}/DiFfRG_dependencies_install.log
+    bash -i ./install.sh -i ${idir}/bundled -j ${threads} ${cuda_flag} # &>${LOGPATH}/DiFfRG_dependencies_install.log
   else
     echo "Elevated permissions required for install path ${idir}."
     sudo mkdir -p ${idir}
     echo
     echo "Installing dependencies..."
-    sudo -E bash -i ./install.sh -i ${idir}/bundled -j ${THREADS} ${cuda_flag} # &>${LOGPATH}/DiFfRG_dependencies_install.log
+    sudo -E bash -i ./install.sh -i ${idir}/bundled -j ${threads} ${cuda_flag} # &>${LOGPATH}/DiFfRG_dependencies_install.log
   fi
   end=$(date +%s)
   runtime=$((end - start))
@@ -133,12 +137,12 @@ fi
 # ##############################################################################
 
 if [[ "$full_inst" == "y" ]] && [[ "$install_dir" != "" ]]; then
-  bash -i ${scriptpath}/update_DiFfRG.sh -j ${threads} -ml ${cuda} -i ${install_dir}
+  bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -ml ${cuda_flag} -i ${install_dir}
 else
   if [[ "$full_inst" == "y" ]]; then
-    bash -i ${scriptpath}/update_DiFfRG.sh -j ${threads} -ml ${cuda}
+    bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -ml ${cuda_flag}
   else
-    bash -i ${scriptpath}/update_DiFfRG.sh -j ${threads}
+    bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads}
   fi
 fi
 
