@@ -1,8 +1,43 @@
 #!/bin/bash
 
 # ##############################################################################
-# Script setup
+# Utility
 # ##############################################################################
+
+expandPath() {
+  local path
+  local -a pathElements resultPathElements
+  IFS=':' read -r -a pathElements <<<"$1"
+  : "${pathElements[@]}"
+  for path in "${pathElements[@]}"; do
+    : "$path"
+    case $path in
+    "~+"/*)
+      path=$PWD/${path#"~+/"}
+      ;;
+    "~-"/*)
+      path=$OLDPWD/${path#"~-/"}
+      ;;
+    "~"/*)
+      path=$HOME/${path#"~/"}
+      ;;
+    "~"*)
+      username=${path%%/*}
+      username=${username#"~"}
+      IFS=: read -r _ _ _ _ _ homedir _ < <(getent passwd "$username")
+      if [[ $path = */* ]]; then
+        path=${homedir}/${path#*/}
+      else
+        path=$homedir
+      fi
+      ;;
+    esac
+    resultPathElements+=("$path")
+  done
+  local result
+  printf -v result '%s:' "${resultPathElements[@]}"
+  printf '%s\n' "${result%:}"
+}
 
 usage_msg="Build script for setting up the DiFfRG library and its dependencies. 
 For configuration of build flags, please edit the config file.
@@ -15,6 +50,10 @@ Options:
   -j <threads>     Set the number of threads passed to make and git fetch.
   --help           Display this information.
 "
+
+# ##############################################################################
+# Script setup
+# ##############################################################################
 
 threads='1'
 full_inst='n'
@@ -52,11 +91,6 @@ if [[ -z ${install_dir+x} ]]; then
   echo
   read -p "Install DiFfRG library globally to /opt/DiFfRG? [y/N/path] " install_dir
   install_dir=${install_dir:-N}
-fi
-
-if [[ -z ${option_setup_library+x} ]]; then
-  read -p "Build DiFfRG library? [Y/n] " option_setup_library
-  option_setup_library=${option_setup_library:-Y}
 fi
 
 if [[ ${install_dir} != "n" ]] && [[ ${install_dir} != "N" ]]; then
