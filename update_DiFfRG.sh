@@ -93,7 +93,7 @@ LOGPATH=${SCRIPTPATH}/logs
 mkdir -p ${LOGPATH}
 
 # Obtain possibly user-defined configuration
-source ${SCRIPT_PATH}/config
+source ${SCRIPTPATH}/config
 
 echo
 
