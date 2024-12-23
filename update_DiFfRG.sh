@@ -42,7 +42,7 @@ expandPath() {
 usage_msg="Build script for building and installing the DiFfRG library. 
 For configuration of build flags, please edit the config file.
 
-Usage: build.sh [options]
+Usage: update_DiFfRG.sh [options]
 Options:
   -c               Use CUDA when building the DiFfRG library.
   -i <directory>   Set the installation directory for the library.
@@ -93,7 +93,7 @@ LOGPATH=${SCRIPTPATH}/logs
 mkdir -p ${LOGPATH}
 
 # Obtain possibly user-defined configuration
-source config
+source ${SCRIPT_PATH}/config
 
 echo
 
