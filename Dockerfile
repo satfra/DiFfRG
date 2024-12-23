@@ -14,9 +14,8 @@ COPY ./.git ./.git
 # install dependencies
 RUN dnf --enablerepo=devel install -y gcc-toolset-12 cmake git openblas-devel doxygen doxygen-latex tbb-devel python3 python3-pip gsl-devel
 RUN git reset --hard
-RUN cat config_docker >config
 SHELL [ "/usr/bin/scl", "enable", "gcc-toolset-12"]
-RUN bash -i build.sh -j $threads -f $cuda -i DiFfRG_install &>build.log
+RUN bash -i build.sh -j -d $threads -f $cuda -i DiFfRG_install &>build.log
 RUN ln -s /DiFfRG/DiFfRG_install /opt/DiFfRG
 
 # run the command

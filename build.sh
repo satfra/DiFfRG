@@ -59,8 +59,14 @@ threads='1'
 full_inst='n'
 install_dir=''
 cuda_flag=''
-while getopts :i:j:fc flag; do
+config_file='config'
+config_flag=''
+while getopts :i:j:fcd flag; do
   case "${flag}" in
+  d)
+    config_file="config_docker"
+    config_flag="-d"
+    ;;
   i) install_dir=${OPTARG} ;;
   j) threads=${OPTARG} ;;
   f) full_inst='y' ;;
@@ -83,7 +89,7 @@ LOGPATH=${SCRIPTPATH}/logs
 mkdir -p ${LOGPATH}
 
 # Obtain possibly user-defined configuration
-source ${SCRIPT_PATH}/config
+source ${SCRIPT_PATH}/${config_file}
 
 # ##############################################################################
 # Build bundled libraries
@@ -104,7 +110,7 @@ if [[ ${install_dir} != "n" ]] && [[ ${install_dir} != "N" ]]; then
   idir=$(expandPath ${install_dir}/)
   idir=$(readlink --canonicalize ${idir})
   echo "DiFfRG library will be installed in ${idir}"
-  
+
   # Check if the install directory is writable
   failed_first=0
   mkdir -p ${idir} &>/dev/null && touch ${idir}/_permission_test &>/dev/null || {
@@ -138,12 +144,12 @@ fi
 # ##############################################################################
 
 if [[ "$full_inst" == "y" ]] && [[ "$install_dir" != "" ]]; then
-  bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag} -i ${install_dir}
+  bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag} ${config_flag} -i ${install_dir}
 else
   if [[ "$full_inst" == "y" ]]; then
-    bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag}
+    bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag} ${config_flag}
   else
-    bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads}
+    bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} ${config_flag}
   fi
 fi
 

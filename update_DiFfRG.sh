@@ -58,8 +58,14 @@ Options:
 THREADS='1'
 CUDA_OPT="-DUSE_CUDA=OFF"
 cuda_flag=""
-while getopts :j:mci: flag; do
+config_file="config"
+config_flag=''
+while getopts :j:mcdi: flag; do
   case "${flag}" in
+  d)
+    config_file="config_docker"
+    config_flag="-d"
+    ;;
   j)
     THREADS=${OPTARG}
     ;;
@@ -93,7 +99,7 @@ LOGPATH=${SCRIPTPATH}/logs
 mkdir -p ${LOGPATH}
 
 # Obtain possibly user-defined configuration
-source ${SCRIPTPATH}/config
+source ${SCRIPT_PATH}/${config_file}
 
 echo
 
