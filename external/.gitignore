@@ -22,5 +22,7 @@ eigen_build/
 eigen_install/
 qmc_install/
 thread-pool_install/
+rapidcsv_build/
+rapidcsv_install/
 logs/
 *.log

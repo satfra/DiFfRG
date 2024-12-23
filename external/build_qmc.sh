@@ -6,8 +6,8 @@ SCRIPT_PATH="$(
   pwd -P
 )"
 
-source $SCRIPT_PATH/build_scripts/populate_paths.sh
 source $SCRIPT_PATH/build_scripts/parse_flags.sh
+source $SCRIPT_PATH/build_scripts/populate_paths.sh
 source $SCRIPT_PATH/build_scripts/cleanup_build_if_asked.sh
 source $SCRIPT_PATH/build_scripts/setup_folders.sh
 

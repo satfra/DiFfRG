@@ -11,8 +11,8 @@
 #   export CXX_FLAGS="-march=core-avx2 -fPIC"
 #   export C_FLAGS="-march=core-avx2 -fPIC"
 #   export CUDA_FLAGS="-arch=sm_35"
-export CXX_FLAGS="-march=native -fPIC -flto"
-export C_FLAGS="-march=native -fPIC -flto"
+export CXX_FLAGS="-march=native -fPIC -flto=auto"
+export C_FLAGS="-march=native -fPIC -flto=auto"
 export CUDA_FLAGS=""
 export CUDA_ARCHITECTURES="native"
 

@@ -4,7 +4,9 @@
 
 if(${CMAKE_PROJECT_NAME} STREQUAL "DiFfRG")
   set(BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-  set(BUNDLED_DIR ${BASE_DIR}/../external)
+  if (NOT DEFINED BUNDLED_DIR)
+    set(BUNDLED_DIR ${BASE_DIR}/../external)
+  endif()
 else()
   set(BASE_DIR ${DiFfRG_BASE_DIR})
   set(BUNDLED_DIR ${BASE_DIR}/bundled)
@@ -42,10 +44,12 @@ link_libraries(TBB::tbb)
 find_package(OpenMP REQUIRED)
 link_libraries(OpenMP::OpenMP_CXX)
 
-find_package(Boost 1.80 REQUIRED HINTS ${BUNDLED_DIR}/boost_install)
+find_package(Boost 1.80 REQUIRED HINTS ${BUNDLED_DIR}/boost_install COMPONENTS thread random iostreams math serialization system)
 message(STATUS "Boost version: ${Boost_VERSION}")
 message(STATUS "Boost include dir: ${Boost_INCLUDE_DIRS}")
+message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 include_directories(SYSTEM ${Boost_INCLUDE_DIRS})
+link_libraries(${Boost_LIBRARIES})
 
 find_package(autodiff REQUIRED PATHS ${BUNDLED_DIR}/autodiff_install)
 link_libraries(autodiff::autodiff)
@@ -61,7 +65,7 @@ link_libraries(GSL::gsl)
 message(STATUS "GSL include dir: ${GSL_INCLUDE_DIR}")
 include_directories(SYSTEM ${GSL_INCLUDE_DIR}) 
 
-include_directories(SYSTEM ${BUNDLED_DIR}/rapidcsv/src)
+include_directories(SYSTEM ${BUNDLED_DIR}/rapidcsv_install/include)
 include_directories(SYSTEM ${BUNDLED_DIR}/qmc_install)
 include_directories(SYSTEM ${BUNDLED_DIR}/thread-pool_install/include)
 
