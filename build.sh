@@ -89,7 +89,7 @@ LOGPATH=${SCRIPTPATH}/logs
 mkdir -p ${LOGPATH}
 
 # Obtain possibly user-defined configuration
-source ${SCRIPT_PATH}/${config_file}
+source ${SCRIPTPATH}/${config_file}
 
 # ##############################################################################
 # Build bundled libraries
