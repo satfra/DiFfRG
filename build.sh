@@ -138,10 +138,10 @@ fi
 # ##############################################################################
 
 if [[ "$full_inst" == "y" ]] && [[ "$install_dir" != "" ]]; then
-  bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -ml ${cuda_flag} -i ${install_dir}
+  bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag} -i ${install_dir}
 else
   if [[ "$full_inst" == "y" ]]; then
-    bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -ml ${cuda_flag}
+    bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag}
   else
     bash -i ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads}
   fi
