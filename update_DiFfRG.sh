@@ -99,7 +99,7 @@ LOGPATH=${SCRIPTPATH}/logs
 mkdir -p ${LOGPATH}
 
 # Obtain possibly user-defined configuration
-source ${SCRIPT_PATH}/${config_file}
+source ${SCRIPTPATH}/${config_file}
 
 echo
 
@@ -125,7 +125,7 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
   idir=$(expandPath ${option_install_library}/)
   idir=$(readlink --canonicalize ${idir})
   echo "DiFfRG library will be installed in ${idir}"
-  
+
   # Check if the install directory is writable
   mkdir -p ${idir} &>/dev/null && touch ${idir}/_permission_test &>/dev/null || {
     failed_first=1
