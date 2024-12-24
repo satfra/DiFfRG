@@ -3,7 +3,7 @@
 // standard library
 #include <future>
 #include <memory>
-#include <oneapi/tbb/blocked_range.h>
+#include <tbb/tbb.h>
 #include <tuple>
 #include <vector>
 
