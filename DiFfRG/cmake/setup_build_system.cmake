@@ -109,7 +109,7 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER)
     target_compile_definitions(${TARGET} PUBLIC USE_CUDA)
     set_target_properties(${TARGET} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     deal_ii_setup_target(${TARGET})
-    set_property(TARGET ${TARGET} PROPERTY CUDA_ARCHITECTURES native)
+    #set_property(TARGET ${TARGET} PROPERTY CUDA_ARCHITECTURES native)
     target_compile_options(
       ${TARGET} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>")
     target_compile_options(${TARGET} PRIVATE -Wno-misleading-indentation)
