@@ -102,3 +102,26 @@ install(
         "${CMAKE_CURRENT_BINARY_DIR}/DiFfRGConfigVersion.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/DiFfRGTargets.cmake"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/DiFfRG")
+
+# ##############################################################################
+# Wrap up
+# ##############################################################################
+
+# Add CPMLicenses for disclaimers
+CPMAddPackage(
+  NAME CPMLicenses.cmake 
+  GITHUB_REPOSITORY cpm-cmake/CPMLicenses.cmake
+  VERSION 0.0.5
+)
+
+set(deal.II_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/dealii)
+set(sundials_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/sundials)
+set(boost_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/boost)
+
+message("deal.II source directory: ${deal.II_SOURCE_DIR}")
+
+message("packages: ${CPM_PACKAGES};deal.II;sundials;boost")
+
+cpm_licenses_create_disclaimer_target(
+  write-licenses "${CMAKE_CURRENT_SOURCE_DIR}/../third_party.txt" "${CPM_PACKAGES};deal.II;sundials;boost"
+)

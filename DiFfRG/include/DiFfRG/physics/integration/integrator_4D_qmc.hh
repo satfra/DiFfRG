@@ -5,7 +5,7 @@
 
 // external libraries
 #include "BS_thread_pool.hpp"
-#include "qmc.hpp"
+#include <qmc/qmc.hpp>
 
 // DiFfRG
 #include <DiFfRG/common/cuda_prefix.hh>
@@ -114,7 +114,7 @@ namespace DiFfRG
     }
 
   private:
-    mutable BS::thread_pool pool;
+    mutable BS::thread_pool<BS::tp::none> pool;
     mutable integrators::Qmc<NT, ctype, 4, integrators::transforms::None::type> integrator;
     const ctype x_extent;
   };

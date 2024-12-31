@@ -145,7 +145,6 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
     -DBUNDLED_DIR=${idir}/bundled \
     ${CUDA_OPT} \
     -DCMAKE_CUDA_FLAGS=${CUDA_FLAGS} \
-    -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
     -DCMAKE_CXX_FLAGS=${CXXFLAGS} \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
     -DDiFfRG_BUILD_TESTS=OFF \

@@ -55,6 +55,7 @@ else()
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_1D_stack.cc
   )
 endif()
+
 setup_target(DiFfRG)
 
 target_include_directories(DiFfRG INTERFACE
@@ -62,6 +63,7 @@ target_include_directories(DiFfRG INTERFACE
   $<INSTALL_INTERFACE:include>
 )
 add_library(DiFfRG::DiFfRG ALIAS DiFfRG)
+set_property(TARGET DiFfRG PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
 include(GNUInstallDirs)
 install(

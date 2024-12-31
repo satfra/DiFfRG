@@ -26,6 +26,7 @@ cmake -DCMAKE_BUILD_TYPE=DebugRelease \
   -DCMAKE_EXE_LINKER_FLAGS="${EXE_LINKER_FLAGS}" \
   -DCMAKE_CXX_STANDARD=17 \
   -DKOKKOS_DIR=${TOP_INSTALL_PATH}/kokkos_install \
+  -DTBB_DIR=${TOP_INSTALL_PATH}/oneTBB_install \
   -DSUNDIALS_DIR=${TOP_INSTALL_PATH}/sundials_install \
   ${DEAL_II_CMAKE} \
   -DBOOST_DIR=${TOP_INSTALL_PATH}/boost_install \

@@ -4,7 +4,7 @@
 #include <future>
 
 // external libraries
-#include "qmc.hpp"
+#include <qmc/qmc.hpp>
 
 // DiFfRG
 #include <DiFfRG/common/cuda_prefix.hh>
