@@ -1,6 +1,6 @@
 ################################################################################
 # This file is sourced by the build scripts to configure the build environment
-# for the docker build. For more information, see the config file in the root 
+# for the docker build. For more information, see the config file in the root
 # directory of the repository.
 ################################################################################
 
@@ -14,4 +14,6 @@ export EXE_LINKER_FLAGS="-fuse-ld=gold"
 
 pythoncmd=python3
 
-export DEAL_II_CMAKE="DDEAL_II_ALLOW_PLATFORM_INTROSPECTION=OFF"
+# Turn on LTO for deal.II, cause we have the time.
+export DEAL_II_CMAKE="DDEAL_II_ALLOW_PLATFORM_INTROSPECTION=OFF \
+  -DDEAL_II_USE_LTO=ON"

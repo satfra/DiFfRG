@@ -58,9 +58,6 @@ deal_ii_initialize_cached_variables()
 find_package(TBB 2022.0.0 REQUIRED HINTS ${BUNDLED_DIR}/oneTBB_install)
 message(STATUS "TBB dir: ${TBB_DIR}")
 
-# Find OpenMP
-find_package(OpenMP REQUIRED)
-
 # Find Boost
 find_package(Boost 1.80 REQUIRED HINTS ${BUNDLED_DIR}/boost_install
              COMPONENTS thread random iostreams math serialization system)
@@ -204,7 +201,6 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER)
     target_link_libraries(${TARGET} spdlog::spdlog)
     target_link_libraries(${TARGET} rmm::rmm)
     target_link_libraries(${TARGET} ${Boost_LIBRARIES})
-    target_link_libraries(${TARGET} OpenMP::OpenMP_CXX)
     target_link_libraries(${TARGET} TBB::tbb)
   endfunction()
 
@@ -231,7 +227,6 @@ else()
     target_link_libraries(${TARGET} TBB::tbb)
     target_link_libraries(${TARGET} spdlog::spdlog)
     target_link_libraries(${TARGET} ${Boost_LIBRARIES})
-    target_link_libraries(${TARGET} OpenMP::OpenMP_CXX)
     target_link_libraries(${TARGET} TBB::tbb)
   endfunction()
 

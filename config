@@ -29,8 +29,11 @@ fi
 # Also, the name of the python executable may vary for your system. You can set this here
 pythoncmd=python3
 
-# Set additional cmake flags for deal.II. For a local build, we want to allow platform introspection.
-export DEAL_II_CMAKE="DDEAL_II_ALLOW_PLATFORM_INTROSPECTION=ON"
+# Set additional cmake flags for deal.II.
+# For a local build, we want to allow platform introspection.
+# By default, we disable LTO for deal.II to speed up the build, but you can enable it here
+export DEAL_II_CMAKE="DDEAL_II_ALLOW_PLATFORM_INTROSPECTION=ON \
+  -DDEAL_II_USE_LTO=OFF"
 
 ################################################################################
 # Library-specific configuration
