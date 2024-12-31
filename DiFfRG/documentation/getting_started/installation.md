@@ -7,8 +7,7 @@ To compile and run this project, there are very few requirements which you can e
 - [GNU Make](https://www.gnu.org/software/make/) or another generator of your choice.
 - A compiler supporting at least the C++20 standard. This project is only tested using the [GCC](https://gcc.gnu.org/) compiler suite, as well as with `AppleClang`, but in principle, ICC or standard Clang should also work.
 - LAPACK and BLAS in some form, e.g. [OpenBlas](https://www.openblas.net/).
-- The GNU Scientific Library [GSL](https://www.gnu.org/software/gsl/)
-- TBB, which is used for CPU-side parallel computations.
+- The GNU Scientific Library [GSL](https://www.gnu.org/software/gsl/). If not found by DiFfRG, it will try to install it by itself.
 - [Doxygen](https://www.doxygen.org/) and [graphviz](https://www.graphviz.org/download/) to build the documentation.
 
 The following requirements are optional:
@@ -21,7 +20,7 @@ The framework has been tested with the following systems:
 
 #### Arch Linux
 ```bash
-$ pacman -S git cmake gcc blas-openblas blas64-openblas paraview python doxygen tbb cuda graphviz gsl
+$ pacman -S git cmake gcc blas-openblas blas64-openblas paraview python doxygen cuda graphviz gsl
 ```
 A further installation of the `gcc12` package from the AUR is necessary for setups with CUDA; with your AUR helper of choice (here `yay`) this can be done with
 ```bash
@@ -30,7 +29,7 @@ $ yay -S gcc12
 
 #### Rocky Linux
 ```bash
-$ dnf --enablerepo=devel install -y gcc-toolset-12 cmake git openblas-devel doxygen doxygen-latex tbb-devel python3 python3-pip gsl-devel
+$ dnf --enablerepo=devel install -y gcc-toolset-12 cmake git openblas-devel doxygen doxygen-latex python3 python3-pip gsl-devel
 $ scl enable gcc-toolkit-12 bash
 ```
 
@@ -39,13 +38,13 @@ The second line is necessary to switch into a shell where `g++-12` is available
 #### Ubuntu
 ```bash
 $ apt-get update
-$ apt-get install git cmake libopenblas-dev paraview build-essential libtbb-dev python3 doxygen libeigen3-dev cuda graphviz
+$ apt-get install git cmake libopenblas-dev paraview build-essential python3 doxygen libeigen3-dev cuda graphviz libgsl-dev
 ```
 
 #### MacOS
 First, install xcode and homebrew, then run
 ```bash
-$ brew install cmake libomp tbb doxygen paraview eigen graphviz
+$ brew install cmake doxygen paraview eigen graphviz gsl
 ```
 
 #### Windows
