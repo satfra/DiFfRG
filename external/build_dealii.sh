@@ -28,8 +28,8 @@ cmake -DCMAKE_BUILD_TYPE=DebugRelease \
   -DKOKKOS_DIR=${TOP_INSTALL_PATH}/kokkos_install \
   -DTBB_DIR=${TOP_INSTALL_PATH}/oneTBB_install \
   -DSUNDIALS_DIR=${TOP_INSTALL_PATH}/sundials_install \
-  ${DEAL_II_CMAKE} \
   -DBOOST_DIR=${TOP_INSTALL_PATH}/boost_install \
+  ${DEAL_II_CMAKE} \
   -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH} \
   -S ${SOURCE_PATH} \
   2>&1 | tee $CMAKE_LOG_FILE

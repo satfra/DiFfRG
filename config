@@ -29,6 +29,9 @@ fi
 # Also, the name of the python executable may vary for your system. You can set this here
 pythoncmd=python3
 
+# Set additional cmake flags for deal.II. For a local build, we want to allow platform introspection.
+export DEAL_II_CMAKE="DDEAL_II_ALLOW_PLATFORM_INTROSPECTION=ON"
+
 ################################################################################
 # Library-specific configuration
 ################################################################################
@@ -38,9 +41,9 @@ pythoncmd=python3
 if command -v dnsdomainname &>/dev/null; then
   if [[ "$(dnsdomainname)" = "thphys.uni-heidelberg.de" ]] || [[ "$(dnsdomainname)" = "itp.uni-heidelberg.de" ]]; then
     export DEAL_II_CMAKE="
+                      -DDEAL_II_ALLOW_PLATFORM_INTROSPECTION=ON \
                       -DLAPACK_LIBRARIES='/usr/lib/x86_64-linux-gnu/libopenblas.so' \
-                      -DBLAS_LIBRARIES='/usr/lib/x86_64-linux-gnu/libopenblas.so' \
-                      -DDEAL_II_FORCE_BUNDLED_TBB=ON"
+                      -DBLAS_LIBRARIES='/usr/lib/x86_64-linux-gnu/libopenblas.so'"
     echo "Using specific flags for thphys.uni-heidelberg.de:"
     echo ${DEAL_II_CMAKE}
     echo

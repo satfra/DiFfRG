@@ -4,12 +4,14 @@
 # directory of the repository.
 ################################################################################
 
-export CXX_FLAGS="-fPIC"
-export C_FLAGS="-fPIC"
-# Lots of backwards compatibility flags
+export CXX_FLAGS="-fPIC -flto=auto"
+export C_FLAGS="-fPIC -flto=auto"
+
 export CUDA_FLAGS=""
 export CUDA_ARCHITECTURES="all"
 
 export EXE_LINKER_FLAGS="-fuse-ld=gold"
 
 pythoncmd=python3
+
+export DEAL_II_CMAKE="DDEAL_II_ALLOW_PLATFORM_INTROSPECTION=OFF"
