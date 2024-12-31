@@ -20,6 +20,7 @@ if(NOT DEFINED CPM_SOURCE_CACHE)
 endif()
 
 # Get CPM for package management
+list(APPEND CMAKE_MODULE_PATH "${BASE_DIR}/cmake")
 include(${BASE_DIR}/cmake/CPM.cmake)
 
 # ##############################################################################
@@ -55,8 +56,7 @@ find_package(deal.II 9.5.0 REQUIRED HINTS ${DEAL_II_DIR}
 deal_ii_initialize_cached_variables()
 
 # Find TBB
-set(TBB_DIR ${BUNDLED_DIR}/oneTBB_install)
-find_package(TBB 2022.0.0 REQUIRED)
+find_package(TBB 2022.0.0 REQUIRED HINTS ${BUNDLED_DIR}/oneTBB_install)
 message(STATUS "TBB dir: ${TBB_DIR}")
 
 # Find Boost
@@ -196,11 +196,10 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER)
 
     target_link_libraries(${TARGET} GSL::gsl)
     target_link_libraries(${TARGET} Eigen3)
-    target_link_libraries(${TARGET} TBB::tbb)
     target_link_libraries(${TARGET} spdlog::spdlog)
     target_link_libraries(${TARGET} rmm::rmm)
     target_link_libraries(${TARGET} ${Boost_LIBRARIES})
-    target_link_libraries(${TARGET} TBB::tbb)
+    target_link_libraries(${TARGET} tbb)
   endfunction()
 
   message(STATUS "CUDA support enabled.")
@@ -223,10 +222,9 @@ else()
 
     target_link_libraries(${TARGET} GSL::gsl)
     target_link_libraries(${TARGET} Eigen3)
-    target_link_libraries(${TARGET} TBB::tbb)
+    target_link_libraries(${TARGET} tbb)
     target_link_libraries(${TARGET} spdlog::spdlog)
     target_link_libraries(${TARGET} ${Boost_LIBRARIES})
-    target_link_libraries(${TARGET} TBB::tbb)
   endfunction()
 
   message(STATUS "CUDA support disabled.")
