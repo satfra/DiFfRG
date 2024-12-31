@@ -61,7 +61,7 @@ find_package(deal.II 9.5.0 REQUIRED HINTS ${DEAL_II_DIR}
 deal_ii_initialize_cached_variables()
 
 # Find TBB
-find_package(TBB REQUIRED)
+find_package(TBB 2022.0.0 REQUIRED HINTS ${BUNDLED_DIR}/oneTBB_install)
 message(STATUS "TBB dir: ${TBB_DIR}")
 
 # Find OpenMP
@@ -95,7 +95,7 @@ endif()
 # Find GSL
 find_package(GSL)
 if(NOT GSL_FOUND)
-  cpmaddpackage(
+  cpmfindpackage(
     NAME
     gsl
     GITHUB_REPOSITORY
@@ -105,6 +105,7 @@ if(NOT GSL_FOUND)
     OPTIONS
     "GSL_DISABLE_TESTS 1"
     "DOCUMENTATION OFF")
+  add_library(GSL::gsl ALIAS gsl)
 else()
   message(STATUS "GSL found: ${GSL_INCLUDE_DIR}")
 endif()
@@ -160,6 +161,7 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER)
 
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     set(CMAKE_CUDA_ARCHITECTURES native)
+    message(WARNING "CMAKE_CUDA_ARCHITECTURES not set. Using native.")
   endif()
 
   set(CUDA_NVCC_FLAGS
@@ -188,7 +190,7 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER)
     set_target_properties(${TARGET} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     set_target_properties(${TARGET} PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(${TARGET} PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-    set_target_properties(${TARGET} PROPERTIES CUDA_ARCHITECTURES native)
+    set_target_properties(${TARGET} PROPERTIES CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES})
 
     target_compile_options(
       ${TARGET} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>")

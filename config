@@ -14,7 +14,7 @@
 export CXX_FLAGS="-march=native -fPIC -flto=auto"
 export C_FLAGS="-march=native -fPIC -flto=auto"
 export CUDA_FLAGS=""
-export CUDA_ARCHITECTURES="native"
+export CUDA_ARCHITECTURES="all"
 
 # Configure linker flags for the current machine. By default, we use the gold linker
 export EXE_LINKER_FLAGS="-fuse-ld=gold"

@@ -107,16 +107,16 @@ install(
 # Wrap up
 # ##############################################################################
 
+set(CPM_PACKAGE_deal.II_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/dealii)
+set(CPM_PACKAGE_sundials_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/sundials)
+set(CPM_PACKAGE_boost_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/boost)
+
 # Add CPMLicenses for disclaimers
 CPMAddPackage(
   NAME CPMLicenses.cmake 
   GITHUB_REPOSITORY cpm-cmake/CPMLicenses.cmake
   VERSION 0.0.5
 )
-
-set(deal.II_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/dealii)
-set(sundials_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/sundials)
-set(boost_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/boost)
 
 message("deal.II source directory: ${deal.II_SOURCE_DIR}")
 
