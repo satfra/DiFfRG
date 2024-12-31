@@ -41,19 +41,13 @@ enable_language(CXX)
 # Find packages
 # ##############################################################################
 
-# Add format.cmake for code formatting
-CPMAddPackage("gh:TheLartians/Format.cmake@1.8.2")
-
 # Use CCACHE if not set
 if(NOT DEFINED USE_CCACHE)
   set(USE_CCACHE ON)
 endif()
 # Add CCache.cmake for faster builds
-CPMAddPackage(
-  NAME Ccache.cmake
-  GITHUB_REPOSITORY TheLartians/Ccache.cmake
-  VERSION 1.2
-)
+cpmaddpackage(NAME Ccache.cmake GITHUB_REPOSITORY TheLartians/Ccache.cmake
+              VERSION 1.2)
 
 # Find deal.II
 find_package(deal.II 9.5.0 REQUIRED HINTS ${DEAL_II_DIR}
@@ -190,7 +184,8 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER)
     set_target_properties(${TARGET} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
     set_target_properties(${TARGET} PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set_target_properties(${TARGET} PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
-    set_target_properties(${TARGET} PROPERTIES CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES})
+    set_target_properties(${TARGET} PROPERTIES CUDA_ARCHITECTURES
+                                               ${CMAKE_CUDA_ARCHITECTURES})
 
     target_compile_options(
       ${TARGET} PRIVATE "$<$<COMPILE_LANGUAGE:CUDA>:${CUDA_NVCC_FLAGS}>")
@@ -256,8 +251,7 @@ cpmaddpackage(
   "AUTODIFF_BUILD_EXAMPLES OFF"
   "AUTODIFF_BUILD_DOCS OFF"
   "AUTODIFF_BUILD_PYTHON OFF"
-  "Eigen3_DIR ${Eigen3_BINARY_DIR}"
-  )
+  "Eigen3_DIR ${Eigen3_BINARY_DIR}")
 
 if(USE_CUDA)
   cpmaddpackage(NAME CCCL GITHUB_REPOSITORY "nvidia/cccl" GIT_TAG "v2.7.0")
@@ -272,8 +266,7 @@ if(USE_CUDA)
     SYSTEM
     Off
     OPTIONS
-    "BUILD_TESTS OFF"
-    )
+    "BUILD_TESTS OFF")
 
 endif()
 

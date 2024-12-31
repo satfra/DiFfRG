@@ -27,9 +27,9 @@
     "cudathreadsperblock": 64
   },
   "discretization": {
-    "p_grid_min" : 1e-3,
-    "p_grid_max" : 40.0,
-    "p_grid_bias" : 8.0,
+    "p_grid_min": 1e-3,
+    "p_grid_max": 40.0,
+    "p_grid_bias": 8.0,
 
     "fe_order": 3,
     "threads": 8,

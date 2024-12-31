@@ -13,7 +13,7 @@
   "physical": {
     "Lambda": 100.0,
     "Nc": 3.0,
-    "m2A" : -1.070279647037e+02,
+    "m2A": -1.070279647037e+02,
 
     "alphaA4": 0.1085,
     "alphaA3": 0.105,
@@ -45,9 +45,9 @@
     "cudathreadsperblock": 64
   },
   "discretization": {
-    "p_grid_min" : 1e-4,
-    "p_grid_max" : 100.0,
-    "p_grid_bias" : 12.0,
+    "p_grid_min": 1e-4,
+    "p_grid_max": 100.0,
+    "p_grid_bias": 12.0,
 
     "fe_order": 3,
     "threads": 8,

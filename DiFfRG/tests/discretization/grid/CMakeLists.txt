@@ -2,8 +2,7 @@
 # Tests on CPU
 # ##############################################################################
 
-add_executable(test_coordinates_cpu
-               test_coordinates_cpu.cc)
+add_executable(test_coordinates_cpu test_coordinates_cpu.cc)
 setup_test(test_coordinates_cpu)
 
 # ##############################################################################
@@ -11,4 +10,5 @@ setup_test(test_coordinates_cpu)
 # ##############################################################################
 
 if(USE_CUDA)
+
 endif()

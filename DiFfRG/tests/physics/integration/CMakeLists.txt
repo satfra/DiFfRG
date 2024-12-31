@@ -1,6 +1,6 @@
-######################################################################
+# ##############################################################################
 # Tests on CPU
-######################################################################
+# ##############################################################################
 
 add_executable(test_integrator_constant integrator_constant.cc)
 setup_test(test_integrator_constant)
@@ -41,9 +41,9 @@ setup_test(test_integrator_4D_2ang_cpu)
 add_executable(test_integrator_4D_qmc integrator_4D_qmc.cc)
 setup_test(test_integrator_4D_qmc)
 
-######################################################################
+# ##############################################################################
 # Tests on GPU
-######################################################################
+# ##############################################################################
 
 if(USE_CUDA)
   add_executable(test_integrator_gpu integrator_gpu.cu)
@@ -84,15 +84,15 @@ if(USE_CUDA)
 
   find_package(OpenACC REQUIRED)
   add_executable(test_integrator_4D_oacc integrator_4D_oacc.cu)
-target_compile_options(test_integrator_4D_oacc PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
-                       --compiler-options -fopenacc
-                       >)
+  target_compile_options(
+    test_integrator_4D_oacc PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+                                    --compiler-options -fopenacc >)
   setup_test(test_integrator_4D_oacc)
 endif()
 
-######################################################################
+# ##############################################################################
 # Benchmarks
-######################################################################
+# ##############################################################################
 
 if(USE_CUDA)
   add_executable(benchmark_integrator benchmark_integrator.cu)

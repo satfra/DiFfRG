@@ -1,17 +1,11 @@
 if(USE_CUDA)
   set(flow_sources
-    flows/qbq/etaQ.cu
-    flows/PhiPhi/etaPhi.cu
-    flows/V/V.cu
-    flows/Phiqbq/hPhi0.cu
-	flows/flows.cc
-    PARENT_SCOPE)
+      flows/qbq/etaQ.cu flows/PhiPhi/etaPhi.cu flows/V/V.cu
+      flows/Phiqbq/hPhi0.cu flows/flows.cc
+      PARENT_SCOPE)
 else()
   set(flow_sources
-    flows/qbq/etaQ.cc
-    flows/PhiPhi/etaPhi.cc
-    flows/V/V.cc
-    flows/Phiqbq/hPhi0.cc
-	flows/flows.cc
-    PARENT_SCOPE)
+      flows/qbq/etaQ.cc flows/PhiPhi/etaPhi.cc flows/V/V.cc
+      flows/Phiqbq/hPhi0.cc flows/flows.cc
+      PARENT_SCOPE)
 endif()

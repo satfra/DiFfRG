@@ -1,29 +1,29 @@
 if(USE_CUDA)
   set(flow_sources
-    flows/qbqqbq/lambda1.cu
-    flows/qbqqbq/lambda2.cu
-    flows/qbqqbq/lambda3.cu
-    flows/qbqqbq/lambda4.cu
-    flows/qbqqbq/lambda5.cu
-    flows/qbqqbq/lambda6.cu
-    flows/qbqqbq/lambda7.cu
-    flows/qbqqbq/lambda8.cu
-    flows/qbqqbq/lambda9.cu
-    flows/qbqqbq/lambda10.cu
-	flows/flows.cc
-    PARENT_SCOPE)
+      flows/qbqqbq/lambda1.cu
+      flows/qbqqbq/lambda2.cu
+      flows/qbqqbq/lambda3.cu
+      flows/qbqqbq/lambda4.cu
+      flows/qbqqbq/lambda5.cu
+      flows/qbqqbq/lambda6.cu
+      flows/qbqqbq/lambda7.cu
+      flows/qbqqbq/lambda8.cu
+      flows/qbqqbq/lambda9.cu
+      flows/qbqqbq/lambda10.cu
+      flows/flows.cc
+      PARENT_SCOPE)
 else()
   set(flow_sources
-    flows/qbqqbq/lambda1.cc
-    flows/qbqqbq/lambda2.cc
-    flows/qbqqbq/lambda3.cc
-    flows/qbqqbq/lambda4.cc
-    flows/qbqqbq/lambda5.cc
-    flows/qbqqbq/lambda6.cc
-    flows/qbqqbq/lambda7.cc
-    flows/qbqqbq/lambda8.cc
-    flows/qbqqbq/lambda9.cc
-    flows/qbqqbq/lambda10.cc
-	flows/flows.cc
-    PARENT_SCOPE)
+      flows/qbqqbq/lambda1.cc
+      flows/qbqqbq/lambda2.cc
+      flows/qbqqbq/lambda3.cc
+      flows/qbqqbq/lambda4.cc
+      flows/qbqqbq/lambda5.cc
+      flows/qbqqbq/lambda6.cc
+      flows/qbqqbq/lambda7.cc
+      flows/qbqqbq/lambda8.cc
+      flows/qbqqbq/lambda9.cc
+      flows/qbqqbq/lambda10.cc
+      flows/flows.cc
+      PARENT_SCOPE)
 endif()

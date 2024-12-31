@@ -33,35 +33,34 @@ if(USE_CUDA)
   target_sources(
     DiFfRG
     PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/common/cuda_prefix.cu
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/integration/quadrature_provider.cu
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_1D.cu
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_2D.cu
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_3D.cu
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_1D.cu
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_3D.cu
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_1D_stack.cu
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/common/cuda_prefix.cu
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/integration/quadrature_provider.cu
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_1D.cu
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_2D.cu
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_3D.cu
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_1D.cu
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_3D.cu
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_1D_stack.cu
   )
 else()
   target_sources(
     DiFfRG
     PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/integration/quadrature_provider.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_1D.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_2D.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_3D.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_1D.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_3D.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_1D_stack.cc
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/integration/quadrature_provider.cc
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_1D.cc
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_2D.cc
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_3D.cc
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_1D.cc
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_3D.cc
+      ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/tex_linear_interpolation_1D_stack.cc
   )
 endif()
 
 setup_target(DiFfRG)
 
-target_include_directories(DiFfRG INTERFACE
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
-  $<INSTALL_INTERFACE:include>
-)
+target_include_directories(
+  DiFfRG INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+                   $<INSTALL_INTERFACE:include>)
 add_library(DiFfRG::DiFfRG ALIAS DiFfRG)
 set_property(TARGET DiFfRG PROPERTY CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
@@ -69,5 +68,4 @@ include(GNUInstallDirs)
 install(
   TARGETS DiFfRG
   EXPORT DiFfRGTargets
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-)
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
