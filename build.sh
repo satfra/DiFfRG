@@ -124,13 +124,13 @@ if [[ ${install_dir} != "n" ]] && [[ ${install_dir} != "N" ]]; then
     rm -f ${idir}/_permission_test
     echo
     echo "Installing dependencies..."
-    bash -i ./install.sh -i ${idir}/bundled -j ${threads} ${cuda_flag} # &>${LOGPATH}/DiFfRG_dependencies_install.log
+    bash -i ./install.sh -i ${idir}/bundled -j ${threads} ${cuda_flag} 2>&1 | tee ${LOGPATH}/DiFfRG_dependencies_install.log
   else
     echo "Elevated permissions required for install path ${idir}."
     sudo mkdir -p ${idir}
     echo
     echo "Installing dependencies..."
-    sudo -E bash -i ./install.sh -i ${idir}/bundled -j ${threads} ${cuda_flag} # &>${LOGPATH}/DiFfRG_dependencies_install.log
+    sudo -E bash -i ./install.sh -i ${idir}/bundled -j ${threads} ${cuda_flag} 2>&1 | tee ${LOGPATH}/DiFfRG_dependencies_install.log
   fi
   end=$(date +%s)
   runtime=$((end - start))

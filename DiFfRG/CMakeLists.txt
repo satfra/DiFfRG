@@ -142,8 +142,9 @@ file(GLOB_RECURSE sources CONFIGURE_DEPENDS
 file(GLOB_RECURSE cuda_sources CONFIGURE_DEPENDS
      "${CMAKE_CURRENT_SOURCE_DIR}/source/*.cu")
 
-clang_format(TARGET_NAME ${headers} ${sources} ${cuda_sources})
+clang_format(format ${headers} ${sources} ${cuda_sources})
 
 file(GLOB_RECURSE CMAKE_FILES CMakeLists.txt)
 
-cmake_format(TARGET_NAME ${CMAKE_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/setup_build_system.cmake)
+cmake_format(cmake-format ${CMAKE_FILES}
+             ${CMAKE_CURRENT_SOURCE_DIR}/cmake/setup_build_system.cmake)

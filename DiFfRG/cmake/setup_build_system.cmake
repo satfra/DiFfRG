@@ -151,11 +151,6 @@ check_language(CUDA)
 if(USE_CUDA AND CMAKE_CUDA_COMPILER)
   enable_language(CUDA)
 
-  #if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-  #  set(CMAKE_CUDA_ARCHITECTURES native)
-  #  message(WARNING "CMAKE_CUDA_ARCHITECTURES not set. Using native.")
-  #endif()
-
   set(CUDA_NVCC_FLAGS
       -Xcudafe
       "--diag_suppress=20208 --diag_suppress=20012"
