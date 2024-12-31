@@ -197,33 +197,6 @@ namespace DiFfRG
   }
 
   template <typename NT, typename Coordinates>
-  __forceinline__ __device__ __host__ typename TexLinearInterpolator1D<NT, Coordinates>::ReturnType
-  TexLinearInterpolator1D<NT, Coordinates>::operator()(const float x) const
-  {
-#ifdef __CUDA_ARCH__
-    int device = 0;
-    cudaGetDevice(&device);
-
-    if constexpr (std::is_same_v<ReturnType, autodiff::real>)
-      return std::array<double, 2>{tex1D<float>(texture[device], coordinates.backward(x) + 0.5),
-                                   tex1D<float>(texture_AD[device], coordinates.backward(x) + 0.5)};
-    else if constexpr (std::is_same_v<ReturnType, float>)
-      return tex1D<float>(texture[device], coordinates.backward(x) + 0.5);
-#else
-    float idx = coordinates.backward(x);
-    idx = std::max(0.f, std::min(idx, static_cast<float>(size - 1)));
-    if constexpr (std::is_same_v<ReturnType, autodiff::real>)
-      return std::array<double, 2>{{m_data[uint(std::floor(idx))] * (1.f - idx + std::floor(idx)) +
-                                        m_data[uint(std::ceil(idx))] * (idx - std::floor(idx)),
-                                    m_data_AD[uint(std::floor(idx))] * (1.f - idx + std::floor(idx)) +
-                                        m_data_AD[uint(std::ceil(idx))] * (idx - std::floor(idx))}};
-    else if constexpr (std::is_same_v<ReturnType, float>)
-      return m_data[uint(std::floor(idx))] * (1.f - idx + std::floor(idx)) +
-             m_data[uint(std::ceil(idx))] * (idx - std::floor(idx));
-#endif
-  }
-
-  template <typename NT, typename Coordinates>
   typename TexLinearInterpolator1D<NT, Coordinates>::ReturnType &
   TexLinearInterpolator1D<NT, Coordinates>::operator[](const uint i)
   {

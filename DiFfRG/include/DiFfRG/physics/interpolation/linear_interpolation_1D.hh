@@ -71,7 +71,25 @@ namespace DiFfRG
      * @param x the point at which to interpolate
      * @return NT the interpolated value
      */
-    __device__ __host__ NT operator()(const typename Coordinates::ctype x) const;
+    __device__ __host__ NT operator()(const typename Coordinates::ctype x) const
+    {
+#ifndef __CUDA_ARCH__
+      using std::ceil;
+      using std::floor;
+      using std::max;
+      using std::min;
+#endif
+
+      auto idx = coordinates.backward(x);
+      idx = max(static_cast<decltype(idx)>(0), min(idx, static_cast<decltype(idx)>(size - 1)));
+#ifndef __CUDA_ARCH__
+      return m_data[uint(floor(idx))] * (1. - idx + floor(idx)) + m_data[uint(ceil(idx))] * (idx - floor(idx));
+#else
+      return device_data_ptr[uint(floor(idx))] * (1. - idx + floor(idx)) +
+             device_data_ptr[uint(ceil(idx))] * (idx - floor(idx));
+#endif
+    }
+
     NT &operator[](const uint i);
     const NT &operator[](const uint i) const;
 

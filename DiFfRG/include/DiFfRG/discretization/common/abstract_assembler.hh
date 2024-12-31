@@ -49,8 +49,7 @@ namespace DiFfRG
      * @param solution The spatial solution vector
      * @param variables The additional variables vector
      */
-    virtual void attach_data_output(DataOutput<dim, VectorType> &data_out, 
-                                    const VectorType &solution,
+    virtual void attach_data_output(DataOutput<dim, VectorType> &data_out, const VectorType &solution,
                                     const VectorType &variables = VectorType(),
                                     const VectorType &dt_solution = VectorType(),
                                     const VectorType &residual = VectorType()) = 0;

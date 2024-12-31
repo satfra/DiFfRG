@@ -1,15 +1,15 @@
 {
   "physical": {
-    "Lambda" : 0.6,
-    "Nf" : 2.0,
-    "Nc" : 3.0,
-    
-    "T" : 0.01,
-    "muq" : 0.0,
+    "Lambda": 0.6,
+    "Nf": 2.0,
+    "Nc": 3.0,
 
-    "m2Phi" : 0.0,
-    "lambdaPhi" : 72.0,
-    "hPhi" : 7.2
+    "T": 0.01,
+    "muq": 0.0,
+
+    "m2Phi": 0.0,
+    "lambdaPhi": 72.0,
+    "hPhi": 7.2
   },
   "discretization": {
     "fe_order": 3,

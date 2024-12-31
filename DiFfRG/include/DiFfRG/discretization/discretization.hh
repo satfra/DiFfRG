@@ -9,9 +9,9 @@
 #include <DiFfRG/discretization/data/data.hh>
 #include <DiFfRG/discretization/data/data_output.hh>
 
-#include <DiFfRG/discretization/mesh/rectangular_mesh.hh>
 #include <DiFfRG/discretization/mesh/h_adaptivity.hh>
 #include <DiFfRG/discretization/mesh/no_adaptivity.hh>
+#include <DiFfRG/discretization/mesh/rectangular_mesh.hh>
 
 #include <DiFfRG/discretization/grid/combined_coordinates.hh>
 #include <DiFfRG/discretization/grid/coordinates.hh>

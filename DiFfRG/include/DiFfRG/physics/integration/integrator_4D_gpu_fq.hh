@@ -53,8 +53,8 @@ namespace DiFfRG
                              * x_quadrature.w[idx_x] * x_extent;         // x weight
         const ctype cos2 = 2 * (ang_quadrature.x[idx_cos2] - (ctype)0.5);
         return std::apply([&](auto &&...args) { return KERNEL::kernel(q, cos1, cos2, phi, k, args...); }, t) // kernel
-                  * int_element * weight                      // other weights and integration elements
-                  * 2 * ang_quadrature.w[idx_cos2];            // cos2 weight
+               * int_element * weight            // other weights and integration elements
+               * 2 * ang_quadrature.w[idx_cos2]; // cos2 weight
       }
 
     private:
@@ -129,17 +129,17 @@ namespace DiFfRG
       cudaSetDevice(0);
 
       const auto cuda_stream = cuda_stream_pool.get_stream();
-      //rmm::device_uvector<NT> device_data(device_data_size, cuda_stream, pool[m_device].get());
-      //gridreduce_4d_fq<q1, q2, ctype, NT, KERNEL>
-      //    <<<num_blocks, threads_per_block, 0, cuda_stream.value()>>>(device_data.data(), x_extent, k, t...);
-      //check_cuda();
-      //return KERNEL::constant(k, t...) + thrust::reduce(thrust::cuda::par.on(cuda_stream.value()), device_data.begin(),
-      //                                                  device_data.end(), NT(0.), thrust::plus<NT>());
-      return KERNEL::constant(k, t...) + thrust::transform_reduce(thrust::cuda::par.on(cuda_stream),
-                               thrust::make_counting_iterator<uint>(0), thrust::make_counting_iterator<uint>(q1 * powr<3>(q2)),
-                               functor<T...>(x_extent, k, t...), NT(0),
-                               thrust::plus<NT>());
-
+      // rmm::device_uvector<NT> device_data(device_data_size, cuda_stream, pool[m_device].get());
+      // gridreduce_4d_fq<q1, q2, ctype, NT, KERNEL>
+      //     <<<num_blocks, threads_per_block, 0, cuda_stream.value()>>>(device_data.data(), x_extent, k, t...);
+      // check_cuda();
+      // return KERNEL::constant(k, t...) + thrust::reduce(thrust::cuda::par.on(cuda_stream.value()),
+      // device_data.begin(),
+      //                                                   device_data.end(), NT(0.), thrust::plus<NT>());
+      return KERNEL::constant(k, t...) +
+             thrust::transform_reduce(thrust::cuda::par.on(cuda_stream), thrust::make_counting_iterator<uint>(0),
+                                      thrust::make_counting_iterator<uint>(q1 * powr<3>(q2)),
+                                      functor<T...>(x_extent, k, t...), NT(0), thrust::plus<NT>());
     }
 
     template <typename... T> std::future<NT> request(const ctype k, const T &...t) const
@@ -152,10 +152,10 @@ namespace DiFfRG
       return std::async(std::launch::deferred, [=, this]() {
         cudaSetDevice(m_device);
 
-      return KERNEL::constant(k, t...) + thrust::transform_reduce(thrust::cuda::par.on(cuda_stream),
-                               thrust::make_counting_iterator<uint>(0), thrust::make_counting_iterator<uint>(q1 * powr<3>(q2)),
-                               functor<T...>(x_extent, k, t...), NT(0),
-                               thrust::plus<NT>());
+        return KERNEL::constant(k, t...) +
+               thrust::transform_reduce(thrust::cuda::par.on(cuda_stream), thrust::make_counting_iterator<uint>(0),
+                                        thrust::make_counting_iterator<uint>(q1 * powr<3>(q2)),
+                                        functor<T...>(x_extent, k, t...), NT(0), thrust::plus<NT>());
       });
 
       cudaSetDevice(0);

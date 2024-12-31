@@ -28,11 +28,9 @@ namespace DiFfRG
      * @param output_folder Folder where the .vtu files will be written. Should be relative to top_folder.
      * @param subdivisions Number of subdivisions of the cells in the .vtu files.
      */
-    DataOutput(std::string top_folder, std::string output_name,
-               std::string output_folder, const JSONValue &json);
+    DataOutput(std::string top_folder, std::string output_name, std::string output_folder, const JSONValue &json);
 
     DataOutput(const JSONValue &json);
-
 
     /**
      * @brief Returns a reference to the FEOutput object used to write FEM functions to .vtu files and .pvd time series.

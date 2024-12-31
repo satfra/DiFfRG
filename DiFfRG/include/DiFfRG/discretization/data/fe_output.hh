@@ -83,7 +83,8 @@ namespace DiFfRG
   {
   public:
     void attach(const DoFHandler<0> &dof_handler, const Vector<double> &solution, const std::string &name);
-    void attach(const DoFHandler<0> &dof_handler, const Vector<double> &solution, const std::vector<std::string> &names);
+    void attach(const DoFHandler<0> &dof_handler, const Vector<double> &solution,
+                const std::vector<std::string> &names);
 
     void flush(double time);
   };

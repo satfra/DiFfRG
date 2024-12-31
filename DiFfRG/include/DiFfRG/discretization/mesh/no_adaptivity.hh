@@ -18,8 +18,7 @@ namespace DiFfRG
 {
   using namespace dealii;
 
-  template <typename VectorType>
-  class NoAdaptivity : public AbstractAdaptor<VectorType>
+  template <typename VectorType> class NoAdaptivity : public AbstractAdaptor<VectorType>
   {
   public:
     NoAdaptivity() {}

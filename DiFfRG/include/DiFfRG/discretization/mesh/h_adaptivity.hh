@@ -50,8 +50,7 @@ namespace DiFfRG
     virtual bool operator()(const double t, VectorType &sol) override
     {
       if (adapt_level > 0 && t >= adapt_t - 1e-12 * adapt_dt && (t - last_adapt + 1e-12 * adapt_dt) >= adapt_dt) {
-        if (!adapt(sol))
-          return false;
+        if (!adapt(sol)) return false;
         last_adapt = t;
         return true;
       }
@@ -87,8 +86,7 @@ namespace DiFfRG
       refined_cells.clear();
       for (const auto &cell : triangulation.active_cell_iterators())
         if (cell->refine_flag_set()) refined_cells.push_back(cell);
-      if (refined_cells.size() == 0)
-        return false;
+      if (refined_cells.size() == 0) return false;
 
       SolutionTransfer<dim, VectorType> solution_trans(dof_handler);
 

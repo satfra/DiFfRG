@@ -19,8 +19,8 @@ namespace DiFfRG
    * Assembler, the two additional methods residual_variables and set_additional_data must be implemented, which are
    * used to compute the explicit residual and to make the additional variables available to the implicit residual.
    *
-   * @tparam VectorType This must be Vector<NumberType>. Other types are currently not supported, as we use a BlockVector
-   * internally to store the solution.
+   * @tparam VectorType This must be Vector<NumberType>. Other types are currently not supported, as we use a
+   * BlockVector internally to store the solution.
    * @tparam dim The dimensionality of the spatial discretization
    */
   template <typename VectorType, typename SparseMatrixType, uint dim,

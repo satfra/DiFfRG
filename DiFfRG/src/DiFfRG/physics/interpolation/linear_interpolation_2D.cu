@@ -61,41 +61,6 @@ namespace DiFfRG
     return m_data.get();
   }
 
-  template <typename NT, typename Coordinates>
-  __forceinline__ __device__ __host__ NT LinearInterpolator2D<NT, Coordinates>::operator()(
-      const typename Coordinates::ctype x, const typename Coordinates::ctype y) const
-  {
-#ifndef __CUDA_ARCH__
-    using std::ceil;
-    using std::floor;
-    using std::max;
-    using std::min;
-#endif
-
-    auto [idx_x, idx_y] = coordinates.backward(x, y);
-    idx_x = max(static_cast<decltype(idx_x)>(0), min(idx_x, static_cast<decltype(idx_x)>(shape[0] - 1)));
-    idx_y = max(static_cast<decltype(idx_y)>(0), min(idx_y, static_cast<decltype(idx_y)>(shape[1] - 1)));
-
-#ifndef __CUDA_ARCH__
-    const auto *d_ptr = m_data.get();
-#else
-    const auto *d_ptr = device_data_ptr;
-#endif
-
-    uint x1 = min(ceil(idx_x + static_cast<decltype(idx_x)>(1e-16)), static_cast<decltype(idx_x)>(shape[0] - 1));
-    const auto x0 = x1 - 1;
-    uint y1 = min(ceil(idx_y + static_cast<decltype(idx_y)>(1e-16)), static_cast<decltype(idx_y)>(shape[1] - 1));
-    const auto y0 = y1 - 1;
-
-    const auto corner00 = d_ptr[x0 * shape[1] + y0];
-    const auto corner01 = d_ptr[x0 * shape[1] + y1];
-    const auto corner10 = d_ptr[x1 * shape[1] + y0];
-    const auto corner11 = d_ptr[x1 * shape[1] + y1];
-
-    return corner00 * (x1 - idx_x) * (y1 - idx_y) + corner01 * (x1 - idx_x) * (idx_y - y0) +
-           corner10 * (idx_x - x0) * (y1 - idx_y) + corner11 * (idx_x - x0) * (idx_y - y0);
-  }
-
   template <typename NT, typename Coordinates> NT &LinearInterpolator2D<NT, Coordinates>::operator[](const uint i)
   {
     return m_data[i];

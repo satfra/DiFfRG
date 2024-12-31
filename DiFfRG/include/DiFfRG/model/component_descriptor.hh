@@ -1,8 +1,8 @@
 #pragma once
 
 // standard library
-#include <utility>
 #include <array>
+#include <utility>
 
 // external libraries
 #include <deal.II/dofs/dof_tools.h>
@@ -26,17 +26,19 @@ namespace DiFfRG
     static constexpr std::array<const char *, sizeof...(_descriptors)> names{{_descriptors::name...}};
     static constexpr std::array<size_t, sizeof...(_descriptors)> sizes{{_descriptors::size...}};
     using descriptor_tuple = std::tuple<_descriptors...>;
-    
+
     static constexpr size_t total_size = (0 + ... + _descriptors::size);
 
     // If two names are the same, the program should not compile
-    static_assert([]<size_t... I>(std::index_sequence<I...>) {
-      if constexpr(sizeof...(_descriptors) > 1)
-        for (size_t i : {I...})
-          for (size_t j : {I...})
-            if (i != j && strings_equal(names[i], names[j])) return false;
-      return true;
-    }(std::make_index_sequence<sizeof...(_descriptors)>{}), "Names of a SubDescriptor must be unique!");
+    static_assert(
+        []<size_t... I>(std::index_sequence<I...>) {
+          if constexpr (sizeof...(_descriptors) > 1)
+            for (size_t i : {I...})
+              for (size_t j : {I...})
+                if (i != j && strings_equal(names[i], names[j])) return false;
+          return true;
+        }(std::make_index_sequence<sizeof...(_descriptors)>{}),
+        "Names of a SubDescriptor must be unique!");
 
     constexpr size_t get(const char *name) const
     {
@@ -106,15 +108,15 @@ namespace DiFfRG
 
     /**
      ** @brief Add a dependency between two FE subsystems, i.e. for LDG constructions.
-      *
-      * @param dependent_subsystem The subsystem that depends on the other.
-      * @param dependent The index of the dependent variable in the dependent subsystem.
-      * @param independent_subsystem The subsystem that is independent.
-      * @param independent The index of the independent variable on which the dependent depends.
+     *
+     * @param dependent_subsystem The subsystem that depends on the other.
+     * @param dependent The index of the dependent variable in the dependent subsystem.
+     * @param independent_subsystem The subsystem that is independent.
+     * @param independent The index of the independent variable on which the dependent depends.
      */
     void add_dependency(uint dependent_subsystem, uint dependent, uint independent_subsystem, uint independent)
     {
-      if(dependent_subsystem >= n_fe_subsystems || independent_subsystem >= n_fe_subsystems)
+      if (dependent_subsystem >= n_fe_subsystems || independent_subsystem >= n_fe_subsystems)
         throw std::runtime_error("The subsystems described by 'add_dependency' do not exist.");
 
       if (dependent_subsystem != independent_subsystem + 1)
@@ -132,7 +134,7 @@ namespace DiFfRG
 
     void set_jacobian_constant(uint dependent_subsystem, uint independent_subsystem)
     {
-      if(dependent_subsystem >= n_fe_subsystems || independent_subsystem >= n_fe_subsystems)
+      if (dependent_subsystem >= n_fe_subsystems || independent_subsystem >= n_fe_subsystems)
         throw std::runtime_error("The subsystems described by 'add_dependency' do not exist.");
 
       if (dependent_subsystem != independent_subsystem + 1)

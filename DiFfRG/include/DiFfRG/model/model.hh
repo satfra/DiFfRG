@@ -332,11 +332,11 @@ namespace DiFfRG
        */
       //@{
 
-      template <int dim, typename Vector> std::array<double, dim> EoM(const Point<dim> &x, const Vector &u) const 
-      { 
+      template <int dim, typename Vector> std::array<double, dim> EoM(const Point<dim> &x, const Vector &u) const
+      {
         // Just to avoid warnings
         (void)x;
-        return std::array<double, dim>{{u[0]}}; 
+        return std::array<double, dim>{{u[0]}};
       }
 
       template <int dim, typename Vector> Point<dim> EoM_postprocess(const Point<dim> &EoM, const Vector &) const

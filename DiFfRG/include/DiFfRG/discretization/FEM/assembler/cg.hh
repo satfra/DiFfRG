@@ -232,12 +232,13 @@ namespace DiFfRG
       virtual const SparseMatrix<NumberType> &get_mass_matrix() const override { return mass_matrix; }
 
       /**
-       * @brief refinement indicator for adaptivity. Only calls the model's cell_indicator function, as in CG schemes the cell boundary is not discontinuous.
+       * @brief refinement indicator for adaptivity. Only calls the model's cell_indicator function, as in CG schemes
+       * the cell boundary is not discontinuous.
        *
        * @param indicator The vector to store the refinement indicator in.
        * @param solution_global The global solution vector.
        */
-      virtual void refinement_indicator(Vector<double> &indicator, const VectorType &solution_global) override 
+      virtual void refinement_indicator(Vector<double> &indicator, const VectorType &solution_global) override
       {
         using Iterator = typename DoFHandler<dim>::active_cell_iterator;
         using Scratch = internal::ScratchData<Discretization>;
@@ -264,13 +265,12 @@ namespace DiFfRG
           for (const auto &q_index : q_indices) {
             const auto &x_q = q_points[q_index];
             const std::vector<double> nothing = {};
-            model.cell_indicator(local_indicator, x_q, i_tie(solution[q_index], solution_grad[q_index], solution_hess[q_index]));
+            model.cell_indicator(local_indicator, x_q,
+                                 i_tie(solution[q_index], solution_grad[q_index], solution_hess[q_index]));
             copy_data.value += JxW[q_index] * local_indicator;
           }
         };
-        const auto copier = [&](const CopyData &c) {
-          indicator[c.cell_index] += c.value;
-        };
+        const auto copier = [&](const CopyData &c) { indicator[c.cell_index] += c.value; };
 
         Scratch scratch_data(mapping, fe, quadrature, quadrature_face);
         CopyData copy_data;
@@ -279,7 +279,6 @@ namespace DiFfRG
         MeshWorker::mesh_loop(dof_handler.begin_active(), dof_handler.end(), cell_worker, copier, scratch_data,
                               copy_data, assemble_flags, nullptr, nullptr, threads, batch_size);
       }
-
 
       virtual void mass(VectorType &mass, const VectorType &solution_global, const VectorType &solution_global_dot,
                         NumberType weight) override

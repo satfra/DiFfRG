@@ -121,7 +121,7 @@ namespace DiFfRG
 
     /**
      * @brief Any derived class must implement this method to run the timestepping algorithm.
-     * 
+     *
      * @param initial_condition A pointer to a flowing variables object that contains the initial condition.
      * @param t_start The start time of the simulation.
      * @param t_stop The run method will evolve the system from t_start to t_stop.
@@ -161,7 +161,7 @@ namespace DiFfRG
 
     /**
      * @brief Pretty-print the status of the timestepping algorithm to the console.
-     * 
+     *
      * @param t Current time.
      * @param name A tag prepended to the output.
      * @param verbosity_level The verbosity level of the output.

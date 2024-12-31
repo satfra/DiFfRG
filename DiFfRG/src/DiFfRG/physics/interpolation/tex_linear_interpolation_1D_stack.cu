@@ -179,30 +179,6 @@ namespace DiFfRG
   }
 
   template <typename NT, typename Coordinates, uint max_stack_size>
-  __forceinline__ __device__ __host__ typename TexLinearInterpolator1DStack<NT, Coordinates, max_stack_size>::ReturnType
-  TexLinearInterpolator1DStack<NT, Coordinates, max_stack_size>::operator()(const float m, const float p) const
-  {
-    auto [m_idx, p_idx] = coordinates.backward(m, p);
-#ifdef __CUDA_ARCH__
-    if constexpr (std::is_same_v<ReturnType, autodiff::real>)
-      return std::array<double, 2>{tex1D<float>(texture[m_idx], p_idx + 0.5),
-                                   tex1D<float>(texture_AD[m_idx], p_idx + 0.5)};
-    else if constexpr (std::is_same_v<ReturnType, float>)
-      return tex1D<float>(texture[m_idx], p_idx + 0.5);
-#else
-    p_idx = std::max(static_cast<decltype(p_idx)>(0.), std::min(p_idx, static_cast<decltype(p_idx)>(p_size - 1)));
-    if constexpr (std::is_same_v<ReturnType, autodiff::real>)
-      return std::array<double, 2>{{m_data[m_idx][uint(std::floor(p_idx))] * (1.f - p_idx + std::floor(p_idx)) +
-                                        m_data[m_idx][uint(std::ceil(p_idx))] * (p_idx - std::floor(p_idx)),
-                                    m_data_AD[m_idx][uint(std::floor(p_idx))] * (1.f - p_idx + std::floor(p_idx)) +
-                                        m_data_AD[m_idx][uint(std::ceil(p_idx))] * (p_idx - std::floor(p_idx))}};
-    else if constexpr (std::is_same_v<ReturnType, float>)
-      return m_data[m_idx][uint(std::floor(p_idx))] * (1.f - p_idx + std::floor(p_idx)) +
-             m_data[m_idx][uint(std::ceil(p_idx))] * (p_idx - std::floor(p_idx));
-#endif
-  }
-
-  template <typename NT, typename Coordinates, uint max_stack_size>
   typename TexLinearInterpolator1DStack<NT, Coordinates, max_stack_size>::ReturnType &
   TexLinearInterpolator1DStack<NT, Coordinates, max_stack_size>::operator[](const uint i)
   {

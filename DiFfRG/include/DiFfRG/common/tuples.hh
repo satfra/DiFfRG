@@ -35,12 +35,14 @@ namespace DiFfRG
     static constexpr std::array<const char *, size> names{{strs...}};
 
     // If two names are the same, the program should not compile
-    static_assert([]<size_t... I>(std::index_sequence<I...>) {
-      for (size_t i : {I...})
-        for (size_t j : {I...})
-          if (i != j && strings_equal(names[i], names[j])) return false;
-      return true;
-    }(std::make_index_sequence<size>{}), "Names of a named_tuple must be unique!");
+    static_assert(
+        []<size_t... I>(std::index_sequence<I...>) {
+          for (size_t i : {I...})
+            for (size_t j : {I...})
+              if (i != j && strings_equal(names[i], names[j])) return false;
+          return true;
+        }(std::make_index_sequence<size>{}),
+        "Names of a named_tuple must be unique!");
 
     named_tuple(tuple_type &&t) : tuple(t) {}
     named_tuple(tuple_type &t) : tuple(t) {}

@@ -228,7 +228,7 @@ namespace DiFfRG
        * @param indicator The vector to store the refinement indicator in.
        * @param solution_global The global solution vector.
        */
-      virtual void refinement_indicator(Vector<double> &indicator, const VectorType &solution_global) override 
+      virtual void refinement_indicator(Vector<double> &indicator, const VectorType &solution_global) override
       {
         using Iterator = typename DoFHandler<dim>::active_cell_iterator;
         using Scratch = internal::ScratchData<Discretization>;
@@ -257,7 +257,8 @@ namespace DiFfRG
           for (const auto &q_index : q_indices) {
             const auto &x_q = q_points[q_index];
             const std::vector<double> nothing = {};
-            model.cell_indicator(local_indicator, x_q, i_tie(solution[q_index], solution_grad[q_index], solution_hess[q_index]));
+            model.cell_indicator(local_indicator, x_q,
+                                 i_tie(solution[q_index], solution_grad[q_index], solution_hess[q_index]));
             copy_data.value += JxW[q_index] * local_indicator;
           }
         };
@@ -301,9 +302,9 @@ namespace DiFfRG
           array<double, 2> local_indicator{};
           for (const auto &q_index : q_indices) {
             const auto &x_q = q_points[q_index];
-            model.face_indicator(local_indicator, normals[q_index], x_q, 
-                          i_tie(solution_s[q_index], solution_grad_s[q_index], solution_hess_s[q_index]),
-                          i_tie(solution_n[q_index], solution_grad_n[q_index], solution_hess_n[q_index]));
+            model.face_indicator(local_indicator, normals[q_index], x_q,
+                                 i_tie(solution_s[q_index], solution_grad_s[q_index], solution_hess_s[q_index]),
+                                 i_tie(solution_n[q_index], solution_grad_n[q_index], solution_hess_n[q_index]));
 
             copy_data_face.values[0] += JxW[q_index] * local_indicator[0] * (1. + t_cell->at_boundary());
             copy_data_face.values[1] += JxW[q_index] * local_indicator[1] * (1. + t_ncell->at_boundary());
@@ -315,11 +316,10 @@ namespace DiFfRG
               indicator[cdf.cell_indices[j]] += cdf.values[j];
           indicator[c.cell_index] += c.value;
         };
-        const UpdateFlags update_flags = update_values | update_gradients | update_quadrature_points |
-                                                     update_JxW_values | update_hessians;
-        const UpdateFlags interface_update_flags = update_values | update_gradients |
-                                                               update_quadrature_points | update_JxW_values |
-                                                               update_normal_vectors | update_hessians;
+        const UpdateFlags update_flags =
+            update_values | update_gradients | update_quadrature_points | update_JxW_values | update_hessians;
+        const UpdateFlags interface_update_flags = update_values | update_gradients | update_quadrature_points |
+                                                   update_JxW_values | update_normal_vectors | update_hessians;
 
         Scratch scratch_data(mapping, fe, quadrature, quadrature_face, update_flags, interface_update_flags);
         CopyData copy_data;

@@ -357,7 +357,8 @@ namespace DiFfRG
                                                    fe_iv[i]->n_current_interface_dofs());
             copy_data_face.joint_dof_indices[i] = fe_iv[i]->get_interface_dof_indices();
           }
-          if (n_extractors > 0) copy_data_face.extractor_cell_jacobian.reinit(fe_iv[0]->n_current_interface_dofs(), n_extractors);
+          if (n_extractors > 0)
+            copy_data_face.extractor_cell_jacobian.reinit(fe_iv[0]->n_current_interface_dofs(), n_extractors);
           return copy_data_face;
         }
       };

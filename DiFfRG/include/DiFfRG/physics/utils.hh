@@ -177,7 +177,7 @@ namespace DiFfRG
    * @return std::shared_ptr<std::vector<std::future<NT>>> A vector of futures which will yield the requested data
    */
   template <typename NT, typename FUN, typename GRID, typename... T>
-  void get_data(NT* dest, FUN &fun, const GRID &grid, const double k, std::tuple<T...> args)
+  void get_data(NT *dest, FUN &fun, const GRID &grid, const double k, std::tuple<T...> args)
   {
     std::apply([&](auto... args) { get_data<NT>(dest, fun, grid, k, args...); }, args);
   }
@@ -199,18 +199,18 @@ namespace DiFfRG
    * @return std::shared_ptr<std::vector<std::future<NT>>> A vector of futures which will yield the requested data
    */
   template <typename NT, typename FUN, typename GRID, typename... T>
-  void get_data(NT* dest, FUN &fun, const GRID &grid, const double k, T... args)
+  void get_data(NT *dest, FUN &fun, const GRID &grid, const double k, T... args)
   {
     auto req_point = [&](auto... p) { return fun.template get<NT>(k, p..., args...); };
 
-    //for (uint i = 0; i < grid.size(); ++i) {
+    // for (uint i = 0; i < grid.size(); ++i) {
     tbb::parallel_for(tbb::blocked_range<uint>(0, grid.size()), [&](const tbb::blocked_range<uint> &r) {
       for (uint i = r.begin(); i < r.end(); ++i) {
-      auto p = grid[i];
-      if constexpr (std::is_same_v<decltype(p), double> || std::is_same_v<decltype(p), float>)
-        dest[i] = req_point(p);
-      else
-        std::apply([&](auto... p) { dest[i] = req_point(p...); }, p);
+        auto p = grid[i];
+        if constexpr (std::is_same_v<decltype(p), double> || std::is_same_v<decltype(p), float>)
+          dest[i] = req_point(p);
+        else
+          std::apply([&](auto... p) { dest[i] = req_point(p...); }, p);
       }
     });
   }

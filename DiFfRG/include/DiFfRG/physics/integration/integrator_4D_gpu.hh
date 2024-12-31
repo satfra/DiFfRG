@@ -109,7 +109,7 @@ namespace DiFfRG
           ptr_ang_quadrature_w(other.ptr_ang_quadrature_w), x_extent(other.x_extent), pool(other.pool),
           device_data_size(other.device_data_size), quadrature_provider(other.quadrature_provider)
     {
-      //device_data_size = other.device_data_size;
+      // device_data_size = other.device_data_size;
       block_sizes = other.block_sizes;
       num_blocks = other.num_blocks;
       threads_per_block = other.threads_per_block;
@@ -117,7 +117,7 @@ namespace DiFfRG
 
     template <typename... T> NT get(const ctype k, const T &...t) const
     {
-      const int m_device = 0;//evaluations++ % n_devices;
+      const int m_device = 0; // evaluations++ % n_devices;
       cudaSetDevice(0);
 
       const ctype *ptr_x_quadrature_p = quadrature_provider.get_device_points<ctype>(grid_sizes[0], m_device);
@@ -139,7 +139,7 @@ namespace DiFfRG
 
     template <typename... T> std::future<NT> request(const ctype k, const T &...t) const
     {
-      const int m_device = 0;//evaluations++ % n_devices;
+      const int m_device = 0; // evaluations++ % n_devices;
       cudaSetDevice(0);
 
       const ctype *ptr_x_quadrature_p = quadrature_provider.get_device_points<ctype>(grid_sizes[0], m_device);

@@ -264,48 +264,39 @@ namespace DiFfRG
     return res;
   }
 
-
   // operators for multiplication of float and complex
-  template <typename T>
-  AUTODIFF_DEVICE_FUNC auto operator*(const float &x, const complex<T> &y)
+  template <typename T> AUTODIFF_DEVICE_FUNC auto operator*(const float &x, const complex<T> &y)
   {
     return y * static_cast<double>(x);
   }
-  template <typename T>
-  AUTODIFF_DEVICE_FUNC auto operator*(const complex<T> &x, const float &y)
+  template <typename T> AUTODIFF_DEVICE_FUNC auto operator*(const complex<T> &x, const float &y)
   {
     return x * static_cast<double>(y);
   }
   // operators for addition of real and complex
-  template <size_t N, typename T>
-  AUTODIFF_DEVICE_FUNC auto operator+(const float &x, const complex<T> &y)
+  template <size_t N, typename T> AUTODIFF_DEVICE_FUNC auto operator+(const float &x, const complex<T> &y)
   {
     return y + static_cast<double>(x);
   }
-  template <size_t N, typename T>
-  AUTODIFF_DEVICE_FUNC auto operator+(const complex<T> &x, const float &y)
+  template <size_t N, typename T> AUTODIFF_DEVICE_FUNC auto operator+(const complex<T> &x, const float &y)
   {
     return x + static_cast<double>(y);
   }
   // operators for subtraction of real and complex
-  template <size_t N, typename T>
-  AUTODIFF_DEVICE_FUNC auto operator-(const float &x, const complex<T> &y)
+  template <size_t N, typename T> AUTODIFF_DEVICE_FUNC auto operator-(const float &x, const complex<T> &y)
   {
     return static_cast<double>(x) - y;
   }
-  template <size_t N, typename T>
-  AUTODIFF_DEVICE_FUNC auto operator-(const complex<T> &x, const float &y)
+  template <size_t N, typename T> AUTODIFF_DEVICE_FUNC auto operator-(const complex<T> &x, const float &y)
   {
     return x - static_cast<double>(y);
   }
   // operators for division of real and complex
-  template <size_t N, typename T>
-  AUTODIFF_DEVICE_FUNC auto operator/(const float &x, const complex<T> &y)
+  template <size_t N, typename T> AUTODIFF_DEVICE_FUNC auto operator/(const float &x, const complex<T> &y)
   {
     return static_cast<double>(x) / y;
   }
-  template <size_t N, typename T>
-  AUTODIFF_DEVICE_FUNC auto operator/(const complex<T> x, const float &y)
+  template <size_t N, typename T> AUTODIFF_DEVICE_FUNC auto operator/(const complex<T> x, const float &y)
   {
     return x / static_cast<double>(y);
   }

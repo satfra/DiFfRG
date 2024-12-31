@@ -256,8 +256,7 @@ namespace DiFfRG
       const EoMPFUN &EoM_postprocess = [](const auto &p, const auto &values) { return p; },
       const double relative_tolerance = 1e-5, const uint max_iter = 100)
   {
-    if (max_iter == 0)
-      return internal::get_origin(dof_handler, EoM_cell);
+    if (max_iter == 0) return internal::get_origin(dof_handler, EoM_cell);
 
     if constexpr (dim == 1) {
       return get_EoM_point_1D(EoM_cell, sol, dof_handler, mapping, get_EoM, EoM_postprocess, relative_tolerance,
