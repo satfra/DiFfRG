@@ -12,7 +12,7 @@ WORKDIR /DiFfRG/
 COPY ./.git ./.git
 
 # install dependencies
-RUN dnf --enablerepo=devel install -y gcc-toolset-12 cmake git openblas-devel doxygen doxygen-latex tbb-devel python3 python3-pip gsl-devel
+RUN dnf --enablerepo=devel install -y gcc-toolset-12 cmake git openblas-devel doxygen doxygen-latex python3 python3-pip gsl-devel
 RUN git reset --hard
 SHELL [ "/usr/bin/scl", "enable", "gcc-toolset-12"]
 RUN bash -i build.sh -j $threads -d -f $cuda -i DiFfRG_install &>build.log
