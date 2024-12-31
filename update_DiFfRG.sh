@@ -149,7 +149,6 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
     -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
     -DDiFfRG_BUILD_TESTS=OFF \
     -DDiFfRG_BUILD_DOCUMENTATION=ON \
-    -DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES} \
     -S ${SOURCEPATH} &>${LOGPATH}/DiFfRG_cmake.log || {
     echo "    Failed to configure DiFfRG, aborting."
     exit 1

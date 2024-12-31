@@ -150,10 +150,10 @@ check_language(CUDA)
 if(USE_CUDA AND CMAKE_CUDA_COMPILER)
   enable_language(CUDA)
 
-  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES native)
-    message(WARNING "CMAKE_CUDA_ARCHITECTURES not set. Using native.")
-  endif()
+  #if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  #  set(CMAKE_CUDA_ARCHITECTURES native)
+  #  message(WARNING "CMAKE_CUDA_ARCHITECTURES not set. Using native.")
+  #endif()
 
   set(CUDA_NVCC_FLAGS
       -Xcudafe
@@ -271,7 +271,7 @@ cpmaddpackage(
   GITHUB_REPOSITORY
   gabime/spdlog
   VERSION
-  1.15.0
+  1.14.1
   OPTIONS
   "CMAKE_BUILD_TYPE Release"
   "CMAKE_CXX_FLAGS \"-O3 -DNDEBUG\"")

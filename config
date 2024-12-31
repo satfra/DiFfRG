@@ -11,10 +11,11 @@
 #   export CXX_FLAGS="-march=core-avx2 -fPIC"
 #   export C_FLAGS="-march=core-avx2 -fPIC"
 #   export CUDA_FLAGS="-arch=sm_35"
-export CXX_FLAGS="-march=native -fPIC -flto=auto"
-export C_FLAGS="-march=native -fPIC -flto=auto"
-export CUDA_FLAGS=""
-export CUDA_ARCHITECTURES="all"
+export CXX_FLAGS="-march=native -fPIC" 
+# -flto=auto"
+export C_FLAGS="-march=native -fPIC"
+# -flto=auto"
+export CUDA_FLAGS="-arch=all"
 
 # Configure linker flags for the current machine. By default, we use the gold linker
 export EXE_LINKER_FLAGS="-fuse-ld=gold"
