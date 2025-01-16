@@ -97,7 +97,7 @@ source ${SCRIPTPATH}/${config_file}
 
 git submodule update --init --recursive --jobs ${threads}
 
-if [[ -z ${install_dir+x} ]]; then
+if [[ -z ${install_dir} ]]; then
   echo
   read -p "Install DiFfRG library globally to /opt/DiFfRG? [y/N/path] " install_dir
   install_dir=${install_dir:-N}

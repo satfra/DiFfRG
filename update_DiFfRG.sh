@@ -141,7 +141,7 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
   mkdir -p ${BUILDPATH}
   cd $BUILDPATH
   cmake \
-    -DCMAKE_INSTALL_PREFIX=${idir} \
+    -DCMAKE_INSTALL_PREFIX=${idir}/ \
     -DBUNDLED_DIR=${idir}/bundled \
     ${CUDA_OPT} \
     -DCMAKE_CUDA_FLAGS="${CUDA_FLAGS}" \
