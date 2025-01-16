@@ -23,31 +23,31 @@ source ../config
 ################################################################################
 
 echo "    Building Boost..."
-bash -i ./build_boost.sh -j ${threads} -i ${install_dir} &>/dev/null || {
+./build_boost.sh -j ${threads} -i ${install_dir} &>/dev/null || {
   echo "    Failed to build Boost, aborting."
   exit 1
 }
 
 echo "    Building oneTBB..."
-bash -i ./build_oneTBB.sh -j ${threads} -i ${install_dir} &>/dev/null || {
+./build_oneTBB.sh -j ${threads} -i ${install_dir} &>/dev/null || {
   echo "    Failed to build oneTBB, aborting."
   exit 1
 }
 
 echo "    Building kokkos..."
-bash -i ./build_kokkos.sh -j ${threads} -i ${install_dir} &>/dev/null || {
+./build_kokkos.sh -j ${threads} -i ${install_dir} &>/dev/null || {
   echo "    Failed to build kokkos, aborting."
   exit 1
 }
 
 echo "    Building sundials..."
-bash -i ./build_sundials.sh -j ${threads} -i ${install_dir} &>/dev/null || {
+./build_sundials.sh -j ${threads} -i ${install_dir} &>/dev/null || {
   echo "    Failed to build SUNDIALS, aborting."
   exit 1
 }
 
 echo "    Building deal.II..."
-bash -i ./build_dealii.sh -j ${threads} -i ${install_dir} &>/dev/null || {
+./build_dealii.sh -j ${threads} -i ${install_dir} &>/dev/null || {
   echo "    Failed to build deal.ii, aborting."
   exit 1
 }
