@@ -25,7 +25,6 @@ if [ -z "$COMPILER" ]; then
   echo "No compiler for boost build specified, choosing ${COMPILER}"
 fi
 
-echo $COMPILER
 cd $SOURCE_PATH
 
 echo "using super user as ${SuperUser}"

@@ -114,27 +114,11 @@ if [[ ${install_dir} != "n" ]] && [[ ${install_dir} != "N" ]]; then
   #idir=$(readlink --canonicalize ${idir})
   echo "DiFfRG library will be installed in ${idir}"
 
-  # Check if the install directory is writable
-  failed_first=0
-  mkdir -p ${idir} &>/dev/null && touch ${idir}/_permission_test &>/dev/null || {
-    failed_first=1
-  }
-
   # Install dependencies
   start=$(date +%s)
   cd ${SCRIPTPATH}/external
-  if [[ $failed_first == 0 ]]; then
-    rm -f ${idir}/_permission_test
-    echo
-    echo "Installing dependencies..."
-    ./install.sh -i ${idir}/bundled -j ${threads} ${cuda_flag} 2>&1 | tee ${LOGPATH}/DiFfRG_dependencies_install.log
-  else
-    echo "Elevated permissions required for install path ${idir}."
-    sudo mkdir -p ${idir}
-    echo
-    echo "Installing dependencies..."
-    sudo -E bash -i ./install.sh -i ${idir}/bundled -j ${threads} ${cuda_flag} 2>&1 | tee ${LOGPATH}/DiFfRG_dependencies_install.log
-  fi
+  echo "Installing dependencies..."
+  ./install.sh -i ${idir}/bundled -j ${threads} ${cuda_flag} 2>&1 | tee ${LOGPATH}/DiFfRG_dependencies_install.log
   end=$(date +%s)
   runtime=$((end - start))
   elapsed="Elapsed: $(($runtime / 3600))hrs $((($runtime / 60) % 60))min $(($runtime % 60))sec"
