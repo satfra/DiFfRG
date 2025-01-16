@@ -27,8 +27,7 @@ fi
 
 cd $SOURCE_PATH
 
-echo "using super user as ${SuperUser}"
-$SuperUser ./bootstrap.sh --prefix=${INSTALL_PATH}
+$SuperUser ./bootstrap.sh --prefix=${INSTALL_PATH} &>/dev/null
 $SuperUser ./b2 --build-dir=${BUILD_PATH} \
   --prefix=${INSTALL_PATH} \
   --with-headers \
@@ -40,4 +39,4 @@ $SuperUser ./b2 --build-dir=${BUILD_PATH} \
   --with-thread \
   -j ${THREADS} \
   cxxflags="${CXX_FLAGS} -std=c++20" \
-  install | tee $MAKE_LOG_FILE
+  install &> $MAKE_LOG_FILE
