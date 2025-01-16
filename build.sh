@@ -103,11 +103,14 @@ if [[ -z ${install_dir} ]]; then
   install_dir=${install_dir:-N}
 fi
 
+if [[ ${install_dir} == "y" ]]; then
+  install_dir="/opt/DiFfRG"
+fi
+
 if [[ ${install_dir} != "n" ]] && [[ ${install_dir} != "N" ]]; then
   cd ${SCRIPTPATH}
-
   # Make sure the install directory is absolute
-  idir=$(expandPath ${install_dir}/)
+  idir=$(expandPath ${install_dir})
   #idir=$(readlink --canonicalize ${idir})
   echo "DiFfRG library will be installed in ${idir}"
 
