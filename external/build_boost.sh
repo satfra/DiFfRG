@@ -28,6 +28,7 @@ fi
 echo $COMPILER
 cd $SOURCE_PATH
 
+echo "using super user as ${SuperUser}"
 $SuperUser ./bootstrap.sh --prefix=${INSTALL_PATH}
 $SuperUser ./b2 --build-dir=${BUILD_PATH} \
   --prefix=${INSTALL_PATH} \
