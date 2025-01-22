@@ -20,7 +20,7 @@ cmake -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CXX_STANDARD=20 \
   -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH} \
   -S ${SOURCE_PATH} \
-  2>&1 | tee $CMAKE_LOG_FILE
+  &> $CMAKE_LOG_FILE
 
-make -j $THREADS 2>&1 | tee $MAKE_LOG_FILE
-$SuperUser make -j $THREADS install
+make -j $THREADS &> $MAKE_LOG_FILE
+$SuperUser make -j $THREADS install >> $MAKE_LOG_FILE 2>&1
