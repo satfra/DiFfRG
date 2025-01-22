@@ -107,7 +107,7 @@ echo
 # Setup and build library
 # ##############################################################################
 
-if [[ -z ${option_install_library+x} ]]; then
+if [[ -z ${option_install_library} ]]; then
   echo
   read -p "Install DiFfRG library globally to /opt/DiFfRG? [y/N/path] " option_install_library
   option_install_library=${option_install_library:-N}
@@ -120,11 +120,6 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
   idir=$(expandPath ${option_install_library}/)
   #idir=$(readlink --canonicalize ${idir})
   echo "DiFfRG library will be installed in ${idir}"
-
-  # Check if the install directory is writable
-  mkdir -p ${idir} &>/dev/null && touch ${idir}/_permission_test &>/dev/null || {
-    failed_first=1
-  }
 
   if [[ ${CUDA_OPT} == "-DUSE_CUDA=ON" ]]; then
     echo "Using CUDA to build DiFfRG library."
@@ -159,16 +154,10 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
   make -j ${THREADS} documentation &>${LOGPATH}/DiFfRG_documentation.log || { echo "    Failed to build DiFfRG documentation."; }
 
   echo "Installing..."
-  if [[ -w ${idir} ]]; then
-    make install -j ${THREADS} &>${LOGPATH}/DiFfRG_install.log
-    cp -r ${SCRIPTPATH}/python ${idir}/
-  else
-    if ((failed_first == 0)); then
-      echo "Elevated permissions required to write into ${idir}."
-    fi
-    sudo -E make install -j ${THREADS} &>${LOGPATH}/DiFfRG_install.log
-    sudo cp -r ${SCRIPTPATH}/python ${idir}/
-  fi
+  SuperUser=$(get_execution_permissions $INSTALL_PATH)
+  $SuperUser mkdir -p $INSTALL_PATH
+  $SuperUser make install -j ${THREADS} &>${LOGPATH}/DiFfRG_install.log
+  $SuperUser cp -r ${SCRIPTPATH}/python ${idir}/
 
   echo "Done."
   echo
