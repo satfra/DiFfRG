@@ -113,11 +113,6 @@ if [[ -z ${option_install_library+x} ]]; then
   option_install_library=${option_install_library:-N}
 fi
 
-if [[ -z ${option_setup_library+x} ]]; then
-  read -p "Build DiFfRG library? [Y/n] " option_setup_library
-  option_setup_library=${option_setup_library:-Y}
-fi
-
 if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N" ]]; then
   cd ${SCRIPTPATH}
 
