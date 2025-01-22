@@ -26,7 +26,7 @@ if(DiFfRG_BUILD_DOCUMENTATION AND DOXYGEN_FOUND)
 
   # request to configure the file
   configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
-  message("Doxygen build started")
+  message(STATUS "Documentation target configured")
 
   add_custom_target(
     documentation
@@ -83,26 +83,27 @@ endif()
 
 include(cmake/install_bundled.cmake)
 include(CMakePackageConfigHelpers)
+
+write_basic_package_version_file(
+  ${CMAKE_CURRENT_BINARY_DIR}/DiFfRGConfigVersion.cmake
+  VERSION 1.0.0
+  COMPATIBILITY SameMajorVersion)
+
 configure_package_config_file(
   "Config.cmake.in" "DiFfRGConfig.cmake"
   INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/DiFfRG
   PATH_VARS CMAKE_INSTALL_LIBDIR)
 
-write_basic_package_version_file(
-  ${CMAKE_CURRENT_BINARY_DIR}/DiFfRGConfigVersion.cmake
-  VERSION 0.1.0
-  COMPATIBILITY SameMajorVersion)
-
-export(
+install(
   EXPORT DiFfRGTargets
-  FILE "${CMAKE_CURRENT_BINARY_DIR}/DiFfRGTargets.cmake"
-  NAMESPACE DiFfRG::)
+  FILE DiFfRGTargets.cmake
+  NAMESPACE DiFfRG::
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/DiFfRG)
 
 # Install Config and ConfigVersion files
 install(
   FILES "${CMAKE_CURRENT_BINARY_DIR}/DiFfRGConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/DiFfRGConfigVersion.cmake"
-        "${CMAKE_CURRENT_BINARY_DIR}/DiFfRGTargets.cmake"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/DiFfRG")
 
 # ##############################################################################

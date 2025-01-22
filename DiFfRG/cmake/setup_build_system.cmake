@@ -2,22 +2,89 @@
 # Setup directories
 # ##############################################################################
 
+# We need to find the bundle directory, which contains several external
+# dependencies
 if(${CMAKE_PROJECT_NAME} STREQUAL "DiFfRG")
+  # If we are building DiFfRG as a standalone project, we need to set the base
+  # directory
   set(BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
   if(NOT DEFINED BUNDLED_DIR)
     set(BUNDLED_DIR ${BASE_DIR}/../external)
   endif()
 else()
+  # If we are building a DiFfRG-based project, we need to set the bundle
+  # directory relative to the DiFfRG base directory
   set(BASE_DIR ${DiFfRG_BASE_DIR})
   set(BUNDLED_DIR ${BASE_DIR}/bundled)
 endif()
+message(STATUS "DiFfRG include directory: ${BASE_DIR}/include")
 
-message("Bundle directory: ${BUNDLED_DIR}")
+# No matter what we are building, we need to set the include directory
+#include_directories(${BASE_DIR}/include)
 
-# If source cache directory is not set, set it to $HOME/.cache
-if(NOT DEFINED CPM_SOURCE_CACHE)
+# By default, we build in Release mode, i.e. if the user does not make any other
+# choice. After all, even if the user is unaware of cmake build types, we want
+# to provide optimal performance.
+if(NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
+  set(CMAKE_BUILD_TYPE Release)
+  message(STATUS "Build type not set, defaulting to Release")
+endif()
+
+# Set some C++ compiler flags if they are not specified by the user. We simply
+# propagate the base library flags to the user's project in that case.
+if(NOT DEFINED CMAKE_CXX_FLAGS OR CMAKE_CXX_FLAGS STREQUAL "")
+  set(CMAKE_CXX_FLAGS "${DiFfRG_CXX_FLAGS}")
+  message(STATUS "CXX flags not set, defaulting to ${CMAKE_CXX_FLAGS}")
+else()
+  message(STATUS "CXX flags have been set to ${CMAKE_CXX_FLAGS}")
+endif()
+
+# CUDA flags are slightly more problematic, as we need them to be compatible
+# with the ones used in the base library. Here, we always fix some flags that
+# could lead to incompatibilities, and then add the user's flags. Also, by
+# default, we use the highest instruction set available on the current machine.
+if(NOT DEFINED CMAKE_CUDA_FLAGS OR CMAKE_CUDA_FLAGS STREQUAL "")
+  set(CMAKE_CUDA_FLAGS
+      "-arch=native --use_fast_math --split-compile=0 --threads=0 --gen-opt-lto"
+  )
+
+  message(STATUS "CUDA flags not set, defaulting to ${CMAKE_CUDA_FLAGS}")
+else()
+  set(CMAKE_CUDA_FLAGS
+      "--split-compile=0 --threads=0 --gen-opt-lto --use_fast_math")
+
+  # check if CMAKE_CUDA_FLAGS contains the arch keyword (i.e. the user has set
+  # what architecture to use). If it does not, set it to the native.
+  if(NOT CMAKE_CUDA_FLAGS MATCHES "-arch")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=native")
+  endif()
+
+  message(STATUS "CUDA flags have been set to ${CMAKE_CUDA_FLAGS}")
+endif()
+
+# By default, enable interprocedural optimization if it is supported.
+if(NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT ipo_supported OUTPUT error)
+
+  if(ipo_supported)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+    message(
+      STATUS
+        "Interprocedural optimization enabled. To disable, set CMAKE_INTERPROCEDURAL_OPTIMIZATION to FALSE."
+    )
+  else()
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
+  endif()
+endif()
+
+message(STATUS "Bundle directory: ${BUNDLED_DIR}")
+
+# If CPM_SOURCE_CACHE is set to OFF, we set it to the default cache directory
+if("${CPM_SOURCE_CACHE}" STREQUAL "OFF" OR NOT DEFINED CPM_SOURCE_CACHE)
   set(CPM_SOURCE_CACHE $ENV{HOME}/.cache/CPM)
 endif()
+message(STATUS "CPM source cache directory: ${CPM_SOURCE_CACHE}")
 
 # Get CPM for package management
 list(APPEND CMAKE_MODULE_PATH "${BASE_DIR}/cmake")
@@ -240,7 +307,8 @@ cpmaddpackage(
   "AUTODIFF_BUILD_PYTHON OFF"
   "Eigen3_DIR ${Eigen3_BINARY_DIR}")
 
-# This is for spdlog usage. We need to hide the local spdlog installation, otherwise we will have problems with the linking process.
+# This is for spdlog usage. We need to hide the local spdlog installation,
+# otherwise we will have problems with the linking process.
 set(CMAKE_DISABLE_FIND_PACKAGE_spdlog TRUE)
 
 if(USE_CUDA)
@@ -261,15 +329,15 @@ if(USE_CUDA)
 endif()
 
 cpmaddpackage(
-    NAME
-    spdlog
-    GITHUB_REPOSITORY
-    gabime/spdlog
-    VERSION
-    1.14.1
-    OPTIONS
-    "CMAKE_BUILD_TYPE Release"
-    "SPDLOG_INSTALL ON")
+  NAME
+  spdlog
+  GITHUB_REPOSITORY
+  gabime/spdlog
+  VERSION
+  1.14.1
+  OPTIONS
+  "CMAKE_BUILD_TYPE Release"
+  "SPDLOG_INSTALL ON")
 
 # ##############################################################################
 # Helper functions

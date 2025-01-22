@@ -145,7 +145,7 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
     -DBUNDLED_DIR=${idir}/bundled \
     ${CUDA_OPT} \
     -DCMAKE_CUDA_FLAGS="${CUDA_FLAGS}" \
-    -DCMAKE_CXX_FLAGS="${CXXFLAGS}" \
+    -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
     -DDiFfRG_BUILD_TESTS=OFF \
     -DDiFfRG_BUILD_DOCUMENTATION=ON \
@@ -153,7 +153,6 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
     echo "    Failed to configure DiFfRG, aborting."
     exit 1
   }
-  make release_additional_flags &>/dev/null
 
   echo "Updating DiFfRG..."
   make -j ${THREADS} &>${LOGPATH}/DiFfRG_make.log || {

@@ -25,5 +25,5 @@ fi
 
 mkdir -p build
 cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS='-O3 -march=native -ffast-math -fno-finite-math-only -Wl,--demangle' -DCMAKE_CUDA_FLAGS="-arch=native" ..
+cmake ..
 make -j"$threads"

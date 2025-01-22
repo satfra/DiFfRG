@@ -5,7 +5,7 @@
     "STI_step_size": 1e-2,
     "STI_scale": 10.0,
 
-    "tune_m2A": true,
+    "tune_m2A": false,
     "lower_m2A": -150.0,
     "upper_m2A": -80.0,
     "m2A_tol": 1e-9

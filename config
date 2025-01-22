@@ -8,27 +8,18 @@
 # By default, we simply build with the highest instruction set available on the current machine
 # if you want to use a different instruction set, you can set this in the CXX_FLAGS, CUDA_FLAGS, C_FLAGS,
 # e.g.
-#   export CXX_FLAGS="-march=core-avx2 -fPIC"
 #   export C_FLAGS="-march=core-avx2 -fPIC"
+#   export CXX_FLAGS="-march=core-avx2 -fPIC"
 #   export CUDA_FLAGS="-arch=sm_35"
-# export CXX_FLAGS="-march=native -fPIC -flto=auto" 
-export CXX_FLAGS="-march=native -fPIC"
-# export C_FLAGS="-march=native -fPIC -flto=auto"
-export C_FLAGS="-march=native -fPIC"
-export CUDA_FLAGS="-arch=native -use_fast_math"
+export C_FLAGS="-march=native -fPIC -O3 -ffast-math -fno-finite-math-only"
+export CXX_FLAGS="${C_FLAGS}"
+export CUDA_FLAGS="-arch=native --use_fast_math"
 
 # Configure linker flags for the current machine. By default, we use the gold linker
 export EXE_LINKER_FLAGS="-fuse-ld=gold"
 
-# If we detect that we are on a Mac, we need to set the OpenMP_ROOT variable to the correct path
-if [[ "$OSTYPE" =~ ^darwin ]]; then
-  export OpenMP_ROOT=$(brew --prefix)/opt/libomp
-  # On Mac, we use the clang linker by default. If you want to use the gold linker, you can set this here
-  export EXE_LINKER_FLAGS=""
-fi
-
 # Also, the name of the python executable may vary for your system. You can set this here
-pythoncmd=python3
+export pythoncmd=python3
 
 # Set additional cmake flags for deal.II.
 # For a local build, we want to allow platform introspection.
