@@ -1,14 +1,15 @@
 #pragma once
 
+// DiFfRG
+#include <DiFfRG/common/cuda_prefix.hh>
+#include <DiFfRG/common/math.hh>
+#include <DiFfRG/physics/interpolation/common.hh>
+
 // standard library
 #include <memory>
 
 // external libraries
 #include <autodiff/forward/real.hpp>
-
-// DiFfRG
-#include <DiFfRG/common/cuda_prefix.hh>
-#include <DiFfRG/physics/interpolation/common.hh>
 
 namespace DiFfRG
 {

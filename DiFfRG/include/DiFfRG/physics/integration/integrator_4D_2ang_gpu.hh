@@ -44,11 +44,25 @@ namespace DiFfRG
                 * int_element * weight;                // weight and integration element
   }
 
+  /**
+   * @brief GPU integrator for the integration of a 4D function with two angles with CUDA. Calculates
+   * \f[
+   *    2\pi\,\int dp\, d\text{cos}_1\, d\text{cos}_2\, \frac{1}{(2\pi)^4} \sqrt{1-\text{cos}_1^2} f(p,
+   * \text{cos}_1, \text{cos}_2, ...) + c
+   * \f]
+   * with \f$ p^2 \f$ bounded by \f$ \text{x_extent} * k^2 \f$.
+   *
+   * @tparam NT The numerical type of the result.
+   * @tparam KERNEL The kernel to integrate.
+   */
   template <typename NT, typename KERNEL> class Integrator4D2AngGPU
   {
     using PoolMR = rmm::mr::pool_memory_resource<rmm::mr::device_memory_resource>;
 
   public:
+    /**
+     * @brief Numerical type to be used for integration tasks e.g. the argument or possible jacobians.
+     */
     using ctype = typename get_type::ctype<NT>;
 
     Integrator4D2AngGPU(QuadratureProvider &quadrature_provider, const std::array<uint, 3> grid_sizes,
@@ -111,6 +125,16 @@ namespace DiFfRG
       threads_per_block = other.threads_per_block;
     }
 
+    /**
+     * @brief Get the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return NT Integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> NT get(const ctype k, const T &...t) const
     {
       const int m_device = evaluations++ % n_devices;
@@ -133,6 +157,16 @@ namespace DiFfRG
       cudaSetDevice(0);
     }
 
+    /**
+     * @brief Request a future for the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return std::future<NT> future holding the integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> std::future<NT> request(const ctype k, const T &...t) const
     {
       const int m_device = evaluations++ % n_devices;

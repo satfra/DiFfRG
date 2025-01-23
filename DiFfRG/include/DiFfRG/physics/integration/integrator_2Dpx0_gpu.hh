@@ -17,6 +17,13 @@
 
 namespace DiFfRG
 {
+  /**
+   * @brief GPU kernel for the integration of a function dependent on p, an angle cos1 and q0.
+   *
+   * @tparam ctype The numerical type of the integration points and weights.
+   * @tparam NT The numerical type of the result.
+   * @tparam KERNEL The kernel to integrate.
+   */
   template <typename ctype, typename NT, typename KERNEL, typename... T>
   __global__ void gridreduce_2dpx0(NT *dest, const ctype *x_quadrature_p, const ctype *x_quadrature_w,
                                    const ctype *ang_quadrature_p, const ctype *ang_quadrature_w,
@@ -59,6 +66,9 @@ namespace DiFfRG
   template <typename NT, typename KERNEL> class Integrator2Dpx0GPU
   {
   public:
+    /**
+     * @brief Numerical type to be used for integration tasks e.g. the argument or possible jacobians.
+     */
     using ctype = typename get_type::ctype<NT>;
 
     /**

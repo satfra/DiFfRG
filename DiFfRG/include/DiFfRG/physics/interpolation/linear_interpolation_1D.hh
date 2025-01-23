@@ -1,14 +1,15 @@
 #pragma once
 
+// DiFfRG
+#include <DiFfRG/common/cuda_prefix.hh>
+#include <DiFfRG/common/math.hh>
+#include <DiFfRG/physics/interpolation/common.hh>
+
 // standard library
 #include <memory>
 
 // external libraries
 #include <autodiff/forward/real.hpp>
-
-// DiFfRG
-#include <DiFfRG/common/cuda_prefix.hh>
-#include <DiFfRG/physics/interpolation/common.hh>
 
 namespace DiFfRG
 {
@@ -83,9 +84,9 @@ namespace DiFfRG
       auto idx = coordinates.backward(x);
       idx = max(static_cast<decltype(idx)>(0), min(idx, static_cast<decltype(idx)>(size - 1)));
 #ifndef __CUDA_ARCH__
-      return m_data[uint(floor(idx))] * (1. - idx + floor(idx)) + m_data[uint(ceil(idx))] * (idx - floor(idx));
+      return m_data[uint(floor(idx))] * (NT(1) - idx + floor(idx)) + m_data[uint(ceil(idx))] * (idx - floor(idx));
 #else
-      return device_data_ptr[uint(floor(idx))] * (1. - idx + floor(idx)) +
+      return device_data_ptr[uint(floor(idx))] * (NT(1) - idx + floor(idx)) +
              device_data_ptr[uint(ceil(idx))] * (idx - floor(idx));
 #endif
     }

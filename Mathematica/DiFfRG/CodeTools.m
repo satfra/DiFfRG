@@ -139,6 +139,10 @@ SetKernelDefinitions[] resets the kernel definitions to the standard.";
 ShowKernelDefinitions::usage="ShowKernelDefinitions[]
 Show the currently specified kernel definitions code.";
 
+AddParameterType::usage="AddParameterType[name,cppType,cppTypeAD,Reference,computeTypeName]
+Add a recognized parameter to the list of useable kernel parameter types.
+"
+
 
 Begin["`Private`"];
 
@@ -267,54 +271,111 @@ head~~prefix~~integrand~~"};"
 
 
 (* ::Input::Initialization:: *)
-ArgType:=<|
+ArgType=<|
 "Constant"->"",
 "Variable"->"",
 "ComplexConstant"->"",
 "ComplexVariable"->"",
 "FunctionTex1D"->"&",
+"FunctionTex2D"->"&",
 "FunctionTex3D"->"&",
 "FunctionTex3DLogLinLin"->"&",
 "Function1D"->"&",
+"Function2D"->"&",
+"Function2DLinLin"->"&",
 "Function3D"->"&",
 "Function3DLogLinLin"->"&",
 "FunctionTex1DBosonicFT"->"&",
 "FunctionTex1DFermionicFT"->"&"
 |>;
-CppType[computeType_String]:=<|
-"Constant"->computeType,
-"Variable"->computeType,
-"ComplexConstant"->"complex<"<>computeType<>">",
-"ComplexVariable"->"complex<"<>computeType<>">",
+$CppType=<|
+"Constant"->"$computeType",
+"Variable"->"$computeType",
+"ComplexConstant"->"complex<$computeType>",
+"ComplexVariable"->"complex<$computeType>",
+
 "FunctionTex1D"->"TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>>",
+
+"FunctionTex2D"->"TexLinearInterpolator2D<double, CoordinatePackND<LogarithmicCoordinates1D<float>, LogarithmicCoordinates1D<float>>>",
+"FunctionTex2DLinLin"->"TexLinearInterpolator2D<double, CoordinatePackND<LinearCoordinates1D<float>, LinearCoordinates1D<float>>>",
+
 "FunctionTex3D"->"TexLinearInterpolator3D<double, CoordinatePackND<LogarithmicCoordinates1D<float>, LogarithmicCoordinates1D<float>, LinearCoordinates1D<float>>>",
 "FunctionTex3DLogLinLin"->"TexLinearInterpolator3D<double, CoordinatePackND<LogarithmicCoordinates1D<float>, LinearCoordinates1D<float>, LinearCoordinates1D<float>>>",
+
 "Function1D"->"LinearInterpolator1D<double, LogarithmicCoordinates1D<float>>",
+
+"Function2D"->"LinearInterpolator2D<double, CoordinatePackND<LogarithmicCoordinates1D<float>, LogarithmicCoordinates1D<float>>>",
+"Function2DLinLin"->"LinearInterpolator2D<double, CoordinatePackND<LinearCoordinates1D<float>, LinearCoordinates1D<float>>>",
+
 "Function3D"->"LinearInterpolator3D<double, CoordinatePackND<LogarithmicCoordinates1D<float>, LogarithmicCoordinates1D<float>, LinearCoordinates1D<float>>>",
 "Function3DLogLinLin"->"LinearInterpolator3D<double, CoordinatePackND<LogarithmicCoordinates1D<float>, LinearCoordinates1D<float>, LinearCoordinates1D<float>>>",
+
 "FunctionTex1DBosonicFT"->"TexLinearInterpolator1DStack<double, BosonicCoordinates1DFiniteT<int, float>>",
 "FunctionTex1DFermionicFT"->"TexLinearInterpolator1DStack<double, FermionicCoordinates1DFiniteT<int, float>>"
 |>;
-CppTypeAD[computeType_String]:=<|
-"Constant"->computeType,
+CppType[computeType_String]:=Map[StringReplace[#,"$computeType"->computeType]&,$CppType]
+$CppTypeAD=<|
+"Constant"->"$computeType",
 "Variable"->"autodiff::real",
-"ComplexConstant"->"complex<"<>computeType<>">",
+"ComplexConstant"->"complex<$computeType>",
 "ComplexVariable"->"complex<autodiff::real>",
-"FunctionTex1D"->"TexLinearInterpolator1D<autodiff::real, LogarithmicCoordinates1D<float>>&",
+
+"FunctionTex1D"->"TexLinearInterpolator1D<autodiff::real, LogarithmicCoordinates1D<float>>",
+
+"FunctionTex2D"->"TexLinearInterpolator2D<autodiff::real, CoordinatePackND<LogarithmicCoordinates1D<float>, LogarithmicCoordinates1D<float>>>",
+"FunctionTex2DLinLin"->"TexLinearInterpolator2D<autodiff::real, CoordinatePackND<LinearCoordinates1D<float>, LinearCoordinates1D<float>>>",
+
 "FunctionTex3D"->"TexLinearInterpolator3D<autodiff::real, CoordinatePackND<LogarithmicCoordinates1D<float>, LogarithmicCoordinates1D<float>, LinearCoordinates1D<float>>>",
 "FunctionTex3DLogLinLin"->"TexLinearInterpolator3D<autodiff::real, CoordinatePackND<LogarithmicCoordinates1D<float>, LinearCoordinates1D<float>, LinearCoordinates1D<float>>>",
-"Function1D"->"LinearInterpolator1D<autodiff::real, LogarithmicCoordinates1D<float>>&",
+
+"Function1D"->"LinearInterpolator1D<autodiff::real, LogarithmicCoordinates1D<float>>",
+
+"Function2D"->"LinearInterpolator2D<autodiff::real, CoordinatePackND<LogarithmicCoordinates1D<float>, LogarithmicCoordinates1D<float>>>",
+"Function2DLinLin"->"LinearInterpolator2D<autodiff::real, CoordinatePackND<LinearCoordinates1D<float>, LinearCoordinates1D<float>>>",
+
 "Function3D"->"LinearInterpolator3D<autodiff::real, CoordinatePackND<LogarithmicCoordinates1D<float>, LogarithmicCoordinates1D<float>, LinearCoordinates1D<float>>>",
 "Function3DLogLinLin"->"LinearInterpolator3D<autodiff::real, CoordinatePackND<LogarithmicCoordinates1D<float>, LinearCoordinates1D<float>, LinearCoordinates1D<float>>>",
+
 "FunctionTex1DBosonicFT"->"TexLinearInterpolator1DStack<autodiff::real, BosonicCoordinates1DFiniteT<int, float>>&",
 "FunctionTex1DFermionicFT"->"TexLinearInterpolator1DStack<autodiff::real, FermionicCoordinates1DFiniteT<int, float>>&"
-|>
-GridSelector=<|
-0->"grid_size_int",
-1->"grid_sizes_angle_int",
-2->"grid_sizes_3D_int",
-3->"grid_sizes_4D_int"
 |>;
+CppTypeAD[computeType_String]:=Map[StringReplace[#,"$computeType"->computeType]&,$CppTypeAD]
+
+AddParameterType[name_String,cppType_String,cppTypeAD_String,Reference_:True,computeTypeName_String:"$computeType"]:=Module[{},
+If[MemberQ[Keys[ArgType],name]||MemberQ[Keys[$CppType],name]||MemberQ[Keys[$CppTypeAD],name],
+Print["Parameter type with name \""<>name<>"\" already exists!"];Abort[]];
+
+If[Reference,
+AppendTo[ArgType,name->"&"],
+AppendTo[ArgType,name->""]
+];
+
+AppendTo[$CppType,name->cppType];
+AppendTo[$CppTypeAD,name->cppTypeAD];
+];
+
+ShowTypes[]:=Module[{},
+Print["Available argument types (for double) are: ",Dataset[Association[Map[{#->{$CppType[#],$CppTypeAD[#]}}&,Keys[$CppType]]],MaxItems->20000]];
+]
+
+
+GridSelector[kernel_]:=Module[{},
+Return@If[kernel["Type"]=="CartesianQuadrature",
+Switch[kernel["d"],
+1,"grid_size_int",
+2,"grid_sizes_2D_cartesian_int",
+3,"grid_sizes_3D_cartesian_int",
+_,Print["CartesianQuadrature has wrong dimension!"];Abort[];
+],
+Switch[kernel["Angles"],
+0,"grid_size_int",
+1,"grid_sizes_angle_int",
+2,"grid_sizes_3D_int",
+3,"grid_sizes_4D_int"
+]
+];
+];
+
 GridSelectorFiniteT=<|
 0->"grid_sizes_int_fT",
 1->"grid_sizes_angle_int",
@@ -324,10 +385,6 @@ GridSelectorFiniteT=<|
 DeviceChoice["CPU"]="TBB";
 DeviceChoice["TBB"]="TBB";
 DeviceChoice["GPU"]="GPU";
-
-ShowTypes[]:=Module[{},
-Print["Available argument types are: ",Dataset[CppType["double"],MaxItems->20000]];
-]
 
 
 (* ::Input::Initialization:: *)
@@ -374,7 +431,7 @@ Return[True];
 ];
 
 
-knownTypes={"Quadrature","QMC","Quadrature","Quadratureq0","Quadraturex0"};
+knownTypes={"Quadrature","QMC","Quadrature","Quadratureq0","Quadraturex0","CartesianQuadrature","CartesianQuadratureq0"};
 TypeTest[type_]:=Module[{},
 If[MemberQ[knownTypes,type],Return[True],Print["Unkown kernel Type: ",type, "\nKnown types: ",knownTypes];Return[False]]
 ];
@@ -740,6 +797,9 @@ private:
   const std::array<uint, 3> grid_sizes_3D_int;
   const std::array<uint, 4> grid_sizes_4D_int;
 
+  const std::array<uint, 2> grid_sizes_2D_cartesian_int;
+  const std::array<uint, 3> grid_sizes_3D_cartesian_int;
+
 public:
   ::DiFfRG::QuadratureProvider quadrature_provider;"<>
 StringJoin[Map["\n  ::DiFfRG::Flows::"<>#["Name"]<>"_integrator "<>#["Name"]<>"_integrator;"&,integratorList]]<>"
@@ -752,8 +812,10 @@ ccFlow="#include \"flows.hh\"
                       grid_size_int{{x_quadrature_order}},
                       grid_sizes_angle_int{{x_quadrature_order, 2 * angle_quadrature_order}},
                       grid_sizes_3D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order}},
-                      grid_sizes_4D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, angle_quadrature_order}}"<>
-StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, "<>GridSelector[#["Angles"]]<>", x_extent, json)"&,integratorList]]<>"
+                      grid_sizes_4D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, angle_quadrature_order}},
+                      grid_sizes_2D_cartesian_int{{x_quadrature_order, x_quadrature_order}},
+                      grid_sizes_3D_cartesian_int{{x_quadrature_order, x_quadrature_order, x_quadrature_order}}"<>
+StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, "<>GridSelector[#]<>", x_extent, json)"&,integratorList]]<>"
 {
 }
 ";
@@ -778,9 +840,9 @@ If[Not@StringQ[regulatorOpts[[1]]]||Not@StringQ[regulatorOpts[[2]]],Print["DiFfR
 
 If[name=="",Print["DiFfRG::CodeTools::MakeFlowClassFiniteT: Please provide a valid name to MakeFlowClass."];Abort[]];
 
-integratorList=Select[kernels,#["Type"]=="Quadrature"||#["Type"]=="Function1D"||#["Type"]=="Constant"&];
-integratorq0List=Select[kernels,#["Type"]=="Quadratureq0"||#["Type"]=="Function1Dq0"&];
-integratorx0List=Select[kernels,#["Type"]=="Quadraturex0"||#["Type"]=="Function1Dx0"&];
+integratorList=Select[kernels,#["Type"]=="Quadrature"&];
+integratorq0List=Select[kernels,#["Type"]=="Quadratureq0"&];
+integratorx0List=Select[kernels,#["Type"]=="Quadraturex0"&];
 
 includeList=StringJoin[Map["#include \""<>#["Path"]<>"/"<>#["Name"]<>".hh\"\n"&,kernels]];
 
@@ -819,6 +881,9 @@ private:
   const std::array<uint, 3> grid_sizes_angle_int;
   const std::array<uint, 4> grid_sizes_4D_int;
 
+  const std::array<uint, 2> grid_sizes_2D_cartesian_int;
+  const std::array<uint, 3> grid_sizes_3D_cartesian_int;
+
 public:
   QuadratureProvider quadrature_provider;"<>
 StringJoin[Map["\n  Flows::"<>#["Name"]<>"_integrator "<>#["Name"]<>"_integrator;"&,Join[integratorList,integratorx0List,integratorq0List]]]<>"
@@ -834,7 +899,9 @@ ccFlow="#include \"flows.hh\"
                     grid_size_int{{x_quadrature_order}},
                     grid_sizes_int_fT{{x_quadrature_order, x0_quadrature_order}},
                     grid_sizes_angle_int{{x_quadrature_order, 2 * angle_quadrature_order, x0_quadrature_order}},
-                    grid_sizes_4D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, x0_quadrature_order}}"<>
+                    grid_sizes_4D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, x0_quadrature_order}},
+                      grid_sizes_2D_cartesian_int{{x_quadrature_order, x_quadrature_order}},
+                      grid_sizes_3D_cartesian_int{{x_quadrature_order, x_quadrature_order, x_quadrature_order}}"<>
 StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, grid_size_int, x_extent, json)"&,integratorList]]<>
 StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, "<>GridSelectorFiniteT[#["Angles"]]<>", x_extent, x0_extent, x0_summands, json)"&,integratorx0List]]<>
 StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, "<>GridSelectorFiniteT[#["Angles"]]<>", x_extent, q0_extent, x0_summands, json)"&,integratorq0List]]<>"
@@ -861,6 +928,63 @@ head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[
 body="";
 If[definitions=!="",
 body=body<>"    // definitions\n"<>definitions<>"\n"
+];
+body=body<>GetOptimizedKernelCode[flow,parameterList,computeType];
+body=IndentCode[body,2];
+templateList<>"\n"<>head<>"\n  {\n"<>body<>"\n  }"
+];
+
+
+MakeKernelCartesian1DMethod[flow_,parameterList_List,definitions_String,computeType_String]:=Module[{templateList,head, body},
+If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abort[]];
+
+templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
+templateList="  template <"<>templateList<>">";
+head="  static __forceinline__ __host__ __device__ auto
+  kernel(const "<>computeType<>" q, const "<>computeType<>" k, ";
+head=
+head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
+body="";
+If[definitions=!="",
+body=body<>definitions<>"\n"
+];
+body=body<>GetOptimizedKernelCode[flow,parameterList,computeType];
+body=IndentCode[body,2];
+templateList<>"\n"<>head<>"\n  {\n"<>body<>"\n  }"
+];
+
+
+MakeKernelCartesian2DMethod[flow_,parameterList_List,definitions_String,computeType_String]:=Module[{templateList,head, body},
+If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abort[]];
+
+templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
+templateList="  template <"<>templateList<>">";
+head="  static __forceinline__ __host__ __device__ auto
+  kernel(const "<>computeType<>" qx, const "<>computeType<>" qy, const "<>computeType<>" k, ";
+head=
+head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
+body="";
+If[definitions=!="",
+body=body<>definitions<>"\n"
+];
+body=body<>GetOptimizedKernelCode[flow,parameterList,computeType];
+body=IndentCode[body,2];
+templateList<>"\n"<>head<>"\n  {\n"<>body<>"\n  }"
+];
+
+
+MakeKernelCartesian3DMethod[flow_,parameterList_List,definitions_String,computeType_String]:=Module[{templateList,head, body},
+If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abort[]];
+
+templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
+templateList="  template <"<>templateList<>">";
+head="  static __forceinline__ __host__ __device__ auto
+  kernel(const "<>computeType<>" qx, const "<>computeType<>" qy, const "<>computeType<>" qz, const "<>computeType<>" k, ";
+head=
+head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
+body="";
+If[definitions=!="",
+body=body<>definitions<>"\n"
 ];
 body=body<>GetOptimizedKernelCode[flow,parameterList,computeType];
 body=IndentCode[body,2];
@@ -988,14 +1112,22 @@ public:";
 
 If[kernel["Angles"]<0,Print["DiFfRG::CodeTools::MakeKernelClass: T = 0 kernel cannot have < 0 angles!"];Abort[]];
 If[kernel["Type"]==="Constant",
-body=MakeKernelConstMethod[integrandFlow,parameterList,integrandDefinitions,computeType]
-,
+body=MakeKernelConstMethod[integrandFlow,parameterList,integrandDefinitions,computeType],
+If[kernel["Type"]==="CartesianQuadrature",
+If[kernel["Angles"]!=0,Print["Cartesian integrator cannot have angles!"];Abort[];];
+Switch[kernel["d"],
+1,body=MakeKernelCartesian1DMethod[integrandFlow,parameterList,integrandDefinitions,computeType],
+2,body=MakeKernelCartesian2DMethod[integrandFlow,parameterList,integrandDefinitions,computeType],
+3,body=MakeKernelCartesian3DMethod[integrandFlow,parameterList,integrandDefinitions,computeType],
+_,Print["Cartesian integrator for dimension "<>ToString[kernel["d"]]<>" not implemented!"];Abort[];
+],
 If[kernel["Angles"]==0,body=MakeKernel0AngleMethod[integrandFlow,parameterList,integrandDefinitions,computeType]];
 If[kernel["Angles"]==1,body=MakeKernel1AngleMethod[integrandFlow,parameterList,integrandDefinitions,computeType]];
 If[kernel["Angles"]==2&&kernel["d"]==4,body=MakeKernel2AngleMethodAlt[integrandFlow,parameterList,integrandDefinitions,computeType]];
 If[kernel["Angles"]==2&&kernel["d"]!=4,body=MakeKernel2AngleMethod[integrandFlow,parameterList,integrandDefinitions,computeType]];
 If[kernel["Angles"]==3,body=MakeKernel3AngleMethod[integrandFlow,parameterList,integrandDefinitions,computeType]];
 If[kernel["Angles"]>3,Print["DiFfRG::CodeTools::MakeKernelClass: T = 0 kernel cannot have > 3 angles!"];Abort[]];
+];
 ];
 
 body=body<>"\n\n"<>MakeConstantMethod[constantFlow,parameterList,constantDefinitions,computeType];
@@ -1013,27 +1145,28 @@ computeType=kernel["ctype"];
 
 kernelName=ToString[kernel["Name"]]<>"_kernel";
 
-suffix=If[kernel["Type"]==="QMC",
-"QMC",
-If[kernel["Type"]==="Constant",
-If[kernel["Angles"]=!=0,Print["Constant integrator cannot have angles!"];Abort[]];
-"Constant",
-If[kernel["Type"]==="Quadrature",
-DeviceChoice[kernel["Device"]],
-Print["Unknown integration type "<>kernel["Type"]<>"!"];Abort[]
-]
-]
+suffix=Switch[kernel["Type"],
+"QMC","QMC",
+"Constant",If[kernel["Angles"]=!=0,Print["Constant integrator cannot have angles!"];Abort[]];"Constant",
+"Quadrature",DeviceChoice[kernel["Device"]],
+"CartesianQuadrature",If[kernel["Angles"]=!=0,Print["Cartesian integrator cannot have angles!"];Abort[]];"Cartesian"<>DeviceChoice[kernel["Device"]],
+_,Print["Unknown integration type "<>kernel["Type"]<>"!"];Abort[]
 ];
 
-If[kernel["Angles"]==0,
+If[kernel["Type"]=="CartesianQuadrature",
+integrator="DiFfRG::Integrator"<>ToString[kernel["d"]]<>"D"<>suffix<>"<"<>computeType<>", "<>kernelName<>"<__REGULATOR__>>" ;
+integratorAD="DiFfRG::Integrator"<>ToString[kernel["d"]]<>"D"<>suffix<>"<"<>"autodiff::real, "<>kernelName<>"<__REGULATOR__>>" ,
+
+Switch[kernel["Angles"],
+0,
 integrator="DiFfRG::Integrator"<>suffix<>"<"<>ToString[kernel["d"]]<>", "<>computeType<>", "<>kernelName<>"<__REGULATOR__>>" ;
-integratorAD="DiFfRG::Integrator"<>suffix<>"<"<>ToString[kernel["d"]]<>", autodiff::real, "<>kernelName<>"<__REGULATOR__>>" 
-];
-If[kernel["Angles"]==1,
+integratorAD="DiFfRG::Integrator"<>suffix<>"<"<>ToString[kernel["d"]]<>", autodiff::real, "<>kernelName<>"<__REGULATOR__>>" ,
+
+1,
 integrator="DiFfRG::IntegratorAngle"<>suffix<>"<"<>ToString[kernel["d"]]<>", "<>computeType<>", "<>kernelName<>"<__REGULATOR__>>" ;
-integratorAD="DiFfRG::IntegratorAngle"<>suffix<>"<"<>ToString[kernel["d"]]<>", autodiff::real, "<>kernelName<>"<__REGULATOR__>>" 
-];
-If[kernel["Angles"]==2,
+integratorAD="DiFfRG::IntegratorAngle"<>suffix<>"<"<>ToString[kernel["d"]]<>", autodiff::real, "<>kernelName<>"<__REGULATOR__>>" ,
+
+2,
 If[kernel["d"]!=3&&kernel["d"]!=4,Print["Inconsistent dimensions!"];Abort[]];
 If[kernel["d"]==3,
 integrator="DiFfRG::Integrator3D"<>suffix<>"<"<>computeType<>", "<>kernelName<>"<__REGULATOR__>>" ;
@@ -1041,21 +1174,22 @@ integratorAD="DiFfRG::Integrator3D"<>suffix<>"<autodiff::real, "<>kernelName<>"<
 ,
 integrator="DiFfRG::Integrator4D2Ang"<>suffix<>"<"<>computeType<>", "<>kernelName<>"<__REGULATOR__>>" ;
 integratorAD="DiFfRG::Integrator4D2Ang"<>suffix<>"<autodiff::real, "<>kernelName<>"<__REGULATOR__>>" ;
-];
-];
-If[kernel["Angles"]==3,
+],
+
+3,
 If[kernel["d"]!=4,Print["Inconsistent dimensions!"];Abort[]];
 integrator="DiFfRG::Integrator4D"<>suffix<>"<"<>computeType<>", "<>kernelName<>"<__REGULATOR__>>" ;
 integratorAD="DiFfRG::Integrator4D"<>suffix<>"<autodiff::real, "<>kernelName<>"<__REGULATOR__>>" 
 ];
+];
 
 {integrator,integratorAD}
-]
+];
 
 
 (* ::Input::Initialization:: *)
 MakeKernelIntegrator[kernel_Association,parameterList_List]:=
-Module[{computeType,kernelName,className,integrator,integratorAD,argList,paramList,paramListAD,kernelFile,hhFile,ccFile,cuFile,hh,cc,cu},
+Module[{computeType,kernelName,className,integrator,integratorAD,gridSizes,argList,paramList,paramListAD,kernelFile,hhFile,ccFile,cuFile,hh,cc,cu},
 If[Not@IsValidKernelSpec[kernel],Print["Invalid kernel!"];Abort[]];
 If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abort[]];
 
@@ -1065,6 +1199,11 @@ kernelName=ToString[kernel["Name"]]<>"_kernel";
 className=ToString[kernel["Name"]]<>"_integrator"; 
 
 {integrator,integratorAD}=MakeIntegratorTypes[kernel];
+
+gridSizes=If[kernel["Type"]=!="CartesianQuadrature",
+kernel["Angles"]+1,
+kernel["d"]
+];
 
 argList=StringDrop[StringJoin[Table[""<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2];
 paramList=StringDrop[StringJoin[Table["const "<>CppType[computeType][parameterList[[i]]["Type"]]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2];
@@ -1096,7 +1235,7 @@ namespace DiFfRG
     class "<>className<>"
     {
     public:
-      "<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json);
+      "<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[gridSizes]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json);
       "<>className<>"(const "<>className<>"& other);
       ~"<>className<>"();
 
@@ -1140,8 +1279,8 @@ If[kernel["AD"],"
 ]<>"
 
       QuadratureProvider& quadrature_provider;
-      const std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> grid_sizes;
-      std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> jac_grid_sizes;
+      const std::array<uint, "<>ToString[gridSizes]<>"> grid_sizes;
+      std::array<uint, "<>ToString[gridSizes]<>"> jac_grid_sizes;
       const "<>computeType<>" x_extent;
       const "<>computeType<>" jacobian_quadrature_factor;
 	  const JSONValue json;
@@ -1165,12 +1304,12 @@ namespace DiFfRG
 {
   namespace Flows
   {
-    "<>className<>"::"<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json)
+    "<>className<>"::"<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[gridSizes]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json)
         : quadrature_provider(quadrature_provider), grid_sizes(grid_sizes), x_extent(x_extent), jacobian_quadrature_factor(json.get_double(\"/integration/jacobian_quadrature_factor\")), json(json)
     {
       integrator = std::make_unique<"<>integrator<>">(quadrature_provider, grid_sizes, x_extent, json);"<>
 If[kernel["AD"],"
-      for(uint i = 0; i < "<>ToString[kernel["Angles"]+1]<>"; ++i)
+      for(uint i = 0; i < "<>ToString[gridSizes]<>"; ++i)
         jac_grid_sizes[i] = uint(jacobian_quadrature_factor * grid_sizes[i]);
       integrator_AD = std::make_unique<"<>integratorAD<>">(quadrature_provider, jac_grid_sizes, x_extent, json);",
 ""
@@ -1727,7 +1866,7 @@ MakeKernelIntegratorFiniteTq0[kernel,parameterList];
 ];
 
 
-QuadTypes={"QMC","Constant","Quadrature"}
+QuadTypes={"QMC","Constant","Quadrature","CartesianQuadrature"}
 
 MakeKernel[kernel_Association, parameterList_List,integrandFlow_, constantFlow_:0., integrandDefinitions_String:"", constantDefinitions_String:""] := Module[{},
 If[Not@IsValidKernelSpecList[kernels],Print["DiFfRG::CodeTools::MakeKernel: Invalid kernels list!"];Abort[]];

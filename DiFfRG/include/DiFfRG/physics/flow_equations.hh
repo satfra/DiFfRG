@@ -1,13 +1,14 @@
 #pragma once
 
+// DiFfRG
+#include <DiFfRG/common/math.hh>
+#include <DiFfRG/common/utils.hh>
+#include <DiFfRG/physics/loop_integrals.hh>
+
 // external libraries
 #include <autodiff/forward/dual.hpp>
 #include <autodiff/forward/real.hpp>
 #include <deal.II/base/quadrature_lib.h>
-
-// DiFfRG
-#include <DiFfRG/common/utils.hh>
-#include <DiFfRG/physics/loop_integrals.hh>
 
 namespace DiFfRG
 {

@@ -1,5 +1,12 @@
 #!/bin/bash
 
+echo "Working directory is $(pwd)"
+SCRIPT_PATH="$(
+  cd -- "$(dirname "$0")" >/dev/null 2>&1
+  pwd -P
+)"
+source $SCRIPT_PATH/build_scripts/setup_permissions.sh
+
 # ##############################################################################
 # Utility
 # ##############################################################################
@@ -155,7 +162,6 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
 
   echo "Installing..."
   SuperUser=$(get_execution_permissions $INSTALL_PATH)
-  $SuperUser mkdir -p $INSTALL_PATH
   $SuperUser make install -j ${THREADS} &>${LOGPATH}/DiFfRG_install.log
   $SuperUser cp -r ${SCRIPTPATH}/python ${idir}/
 

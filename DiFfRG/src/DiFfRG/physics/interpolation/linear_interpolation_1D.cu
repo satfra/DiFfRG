@@ -26,7 +26,7 @@ namespace DiFfRG
     m_data = std::shared_ptr<NT[]>(new NT[size]);
     for (uint i = 0; i < size; ++i)
       m_data[i] = NT(in_data[i]);
-      // Create the thrust::device_vector
+    // Create the thrust::device_vector
 #ifdef __CUDACC__
     device_data = std::shared_ptr<thrust::device_vector<NT>>(new thrust::device_vector<NT>());
     device_data->resize(size);
@@ -78,10 +78,20 @@ namespace DiFfRG
   template class LinearInterpolator1D<float, LogarithmicCoordinates1D<float>>;
   template class LinearInterpolator1D<autodiff::real, LogarithmicCoordinates1D<float>>;
 
+  template class LinearInterpolator1D<complex<double>, LinearCoordinates1D<float>>;
+  template class LinearInterpolator1D<cxReal, LinearCoordinates1D<float>>;
+  template class LinearInterpolator1D<complex<double>, LogarithmicCoordinates1D<float>>;
+  template class LinearInterpolator1D<cxReal, LogarithmicCoordinates1D<float>>;
+
   template class LinearInterpolator1D<double, LinearCoordinates1D<double>>;
   template class LinearInterpolator1D<float, LinearCoordinates1D<double>>;
   template class LinearInterpolator1D<autodiff::real, LinearCoordinates1D<double>>;
   template class LinearInterpolator1D<double, LogarithmicCoordinates1D<double>>;
   template class LinearInterpolator1D<float, LogarithmicCoordinates1D<double>>;
   template class LinearInterpolator1D<autodiff::real, LogarithmicCoordinates1D<double>>;
+
+  template class LinearInterpolator1D<complex<double>, LinearCoordinates1D<double>>;
+  template class LinearInterpolator1D<cxReal, LinearCoordinates1D<double>>;
+  template class LinearInterpolator1D<complex<double>, LogarithmicCoordinates1D<double>>;
+  template class LinearInterpolator1D<cxReal, LogarithmicCoordinates1D<double>>;
 } // namespace DiFfRG

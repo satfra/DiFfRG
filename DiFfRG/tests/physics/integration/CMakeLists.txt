@@ -41,6 +41,15 @@ setup_test(test_integrator_4D_2ang_cpu)
 add_executable(test_integrator_4D_qmc integrator_4D_qmc.cc)
 setup_test(test_integrator_4D_qmc)
 
+add_executable(test_integrator_1D_cartesian_cpu integrator_1D_cartesian_cpu.cc)
+setup_test(test_integrator_1D_cartesian_cpu)
+
+add_executable(test_integrator_2D_cartesian_cpu integrator_2D_cartesian_cpu.cc)
+setup_test(test_integrator_2D_cartesian_cpu)
+
+add_executable(test_integrator_3D_cartesian_cpu integrator_3D_cartesian_cpu.cc)
+setup_test(test_integrator_3D_cartesian_cpu)
+
 # ##############################################################################
 # Tests on GPU
 # ##############################################################################
@@ -81,6 +90,18 @@ if(USE_CUDA)
 
   add_executable(test_integrator_4D_qmc_gpu integrator_4D_qmc.cu)
   setup_test(test_integrator_4D_qmc_gpu)
+
+  add_executable(test_integrator_1D_cartesian_gpu
+                 integrator_1D_cartesian_gpu.cu)
+  setup_test(test_integrator_1D_cartesian_gpu)
+
+  add_executable(test_integrator_2D_cartesian_gpu
+                 integrator_2D_cartesian_gpu.cu)
+  setup_test(test_integrator_2D_cartesian_gpu)
+
+  add_executable(test_integrator_3D_cartesian_gpu
+                 integrator_3D_cartesian_gpu.cu)
+  setup_test(test_integrator_3D_cartesian_gpu)
 endif()
 
 # ##############################################################################

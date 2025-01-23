@@ -21,7 +21,16 @@ namespace DiFfRG
   template <int d, typename NT, typename KERNEL> class IntegratorGPU
   {
   public:
+    /**
+     * @brief Numerical type to be used for integration tasks e.g. the argument or possible jacobians.
+     */
     using ctype = typename get_type::ctype<NT>;
+
+    /**
+     * @brief Custom functor for the thrust::transform_reduce function.
+     *
+     * @tparam T The types of the additional arguments to the kernel.
+     */
     template <typename... T> struct functor {
     public:
       functor(const ctype *x_quadrature_p, const ctype *x_quadrature_w, const ctype x_extent, const ctype k, T... t)
@@ -77,6 +86,16 @@ namespace DiFfRG
     {
     }
 
+    /**
+     * @brief Get the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return NT Integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> NT get(const ctype k, const T &...t) const
     {
       return KERNEL::constant(k, t...) +
@@ -86,6 +105,16 @@ namespace DiFfRG
                  functor<T...>(ptr_x_quadrature_p, ptr_x_quadrature_w, x_extent, k, t...), NT(0), thrust::plus<NT>());
     }
 
+    /**
+     * @brief Request a future for the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return std::future<NT> future holding the integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> std::future<NT> request(const ctype k, const T &...t) const
     {
       return std::async(std::launch::deferred, [=, this]() { return get(k, t...); });

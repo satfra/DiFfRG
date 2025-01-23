@@ -20,7 +20,7 @@ endif()
 message(STATUS "DiFfRG include directory: ${BASE_DIR}/include")
 
 # No matter what we are building, we need to set the include directory
-#include_directories(${BASE_DIR}/include)
+# include_directories(${BASE_DIR}/include)
 
 # By default, we build in Release mode, i.e. if the user does not make any other
 # choice. After all, even if the user is unaware of cmake build types, we want
@@ -261,7 +261,7 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER)
     target_link_libraries(${TARGET} spdlog::spdlog)
     target_link_libraries(${TARGET} rmm::rmm)
     target_link_libraries(${TARGET} ${Boost_LIBRARIES})
-    target_link_libraries(${TARGET} tbb)
+    target_link_libraries(${TARGET} TBB::tbb)
   endfunction()
 
   message(STATUS "CUDA support enabled.")
@@ -284,7 +284,7 @@ else()
 
     target_link_libraries(${TARGET} GSL::gsl)
     target_link_libraries(${TARGET} Eigen3)
-    target_link_libraries(${TARGET} tbb)
+    target_link_libraries(${TARGET} TBB::tbb)
     target_link_libraries(${TARGET} spdlog::spdlog)
     target_link_libraries(${TARGET} ${Boost_LIBRARIES})
   endfunction()
@@ -325,7 +325,6 @@ if(USE_CUDA)
     Off
     OPTIONS
     "BUILD_TESTS OFF")
-
 endif()
 
 cpmaddpackage(

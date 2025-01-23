@@ -94,6 +94,51 @@ namespace DiFfRG
     bool get_bool(const std::string &key) const;
 
     /**
+     * @brief Get the value of a key in the json object, with a default value.
+     *
+     * @param key The key to get the value for. Format: "/category/subcategory/.../key".
+     * @param def The default value to return if the key is not found.
+     * @return double The value.
+     */
+    double get_double(const std::string &key, const double def) const;
+
+    /**
+     * @brief Get the value of a key in the json object, with a default value.
+     *
+     * @param key The key to get the value for. Format: "/category/subcategory/.../key".
+     * @param def The default value to return if the key is not found.
+     * @return int The value.
+     */
+    int get_int(const std::string &key, const int def) const;
+
+    /**
+     * @brief Get the value of a key in the json object, with a default value.
+     *
+     * @param key The key to get the value for. Format: "/category/subcategory/.../key".
+     * @param def The default value to return if the key is not found.
+     * @return uint The value.
+     */
+    uint get_uint(const std::string &key, const uint def) const;
+
+    /**
+     * @brief Get the value of a key in the json object, with a default value.
+     *
+     * @param key The key to get the value for. Format: "/category/subcategory/.../key".
+     * @param def The default value to return if the key is not found.
+     * @return std::string The value.
+     */
+    std::string get_string(const std::string &key, const std::string &def) const;
+
+    /**
+     * @brief Get the value of a key in the json object, with a default value.
+     *
+     * @param key The key to get the value for. Format: "/category/subcategory/.../key".
+     * @param def The default value to return if the key is not found.
+     * @return bool The value.
+     */
+    bool get_bool(const std::string &key, const bool def) const;
+
+    /**
      * @brief Set the value of a key in the json object.
      *
      * @param key The key to set the value for. Format: "/category/subcategory/.../key".

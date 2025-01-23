@@ -14,9 +14,23 @@
 
 namespace DiFfRG
 {
+  /**
+   * @brief GPU integrator for the integration of a 4D function with three angles with quasi-Monte-Carlo. Calculates
+   * \f[
+   *    \int dp\, d\text{cos}_1\, d\text{cos}_2\, d\phi\, \frac{1}{(2\pi)^4} \sqrt{1-\text{cos}_1^2} f(p,
+   * \text{cos}_1, \text{cos}_2, \phi, ...) + c
+   * \f]
+   * with \f$ p^2 \f$ bounded by \f$ \text{x_extent} * k^2 \f$.
+   *
+   * @tparam NT The numerical type of the result.
+   * @tparam KERNEL The kernel to integrate.
+   */
   template <typename NT, typename KERNEL> class Integrator4DQMC
   {
   public:
+    /**
+     * @brief Numerical type to be used for integration tasks e.g. the argument or possible jacobians.
+     */
     using ctype = typename get_type::ctype<NT>;
 
     template <typename... Args> class Functor
@@ -92,6 +106,16 @@ namespace DiFfRG
       }
     }
 
+    /**
+     * @brief Get the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return NT Integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> NT get(const ctype k, const T &...t) const
     {
       Functor<T...> functor(x_extent, k, t...);
@@ -102,6 +126,16 @@ namespace DiFfRG
       return constant + result.integral;
     }
 
+    /**
+     * @brief Request a future for the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return std::future<NT> future holding the integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> std::future<NT> request(const ctype k, const T &...t) const
     {
       const NT constant = KERNEL::constant(k, t...);

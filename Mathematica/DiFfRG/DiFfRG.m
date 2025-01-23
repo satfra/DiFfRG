@@ -87,9 +87,27 @@ StyleBox[\"TensorBases\",\nFontWeight->\"Bold\"]\) to run."];Abort[];
 ];
 
 
+Print["\!\(\*
+StyleBox[\"Loading\",\nFontSize->10,\nFontSlant->\"Italic\"]\)\!\(\*
+StyleBox[\" \",\nFontSize->10,\nFontSlant->\"Italic\"]\)\!\(\*
+StyleBox[\"external\",\nFontSize->10,\nFontSlant->\"Italic\"]\)\!\(\*
+StyleBox[\" \",\nFontSize->10,\nFontSlant->\"Italic\"]\)\!\(\*
+StyleBox[\"packages\",\nFontSize->10,\nFontSlant->\"Italic\"]\)"];
 Get["QMeSderivation`"]
+Print["\!\(\*
+StyleBox[\"QMeS\",\nFontSize->10,\nFontSlant->\"Italic\"]\)\!\(\*
+StyleBox[\" \",\nFontSize->10,\nFontSlant->\"Italic\"]\)\!\(\*
+StyleBox[\"loaded\",\nFontSize->10,\nFontSlant->\"Italic\"]\)"];
 Get["TensorBases`"]
+Print["\!\(\*
+StyleBox[\"TensorBases\",\nFontSize->10,\nFontSlant->\"Italic\"]\)\!\(\*
+StyleBox[\" \",\nFontSize->10,\nFontSlant->\"Italic\"]\)\!\(\*
+StyleBox[\"loaded\",\nFontSize->10,\nFontSlant->\"Italic\"]\)"];
 Get["DiFfRG`CodeTools`"];
+Print["\!\(\*
+StyleBox[\"CodeTools\",\nFontSize->10,\nFontSlant->\"Italic\"]\)\!\(\*
+StyleBox[\" \",\nFontSize->10,\nFontSlant->\"Italic\"]\)\!\(\*
+StyleBox[\"loaded\",\nFontSize->10,\nFontSlant->\"Italic\"]\)"];
 
 
 (* ::Input::Initialization:: *)
@@ -217,9 +235,11 @@ DeleteDirectory[GetDirectory[]~~"TraceBuffer/"~~name~~"/",DeleteContents->True]/
 
 
 MatsubaraSum[expr_,p0_Symbol,T_]:=Module[{denom,poles,residues,n,r,SumB},
-If[Head[expr]==Plus,Return[Total[Flatten[Map[MatsubaraSum[#,p0]&,List@@expr],1]]]];denom = Denominator[expr]//Collect[#,p0]&;
+If[Head[expr]==Plus,Return[Total[Flatten[Map[MatsubaraSum[#,p0,T]&,List@@expr],1]]]];denom = Denominator[expr]//Collect[#,p0]&;
 poles = p0/.{ToRules[Reduce[Reduce[denom==0,p0]//FullSimplify,p0]]};
-poles = Assuming[T>0&&_Symbol\[Element]Reals,poles//FullSimplify];residues={};For[n=1,n<=Length[poles],n++,
+poles = Assuming[T>0&&_Symbol\[Element]Reals,poles//FullSimplify];
+
+residues={};For[n=1,n<=Length[poles],n++,
 r=Simplify[Residue[expr Coth[(I p0)/(2T)],{p0,poles[[n]]}]];
 AppendTo[residues,r];];
 SumB=1/(2I) TrigReduce[residues];
