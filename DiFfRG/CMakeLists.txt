@@ -71,7 +71,6 @@ add_subdirectory(src)
 # ##############################################################################
 
 option(DiFfRG_BUILD_TESTS "Build tests" ON)
-
 if(DiFfRG_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
@@ -101,10 +100,9 @@ install(
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/DiFfRG)
 
 # Install Config and ConfigVersion files
-install(
-  FILES "${CMAKE_CURRENT_BINARY_DIR}/DiFfRGConfig.cmake"
-        "${CMAKE_CURRENT_BINARY_DIR}/DiFfRGConfigVersion.cmake"
-  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/DiFfRG")
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/DiFfRGConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/DiFfRGConfigVersion.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/DiFfRG")
 
 # ##############################################################################
 # licenses
@@ -120,9 +118,9 @@ set(CPM_PACKAGE_boost_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../external/boost)
 cpmaddpackage(NAME CPMLicenses.cmake GITHUB_REPOSITORY
               cpm-cmake/CPMLicenses.cmake VERSION 0.0.5)
 
-message("deal.II source directory: ${deal.II_SOURCE_DIR}")
+message(STATUS "deal.II source directory: ${CPM_PACKAGE_deal.II_SOURCE_DIR}")
 
-message("packages: ${CPM_PACKAGES};deal.II;sundials;boost")
+message(STATUS "packages: ${CPM_PACKAGES};deal.II;sundials;boost")
 
 cpm_licenses_create_disclaimer_target(
   write-licenses "${CMAKE_CURRENT_SOURCE_DIR}/../third_party.txt"

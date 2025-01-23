@@ -24,6 +24,9 @@ namespace DiFfRG
   template <typename NT, typename KERNEL> class Integrator2Dpx0TBB
   {
   public:
+    /**
+     * @brief Numerical type to be used for integration tasks e.g. the argument or possible jacobians.
+     */
     using ctype = typename get_type::ctype<NT>;
 
     /**

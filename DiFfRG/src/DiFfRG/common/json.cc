@@ -97,7 +97,6 @@ namespace DiFfRG
       ss << "  Error: " << e.what() << std::endl;
       throw std::runtime_error(ss.str());
     }
-    return value.at_pointer(key).as_double();
   }
 
   int JSONValue::get_int(const std::string &key) const
@@ -150,6 +149,53 @@ namespace DiFfRG
       ss << "  At Key: " << key << std::endl;
       ss << "  Error: " << e.what() << std::endl << std::endl;
       throw std::runtime_error(ss.str());
+    }
+  }
+
+  double JSONValue::get_double(const std::string &key, const double def) const
+  {
+    try {
+      return value.at_pointer(key).as_double();
+    } catch (const std::exception &e) {
+      return def;
+    }
+    return value.at_pointer(key).as_double();
+  }
+
+  int JSONValue::get_int(const std::string &key, const int def) const
+  {
+    try {
+      return value.at_pointer(key).as_int64();
+    } catch (const std::exception &e) {
+      return def;
+    }
+  }
+
+  uint JSONValue::get_uint(const std::string &key, const uint def) const
+  {
+    try {
+      const int val = value.at_pointer(key).as_int64();
+      return val >= 0 ? val : throw std::runtime_error("Value is negative");
+    } catch (const std::exception &e) {
+      return def;
+    }
+  }
+
+  std::string JSONValue::get_string(const std::string &key, const std::string &def) const
+  {
+    try {
+      return value.at_pointer(key).as_string().c_str();
+    } catch (const std::exception &e) {
+      return def;
+    }
+  }
+
+  bool JSONValue::get_bool(const std::string &key, const bool def) const
+  {
+    try {
+      return value.at_pointer(key).as_bool();
+    } catch (const std::exception &e) {
+      return def;
     }
   }
 

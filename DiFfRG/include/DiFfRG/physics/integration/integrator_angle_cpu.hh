@@ -11,9 +11,22 @@
 
 namespace DiFfRG
 {
+  /**
+   * @brief Integrator for the integration of a function with one angle with TBB. Calculates
+   * \f[
+   *    \int dp\, d\text{cos}\, \frac{1}{(2\pi)^d} f(p, \text{cos}, ...) + c
+   * \f]
+   * with \f$ p^2 \f$ bounded by \f$ \text{x_extent} * k^2 \f$.
+   *
+   * @tparam NT The numerical type of the result.
+   * @tparam KERNEL The kernel to integrate.
+   */
   template <int d, typename NT, typename KERNEL> class IntegratorAngleTBB
   {
   public:
+    /**
+     * @brief Numerical type to be used for integration tasks e.g. the argument or possible jacobians.
+     */
     using ctype = typename get_type::ctype<NT>;
 
     IntegratorAngleTBB(QuadratureProvider &quadrature_provider, const std::array<uint, 2> grid_sizes,
@@ -33,6 +46,16 @@ namespace DiFfRG
       (void)max_block_size;
     }
 
+    /**
+     * @brief Get the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return NT Integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> NT get(const ctype k, const T &...t) const
     {
       const ctype S_d = 2 * std::pow(M_PI, d / 2.) / std::tgamma(d / 2.);
@@ -60,6 +83,16 @@ namespace DiFfRG
                             [&](NT x, NT y) -> NT { return x + y; });
     }
 
+    /**
+     * @brief Request a future for the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return std::future<NT> future holding the integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> std::future<NT> request(const ctype k, const T &...t) const
     {
       return std::async(std::launch::deferred, [=, this]() { return get(k, t...); });

@@ -1,14 +1,15 @@
 #pragma once
 
+// DiFfRG
+#include <DiFfRG/common/cuda_prefix.hh>
+#include <DiFfRG/common/math.hh>
+#include <DiFfRG/physics/interpolation/common.hh>
+
 // standard library
 #include <memory>
 
 // external libraries
 #include <autodiff/forward/real.hpp>
-
-// DiFfRG
-#include <DiFfRG/common/cuda_prefix.hh>
-#include <DiFfRG/physics/interpolation/common.hh>
 
 namespace DiFfRG
 {
@@ -86,10 +87,10 @@ namespace DiFfRG
     {
 #ifdef __CUDA_ARCH__
       if constexpr (std::is_same_v<ReturnType, autodiff::real>)
-        return std::array<double, 2>{tex1D<float>(texture[0], coordinates.backward(x) + 0.5),
-                                     tex1D<float>(texture_AD[0], coordinates.backward(x) + 0.5)};
+        return std::array<double, 2>{tex1D<float>(texture[0], coordinates.backward(x) + 0.5f),
+                                     tex1D<float>(texture_AD[0], coordinates.backward(x) + 0.5f)};
       else if constexpr (std::is_same_v<ReturnType, float>)
-        return tex1D<float>(texture[0], coordinates.backward(x) + 0.5);
+        return tex1D<float>(texture[0], coordinates.backward(x) + 0.5f);
 #else
       float idx = coordinates.backward(x);
       idx = std::max(0.f, std::min(idx, static_cast<float>(size - 1)));

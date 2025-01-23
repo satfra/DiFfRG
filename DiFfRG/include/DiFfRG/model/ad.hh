@@ -1,5 +1,9 @@
 #pragma once
 
+// DiFfRG
+#include <DiFfRG/common/math.hh>
+#include <DiFfRG/common/utils.hh>
+
 // external libraries
 #include <autodiff/forward/dual.hpp>
 #include <autodiff/forward/real.hpp>
@@ -8,9 +12,6 @@
 #include <deal.II/lac/full_matrix.h>
 #include <deal.II/lac/vector.h>
 #include <tbb/tbb.h>
-
-// DiFfRG
-#include <DiFfRG/common/utils.hh>
 
 namespace DiFfRG
 {

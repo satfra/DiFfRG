@@ -1,19 +1,19 @@
 #pragma once
 
+// DiFfRG
+#include <DiFfRG/common/complex_math.hh>
+#include <DiFfRG/common/cuda_prefix.hh>
+#include <DiFfRG/common/utils.hh>
+
 // standard library
 #include <cmath>
+#include <type_traits>
 
 // external libraries
 #include <Eigen/Dense>
 #include <autodiff/forward/real.hpp>
 #include <deal.II/lac/block_vector.h>
 #include <deal.II/lac/vector.h>
-
-// DiFfRG
-#include <DiFfRG/common/complex_math.hh>
-#include <DiFfRG/common/cuda_prefix.hh>
-#include <DiFfRG/common/utils.hh>
-#include <type_traits>
 
 namespace DiFfRG
 {

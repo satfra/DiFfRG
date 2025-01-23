@@ -14,6 +14,9 @@ namespace DiFfRG
   template <typename NT, typename KERNEL> class Integrator3Dpx0TBB
   {
   public:
+    /**
+     * @brief Numerical type to be used for integration tasks e.g. the argument or possible jacobians.
+     */
     using ctype = typename get_type::ctype<NT>;
 
     Integrator3Dpx0TBB(QuadratureProvider &quadrature_provider, const std::array<uint, 4> grid_sizes,
@@ -71,6 +74,16 @@ namespace DiFfRG
                             [&](NT x, NT y) -> NT { return x + y; });
     }
 
+    /**
+     * @brief Request a future for the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return std::future<NT> future holding the integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> std::future<NT> request(const ctype k, const T &...t) const
     {
       return std::async(std::launch::deferred, [=, this]() { return get(k, t...); });

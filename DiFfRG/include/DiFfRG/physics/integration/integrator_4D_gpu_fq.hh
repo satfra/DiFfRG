@@ -25,6 +25,9 @@ namespace DiFfRG
     using PoolMR = rmm::mr::pool_memory_resource<rmm::mr::device_memory_resource>;
 
   public:
+    /**
+     * @brief Numerical type to be used for integration tasks e.g. the argument or possible jacobians.
+     */
     using ctype = typename get_type::ctype<NT>;
 
     template <typename... T> struct functor {
@@ -123,6 +126,16 @@ namespace DiFfRG
       threads_per_block = other.threads_per_block;
     }
 
+    /**
+     * @brief Get the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return NT Integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> NT get(const ctype k, const T &...t) const
     {
       const int m_device = evaluations++ % n_devices;
@@ -142,6 +155,16 @@ namespace DiFfRG
                                       functor<T...>(x_extent, k, t...), NT(0), thrust::plus<NT>());
     }
 
+    /**
+     * @brief Request a future for the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return std::future<NT> future holding the integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> std::future<NT> request(const ctype k, const T &...t) const
     {
       const int m_device = evaluations++ % n_devices;

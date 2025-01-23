@@ -219,11 +219,11 @@ namespace DiFfRG
         stuck_t = t;
       }
 
-      if (!is_close(t, t_start) && stuck > 50)
+      if (!is_close(t, t_start) && stuck > 100)
         throw std::runtime_error("timestepping got stuck at t = " + std::to_string(t));
       if (is_close(t, t_start) && stuck > 200)
         throw std::runtime_error("timestepping got stuck at t = " + std::to_string(t));
-      if (failure_counter > 50) {
+      if (failure_counter > 200) {
         std::cerr << "timestep failure, at t = " << t << std::endl;
         throw std::runtime_error("timestep failure, at t = " + std::to_string(t));
       }
@@ -260,7 +260,7 @@ namespace DiFfRG
     // Calculate the jacobian d(y_dot + F(y))/dy + d(y_dot*alpha)/dy_dot
     time_stepper.setup_jacobian = [&](const double t, const VectorType &y, const VectorType &y_dot,
                                       const double alpha) -> int {
-      if (failure_counter > 50) throw std::runtime_error("timestep failure at jacobian");
+      if (failure_counter > 200) throw std::runtime_error("timestep failure at jacobian");
 
       try {
         auto now = std::chrono::high_resolution_clock::now();

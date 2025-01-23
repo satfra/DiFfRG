@@ -1,5 +1,8 @@
 #pragma once
 
+// DiFfRG
+#include <DiFfRG/common/math.hh>
+
 // external libraries
 #include <autodiff/forward/real.hpp>
 #include <deal.II/lac/block_sparse_matrix.h>
@@ -75,12 +78,28 @@ namespace DiFfRG
         using value = double;
       };
 
-      template <> struct _ctype<autodiff::Real<1, double>> {
+      template <> struct _ctype<complex<float>> {
+        using value = float;
+      };
+
+      template <> struct _ctype<complex<double>> {
         using value = double;
       };
 
       template <> struct _ctype<autodiff::Real<1, float>> {
         using value = float;
+      };
+
+      template <> struct _ctype<autodiff::Real<1, double>> {
+        using value = double;
+      };
+
+      template <> struct _ctype<autodiff::Real<1, complex<float>>> {
+        using value = float;
+      };
+
+      template <> struct _ctype<autodiff::Real<1, complex<double>>> {
+        using value = double;
       };
     } // namespace internal
 

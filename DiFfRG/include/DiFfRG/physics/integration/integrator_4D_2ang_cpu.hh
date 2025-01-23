@@ -11,9 +11,23 @@
 
 namespace DiFfRG
 {
+  /**
+   * @brief Integrator for the integration of a 4D function with two angles with CUDA. Calculates
+   * \f[
+   *    2\pi\,\int dp\, d\text{cos}_1\, d\text{cos}_2\, \frac{1}{(2\pi)^4} \sqrt{1-\text{cos}_1^2} f(p,
+   * \text{cos}_1, \text{cos}_2, ...) + c
+   * \f]
+   * with \f$ p^2 \f$ bounded by \f$ \text{x_extent} * k^2 \f$.
+   *
+   * @tparam NT The numerical type of the result.
+   * @tparam KERNEL The kernel to integrate.
+   */
   template <typename NT, typename KERNEL> class Integrator4D2AngTBB
   {
   public:
+    /**
+     * @brief Numerical type to be used for integration tasks e.g. the argument or possible jacobians.
+     */
     using ctype = typename get_type::ctype<NT>;
 
     Integrator4D2AngTBB(QuadratureProvider &quadrature_provider, const std::array<uint, 3> grid_sizes,
@@ -35,6 +49,16 @@ namespace DiFfRG
       (void)max_block_size;
     }
 
+    /**
+     * @brief Get the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return NT Integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> NT get(const ctype k, const T &...t) const
     {
       using std::sqrt;
@@ -66,6 +90,16 @@ namespace DiFfRG
                  [&](NT x, NT y) -> NT { return x + y; });
     }
 
+    /**
+     * @brief Request a future for the integral of the kernel.
+     *
+     * @tparam T Types of the parameters for the kernel.
+     * @param k RG-scale.
+     * @param t Parameters forwarded to the kernel.
+     *
+     * @return std::future<NT> future holding the integral of the kernel plus the constant part.
+     *
+     */
     template <typename... T> std::future<NT> request(const ctype k, const T &...t) const
     {
       return std::async(std::launch::deferred, [=, this]() { return get(k, t...); });

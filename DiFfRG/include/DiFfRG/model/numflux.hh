@@ -48,7 +48,7 @@ namespace DiFfRG
         std::array<Tensor<1, dim, NumberType>, Components::count_fe_functions(0)> dflux_s{};
         std::array<Tensor<1, dim, NumberType>, Components::count_fe_functions(0)> dflux_n{};
         for (uint i = 0; i < Model::Components::count_fe_functions(0); ++i) {
-          auto du = 1e-9 * (0.5 * (abs(u_s[i]) + abs(u_n[i])) + 1e-6);
+          auto du = 1e-5 * (0.5 * (abs(u_s[i]) + abs(u_n[i])) + 1e-9);
           du_s[i] += du;
           du_n[i] += du;
           asImp().flux(dflux_s, p, Solutions_s::as(std::tuple_cat(std::tie(du_s), tuple_tail(sol_s))));
