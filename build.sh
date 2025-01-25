@@ -118,7 +118,7 @@ if [[ ${install_dir} != "n" ]] && [[ ${install_dir} != "N" ]]; then
   start=$(date +%s)
   cd ${SCRIPTPATH}/external
   echo "Installing dependencies..."
-  ./install.sh -i ${idir}/bundled -j ${threads} ${cuda_flag} 2>&1 | tee ${LOGPATH}/DiFfRG_dependencies_install.log
+  bash ./install.sh -i ${idir}/bundled -j ${threads} ${cuda_flag} 2>&1 | tee ${LOGPATH}/DiFfRG_dependencies_install.log
   end=$(date +%s)
   runtime=$((end - start))
   elapsed="Elapsed: $(($runtime / 3600))hrs $((($runtime / 60) % 60))min $(($runtime % 60))sec"
@@ -131,12 +131,12 @@ fi
 # ##############################################################################
 
 if [[ "$full_inst" == "y" ]] && [[ "$install_dir" != "" ]]; then
-  ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag} ${config_flag} -i ${install_dir}
+  bash ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag} ${config_flag} -i ${install_dir}
 else
   if [[ "$full_inst" == "y" ]]; then
-    ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag} ${config_flag}
+    bash ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag} ${config_flag}
   else
-    ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} ${config_flag}
+    bash ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} ${config_flag}
   fi
 fi
 
