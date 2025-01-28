@@ -21,7 +21,7 @@ namespace DiFfRG
    * - RF(k2, q2) = \f$ p r_F(k^2,p^2) \f$
    * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
    */
-  struct LitimRegulator {
+  template <class Dummy = void> struct LitimRegulator {
     template <typename NT1, typename NT2> static __forceinline__ __device__ __host__ auto RB(const NT1 k2, const NT2 q2)
     {
       return (k2 - q2) * (k2 > q2);
