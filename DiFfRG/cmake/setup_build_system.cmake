@@ -335,7 +335,7 @@ cpmaddpackage(
   VERSION
   1.14.1
   OPTIONS
-  "CMAKE_BUILD_TYPE Release"
+#  "CMAKE_BUILD_TYPE Release"
   "SPDLOG_INSTALL ON")
 
 # ##############################################################################
