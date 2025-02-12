@@ -15,19 +15,35 @@ namespace DiFfRG
     using namespace dealii;
 
     struct PhysicalParameters {
-      double initial_x0 = 0.;
-      double initial_x1 = 1.;
-      double initial_x2 = 0.;
-      double initial_x3 = 0.;
+      std::array<double, 3> initial_x0{{0., 0., 0.}};
+      std::array<double, 3> initial_x1{{0., 0., 0.}};
+      std::array<double, 3> initial_x2{{0., 0., 0.}};
+      std::array<double, 3> initial_x3{{0., 0., 0.}};
     };
 
-    template <uint dim>
+    template <uint components> struct compFactory {
+      using value = ComponentDescriptor<FEFunctionDescriptor<>>;
+    };
+
+    template <> struct compFactory<1> {
+      using value = ComponentDescriptor<FEFunctionDescriptor<Scalar<"u">>>;
+    };
+
+    template <> struct compFactory<2> {
+      using value = ComponentDescriptor<FEFunctionDescriptor<Scalar<"u">, Scalar<"v">>>;
+    };
+
+    template <> struct compFactory<3> {
+      using value = ComponentDescriptor<FEFunctionDescriptor<Scalar<"u">, Scalar<"v">, Scalar<"w">>>;
+    };
+
+    template <uint dim, uint components = 1>
     class ModelConstant
-        : public def::AbstractModel<ModelConstant<dim>, ComponentDescriptor<FEFunctionDescriptor<Scalar<"u">>>>,
-          public def::Time,                               // this handles time
-          public def::NoNumFlux<ModelConstant<dim>>,      // use no numflux
-          public def::FlowBoundaries<ModelConstant<dim>>, // use Inflow/Outflow boundaries
-          public def::AD<ModelConstant<dim>>              // define all jacobians per AD
+        : public def::AbstractModel<ModelConstant<dim, components>, typename compFactory<components>::value>,
+          public def::Time,                                           // this handles time
+          public def::NoNumFlux<ModelConstant<dim, components>>,      // use no numflux
+          public def::FlowBoundaries<ModelConstant<dim, components>>, // use Inflow/Outflow boundaries
+          public def::AD<ModelConstant<dim, components>>              // define all jacobians per AD
     {
     public:
       const PhysicalParameters prm;
@@ -35,9 +51,25 @@ namespace DiFfRG
       ModelConstant(PhysicalParameters prm) : prm(prm) {}
       template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
       {
-        values[0] = prm.initial_x0 + prm.initial_x1 * pos[0];
+        for (uint c = 0; c < components; ++c)
+          values[c] = prm.initial_x0[c] + prm.initial_x1[c] * pos[c];
       }
-      double solution(const Point<dim> &pos) const { return prm.initial_x0 + prm.initial_x1 * pos[0]; }
+
+      template <typename Vector> std::array<double, dim> EoM(const Point<dim> &x, const Vector &u) const
+      {
+        // Just to avoid warnings
+        (void)x;
+        if constexpr (dim == 1)
+          return std::array<double, dim>{{u[0]}};
+        else if constexpr (dim == 2) {
+          return std::array<double, dim>{{u[0], u[1]}};
+        } else if constexpr (dim == 3)
+          return std::array<double, dim>{{u[0], u[1], u[2]}};
+        else
+          throw std::runtime_error("Only 1, 2, and 3 dimensions are supported.");
+      }
+
+      double solution(const Point<dim> &pos) const { return prm.initial_x0[0] + prm.initial_x1[0] * pos[0]; }
     };
 
     template <uint dim>
@@ -56,9 +88,9 @@ namespace DiFfRG
       LDGModelConstant(PhysicalParameters prm) : prm(prm) {}
       template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
       {
-        values[0] = prm.initial_x0 + prm.initial_x1 * pos[0];
+        values[0] = prm.initial_x0[0] + prm.initial_x1[0] * pos[0];
       }
-      double solution(const Point<dim> &pos) const { return prm.initial_x0 + prm.initial_x1 * pos[0]; }
+      double solution(const Point<dim> &pos) const { return prm.initial_x0[0] + prm.initial_x1[0] * pos[0]; }
       template <uint dependent, int mdim, typename NumberType, typename Solutions_s, typename Solutions_n>
       void ldg_numflux(std::array<Tensor<1, mdim, NumberType>, 1> &, const Tensor<1, mdim> &, const Point<mdim> &,
                        const Solutions_s &, const Solutions_n &) const
@@ -81,10 +113,13 @@ namespace DiFfRG
 
       template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
       {
-        values[0] = prm.initial_x0 + prm.initial_x1 * pos[0];
+        values[0] = prm.initial_x0[0] + prm.initial_x1[0] * pos[0];
       }
 
-      double solution(const Point<dim> &pos) const { return std::exp(t) * (prm.initial_x0 + prm.initial_x1 * pos[0]); }
+      double solution(const Point<dim> &pos) const
+      {
+        return std::exp(t) * (prm.initial_x0[0] + prm.initial_x1[0] * pos[0]);
+      }
 
       template <typename NT, typename Solution>
       void source(std::array<NT, 1> &s_i, const Point<dim> & /*p*/, const Solution &sol) const
@@ -110,12 +145,12 @@ namespace DiFfRG
 
       template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
       {
-        values[0] = prm.initial_x0 + prm.initial_x1 * pos[0];
+        values[0] = prm.initial_x0[0] + prm.initial_x1[0] * pos[0];
       }
 
       double solution(const Point<dim> &pos) const
       {
-        return (prm.initial_x0 + prm.initial_x1 * pos[0]) / (prm.initial_x1 * t + 1.);
+        return (prm.initial_x0[0] + prm.initial_x1[0] * pos[0]) / (prm.initial_x1[0] * t + 1.);
       }
 
       template <typename NT, typename Solution>

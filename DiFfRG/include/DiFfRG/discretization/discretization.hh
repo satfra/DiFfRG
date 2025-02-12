@@ -1,6 +1,6 @@
 #pragma once
 
-//#include <DiFfRG/discretization/FV/discretization.hh>
+// #include <DiFfRG/discretization/FV/discretization.hh>
 
 #include <DiFfRG/discretization/FEM/cg.hh>
 #include <DiFfRG/discretization/FEM/dg.hh>
@@ -19,4 +19,4 @@
 #include <DiFfRG/discretization/grid/coordinates.hh>
 #include <DiFfRG/discretization/grid/stack_coordinates.hh>
 
-#include <DiFfRG/discretization/common/utils.hh>
+#include <DiFfRG/discretization/common/EoM.hh>
