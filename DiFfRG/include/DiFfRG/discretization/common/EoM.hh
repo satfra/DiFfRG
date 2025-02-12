@@ -121,16 +121,31 @@ namespace DiFfRG
     constexpr uint dim = 1;
 
     using namespace dealii;
-    using CellIterator = typename dealii::DoFHandler<1>::cell_iterator;
+    using CellIterator = typename dealii::DoFHandler<dim>::cell_iterator;
+    using EoMType = std::array<double, dim>;
+
     auto EoM = Point<dim>();
     Vector<typename VectorType::value_type> values(dof_handler.get_fe().n_components());
+    Functions::FEFieldFunction<dim, VectorType> fe_function(dof_handler, sol, mapping);
 
     // We start by investigating the origin.
     const auto origin = internal::get_origin(dof_handler, EoM_cell);
-    Functions::FEFieldFunction<dim, VectorType> fe_function(dof_handler, sol, mapping);
+    fe_function.set_active_cell(EoM_cell);
     fe_function.vector_value(origin, values);
-    const double EoM_val = get_EoM(origin, values)[0];
-    if (EoM_val >= EoM_abs_tol) {
+    const auto origin_val = get_EoM(origin, values);
+
+    const auto secondary_point = (origin + EoM_cell->center()) / 2.;
+    fe_function.vector_value(secondary_point, values);
+    const auto secondary_val = get_EoM(secondary_point, values);
+
+    double total_origin_val = 0.;
+    double total_secondary_val = 0.;
+    for (uint d = 0; d < dim; ++d) {
+      total_origin_val += origin_val[d];
+      total_secondary_val += secondary_val[d];
+    }
+
+    if (total_origin_val >= EoM_abs_tol && total_origin_val >= 0) {
       EoM = origin;
       return EoM;
     }
@@ -284,20 +299,33 @@ namespace DiFfRG
   {
     using namespace dealii;
     using CellIterator = typename dealii::DoFHandler<dim>::cell_iterator;
+    using EoMType = std::array<double, dim>;
+
     auto EoM = Point<dim>();
     Vector<typename VectorType::value_type> values(dof_handler.get_fe().n_components());
+    Functions::FEFieldFunction<dim, VectorType> fe_function(dof_handler, sol, mapping);
 
     // We start by investigating the origin.
     const auto origin = internal::get_origin(dof_handler, EoM_cell);
-    Functions::FEFieldFunction<dim, VectorType> fe_function(dof_handler, sol, mapping);
+    fe_function.set_active_cell(EoM_cell);
     fe_function.vector_value(origin, values);
-    const double EoM_val = get_EoM(origin, values)[0];
-    if (EoM_val >= EoM_abs_tol) {
+    const auto origin_val = get_EoM(origin, values);
+
+    const auto secondary_point = (origin + EoM_cell->center()) / 2.;
+    fe_function.vector_value(secondary_point, values);
+    const auto secondary_val = get_EoM(secondary_point, values);
+
+    double total_origin_val = 0.;
+    double total_secondary_val = 0.;
+    for (uint d = 0; d < dim; ++d) {
+      total_origin_val += origin_val[d];
+      total_secondary_val += secondary_val[d];
+    }
+
+    if (total_origin_val >= EoM_abs_tol && total_origin_val >= 0) {
       EoM = origin;
       return EoM;
     }
-
-    using EoMType = std::array<double, dim>;
 
     auto check_cell = [&](const CellIterator &cell) -> bool {
       // Obtain the values at the vertices of the cell.
@@ -328,35 +356,19 @@ namespace DiFfRG
 
     auto find_EoM = [&](const CellIterator &cell, CellIterator &m_EoM_cell, Point<dim> &m_EoM,
                         double &EoM_val) -> bool {
-      Timer time;
       Functions::FEFieldFunction<dim, VectorType> fe_function(dof_handler, sol, mapping);
       Vector<typename VectorType::value_type> values(dof_handler.get_fe().n_components());
       fe_function.set_active_cell(cell);
 
-      std::array<std::array<double, 2>, dim> cell_borders;
-      for (uint d = 0; d < dim; ++d) {
-        for (uint i = 0; i < GeometryInfo<dim>::vertices_per_cell; ++i) {
-          cell_borders[d][0] = std::min(cell_borders[d][0], cell->vertex(i)[d]);
-          cell_borders[d][1] = std::max(cell_borders[d][1], cell->vertex(i)[d]);
-        }
-      }
-
       std::function<std::array<double, dim>(const dealii::Point<dim> &)> eval_on_point =
           [&](const Point<dim> &p) -> std::array<double, dim> {
-        // if p is outside the cell, project it to the closest border
-        Point<dim> p_proj = p;
-        /*for (uint d = 0; d < dim; ++d) {
-          if (!isfinite(p_proj[d])) {
-            p_proj = cell->center();
-          }
-          if (p_proj[d] < cell_borders[d][0])
-            p_proj[d] = cell_borders[d][0] + 1e-10 * (cell_borders[d][1] - cell_borders[d][0]);
-          else if (p_proj[d] > cell_borders[d][1])
-            p_proj[d] = cell_borders[d][1] - 1e-10 * (cell_borders[d][1] - cell_borders[d][0]);
-        }*/
-
-        fe_function.vector_value(p_proj, values);
-        return get_EoM(p_proj, values);
+        try {
+          fe_function.vector_value(p, values);
+        } catch (...) {
+          // if p is outside the triangulation, give a default value
+          return std::array<double, dim>{{1.}};
+        }
+        return get_EoM(p, values);
       };
 
       const auto cell_center = cell->center();
