@@ -116,7 +116,7 @@ namespace DiFfRG
       typename dealii::DoFHandler<1>::cell_iterator &EoM_cell, const VectorType &sol,
       const dealii::DoFHandler<1> &dof_handler, const dealii::Mapping<1> &mapping, const EoMFUN &get_EoM,
       const EoMPFUN &EoM_postprocess = [](const auto &p, const auto &values) { return p; },
-      const double EoM_abs_tol = 1e-5, const uint max_iter = 100)
+      const double EoM_abs_tol = 1e-8, const uint max_iter = 100)
   {
     constexpr uint dim = 1;
 
@@ -130,7 +130,7 @@ namespace DiFfRG
     Functions::FEFieldFunction<dim, VectorType> fe_function(dof_handler, sol, mapping);
     fe_function.vector_value(origin, values);
     const double EoM_val = get_EoM(origin, values)[0];
-    if (EoM_val >= 0.) {
+    if (EoM_val >= EoM_abs_tol) {
       EoM = origin;
       return EoM;
     }
@@ -280,7 +280,7 @@ namespace DiFfRG
       typename dealii::DoFHandler<dim>::cell_iterator &EoM_cell, const VectorType &sol,
       const dealii::DoFHandler<dim> &dof_handler, const dealii::Mapping<dim> &mapping, const EoMFUN &get_EoM,
       const EoMPFUN &EoM_postprocess = [](const auto &p, const auto &values) { return p; },
-      const double EoM_abs_tol = 1e-5, const uint max_iter = 100)
+      const double EoM_abs_tol = 1e-8, const uint max_iter = 100)
   {
     using namespace dealii;
     using CellIterator = typename dealii::DoFHandler<dim>::cell_iterator;
@@ -292,7 +292,7 @@ namespace DiFfRG
     Functions::FEFieldFunction<dim, VectorType> fe_function(dof_handler, sol, mapping);
     fe_function.vector_value(origin, values);
     const double EoM_val = get_EoM(origin, values)[0];
-    if (EoM_val >= 0.) {
+    if (EoM_val >= EoM_abs_tol) {
       EoM = origin;
       return EoM;
     }
@@ -377,7 +377,7 @@ namespace DiFfRG
       gsl_multiroot_fsolver_set(s, &f, x);
 
       // start the iteration
-      int iter = 0;
+      uint iter = 0;
       int status;
       do {
         iter++;
@@ -386,7 +386,7 @@ namespace DiFfRG
         if (status) break;
 
         status = gsl_multiroot_test_residual(s->f, EoM_abs_tol);
-      } while (status == GSL_CONTINUE && iter < 1000);
+      } while (status == GSL_CONTINUE && iter < max_iter);
 
       EoM_val = 0.;
       for (uint d = 0; d < dim; ++d) {
