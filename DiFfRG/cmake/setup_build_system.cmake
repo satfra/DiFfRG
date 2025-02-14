@@ -62,19 +62,21 @@ else()
   message(STATUS "CUDA flags have been set to ${CMAKE_CUDA_FLAGS}")
 endif()
 
-# By default, enable interprocedural optimization if it is supported.
-if(NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
-  include(CheckIPOSupported)
-  check_ipo_supported(RESULT ipo_supported OUTPUT error)
+if(${CMAKE_PROJECT_NAME} STREQUAL "DiFfRG")
+  # By default, enable interprocedural optimization if it is supported.
+  if(NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT ipo_supported OUTPUT error)
 
-  if(ipo_supported)
-    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
-    message(
-      STATUS
-        "Interprocedural optimization enabled. To disable, set CMAKE_INTERPROCEDURAL_OPTIMIZATION to FALSE."
-    )
-  else()
-    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
+    if(ipo_supported)
+      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+      message(
+        STATUS
+          "Interprocedural optimization enabled. To disable, set CMAKE_INTERPROCEDURAL_OPTIMIZATION to FALSE."
+      )
+    else()
+      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
+    endif()
   endif()
 endif()
 
@@ -300,6 +302,8 @@ cpmaddpackage(
   autodiff/autodiff
   GIT_TAG
   v1.1.0
+  PATCHES
+  "autodiff.patch"
   OPTIONS
   "AUTODIFF_BUILD_TESTS OFF"
   "AUTODIFF_BUILD_EXAMPLES OFF"

@@ -64,7 +64,11 @@ namespace DiFfRG
     template <typename... T> NT get(const ctype k, const T &...t) const
     {
       const ctype S_dm1 = 2 * std::pow(M_PI, (d - 1) / 2.) / std::tgamma((d - 1) / 2.);
-      using std::sqrt;
+      using std::sqrt, std::exp, std::log;
+
+      const ctype integral_start = (2 * x0_summands * (ctype)M_PI * m_T) / k;
+      const ctype log_start = log(integral_start + (m_T == 0) * ctype(1e-3));
+      const ctype log_ext = log(x0_extent / (integral_start + (m_T == 0) * ctype(1e-3)));
 
       const auto constant = KERNEL::constant(k, t...);
       return constant +
@@ -75,16 +79,15 @@ namespace DiFfRG
                      const ctype q = k * sqrt(ptr_x_quadrature_p[idx_x] * x_extent);
                      for (uint idx_y = r.cols().begin(); idx_y != r.cols().end(); ++idx_y) {
                        if (idx_y >= x0_summands) {
-                         const ctype integral_start = (2 * x0_summands * (ctype)M_PI * m_T) / k;
-                         const ctype q0 = k * integral_start +
-                                          ptr_x0_quadrature_p[idx_y - x0_summands] * k * (x0_extent - integral_start);
+                         const ctype q0 = k * (exp(log_start + log_ext * ptr_x0_quadrature_p[idx_y - x0_summands]) -
+                                               (m_T == 0) * ctype(1e-3));
 
                          const ctype int_element = S_dm1                                      // solid nd angle
                                                    * (powr<d - 3>(q) / (ctype)2 * powr<2>(k)) // x = p^2 / k^2 integral
                                                    * (k)                                      // x0 = q0 / k integral
                                                    / powr<d>(2 * (ctype)M_PI);                // fourier factor
                          const ctype weight = ptr_x_quadrature_w[idx_x] * x_extent *
-                                              ptr_x0_quadrature_w[idx_y - x0_summands] * (x0_extent - integral_start);
+                                              (ptr_x0_quadrature_w[idx_y - x0_summands] * log_ext * q0 / k);
 
                          value +=
                              int_element * weight * (KERNEL::kernel(q, q0, k, t...) + KERNEL::kernel(q, -q0, k, t...));

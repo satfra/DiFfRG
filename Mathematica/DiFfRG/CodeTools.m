@@ -204,7 +204,12 @@ SetCppNames[]
 CodeForm[expr_,computeType_String:"double"]:=StringDelete[StringReplace[CodeFormatted[N[expr],computeType],CppNames],"\n"|"\r"];
    
 SafeFiniteTFunctions[expr_,T_]:=Module[{a},
-expr//.{Tanh[a_/(2 T)]->Symbol["TanhFiniteT"][a,T],Coth[a_/(2 T)]->Symbol["CothFiniteT"][a,T]}
+expr//.{
+Tanh[a_/(2 T)]:>Symbol["TanhFiniteT"][a,T],Tanh[a_/T]:>Symbol["TanhFiniteT"][a,2T],Tanh[a_/(2 T)]^n_:>Symbol["TanhFiniteT"][a,T]^n,Tanh[a_/T]^n_:>Symbol["TanhFiniteT"][a,2T]^n,
+Coth[a_/(2 T)]:>Symbol["CothFiniteT"][a,T],Coth[a_/T]:>Symbol["CothFiniteT"][a,2T],Coth[a_/(2 T)]^n_:>Symbol["CothFiniteT"][a,T]^n,Coth[a_/T]^n_:>Symbol["CothFiniteT"][a,2T]^n,
+Csch[a_/(2 T)]:>Symbol["CschFiniteT"][a,T],Csch[a_/T]:>Symbol["CschFiniteT"][a,2T],Csch[a_/(2 T)]^n_:>Symbol["CschFiniteT"][a,T]^n,Csch[a_/T]^n_:>Symbol["CschFiniteT"][a,2T]^n,
+Sech[a_/(2 T)]:>Symbol["SechFiniteT"][a,T],Sech[a_/T]:>Symbol["SechFiniteT"][a,2T],Sech[a_/(2 T)]^n_:>Symbol["SechFiniteT"][a,T]^n,Sech[a_/T]^n_:>Symbol["SechFiniteT"][a,2T]^n
+}
 ]
 
 clangFormatExists=Quiet[RunProcess[{"clang-format","--help"}]]=!=$Failed;

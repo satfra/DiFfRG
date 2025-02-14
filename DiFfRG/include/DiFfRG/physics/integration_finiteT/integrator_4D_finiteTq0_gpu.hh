@@ -42,12 +42,16 @@ namespace DiFfRG
     NT res = 0;
 
     // integral
-    const ctype integral_start = (2 * q0_summands * (ctype)M_PI * m_T);
     const ctype int_element_int = (powr<d - 3>(q) / (ctype)2 * powr<2>(k)) // x = p^2 / k^2 integral
                                   / powr<d>(2 * (ctype)M_PI);              // fourier factor
+
+    const ctype integral_start = (2 * q0_summands * (ctype)M_PI * m_T);
+    const ctype log_start = log(integral_start + (m_T == 0) * ctype(1e-3));
+    const ctype log_ext = log(q0_extent / (integral_start + (m_T == 0) * ctype(1e-3)));
+
     for (uint idx_0 = 0; idx_0 < q0_quadrature_size; ++idx_0) {
-      const ctype q0 = integral_start + q0_quadrature_p[idx_0] * (q0_extent - integral_start);
-      const ctype m_weight = weight * q0_quadrature_w[idx_0] * (q0_extent - integral_start);
+      const ctype q0 = exp(log_start + log_ext * q0_quadrature_p[idx_0]) - (m_T == 0) * ctype(1e-3);
+      const ctype m_weight = weight * (q0_quadrature_w[idx_0] * log_ext * q0);
 
       res += int_element_int * m_weight *
              (KERNEL::kernel(q, cos, phi, q0, k, t...) + KERNEL::kernel(q, cos, phi, -q0, k, t...));

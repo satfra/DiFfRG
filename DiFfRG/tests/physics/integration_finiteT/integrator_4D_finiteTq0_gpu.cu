@@ -44,30 +44,34 @@ TEST_CASE("Test 4D gpu momentum integrals with finite T (q0)", "[4D integration]
   constexpr int dim = 4;
 
   const double x_extent = GENERATE(take(2, random(1., 2.)));
-  const double q0_summands = 8;
-  const double T = GENERATE(take(2, random(0.5, 1.)));
+  const double q0_summands = 32;
+  const uint q0_int_order = 64;
+  const double T = GENERATE(take(4, random(0.01, 1.)));
   const double k = GENERATE(take(2, random(0., 1.)));
-  const double q0_extent = 1000 * 2. * M_PI;
-  const double val = GENERATE(take(4,random(0.8, 1.2)));
+  const double q0_extent = 10000 * 2. * M_PI;
+  const double val = GENERATE(take(4, random(0.8, 1.2)));
 
   QuadratureProvider quadrature_provider;
-  Integrator4DFiniteTq0GPU<double, PolyIntegrand> integrator(quadrature_provider, {{64, 12, 12, 12}}, x_extent,
-                                                             q0_extent, q0_summands, T);
+  Integrator4DFiniteTq0GPU<double, PolyIntegrand> integrator(quadrature_provider, {{64, 16, 16, q0_int_order}},
+                                                             x_extent, q0_extent, q0_summands, T);
 
   SECTION("Test integral")
   {
     const double q_extent = std::sqrt(x_extent * powr<2>(k));
-    const double reference_integral = V_d(dim - 1, q_extent) / powr<dim - 1>(2. * M_PI)                 // spatial part
-                                      / T / std::tanh(0.5/val) / 2./val;                                             // sum
+    const double reference_integral = V_d(dim - 1, q_extent) / powr<dim - 1>(2. * M_PI) // spatial part
+                                      / T / std::tanh(0.5 / val) / 2. / val;            // sum
 
-    const double integral =
-        integrator.request(k, 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0., powr<2>(T), 0., powr<2>(val), 0., 0.).get();
+    const double integral = integrator
+                                .request(k, 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0., powr<2>(T), 0.,
+                                         powr<2>(val), 0., 0.)
+                                .get();
 
-    if (!is_close(reference_integral, integral, 1e-3)) {
+    if (!is_close(reference_integral, integral, 5e-5)) {
       std::cerr << "dim: " << dim << "| reference: " << reference_integral << "| integral: " << integral
                 << "| relative error: " << std::abs(reference_integral - integral) / std::abs(reference_integral)
                 << std::endl;
     }
-    CHECK(is_close(reference_integral, integral, 1e-3));
+    CHECK(isfinite(integral));
+    CHECK(is_close(reference_integral, integral, 5e-5));
   }
 }

@@ -69,7 +69,11 @@ namespace DiFfRG
     template <typename... T> NT get(const ctype k, const T &...t) const
     {
       const ctype S_dm1 = 2. * std::pow(M_PI, (d - 1) / 2.) / std::tgamma((d - 1) / 2.);
-      using std::sqrt;
+      using std::sqrt, std::exp, std::log;
+
+      const ctype integral_start = (2 * q0_summands * (ctype)M_PI * m_T);
+      const ctype log_start = log(integral_start + (m_T == 0) * ctype(1e-3));
+      const ctype log_ext = log(q0_extent / (integral_start + (m_T == 0) * ctype(1e-3)));
 
       const auto constant = KERNEL::constant(k, t...);
       return constant +
@@ -82,9 +86,8 @@ namespace DiFfRG
                        const ctype cos = 2 * (ptr_ang_quadrature_p[idx_y] - (ctype)0.5);
                        for (uint idx_z = r.cols().begin(); idx_z != r.cols().end(); ++idx_z) {
                          if (idx_z >= q0_summands) {
-                           const ctype integral_start = (2 * q0_summands * (ctype)M_PI * m_T);
-                           const ctype q0 =
-                               integral_start + ptr_q0_quadrature_p[idx_z - q0_summands] * (q0_extent - integral_start);
+                           const ctype q0 = exp(log_start + log_ext * ptr_q0_quadrature_p[idx_z - q0_summands]) -
+                                            (m_T == 0) * ctype(1e-3);
 
                            const ctype int_element = S_dm1 // solid nd angle
                                                      *
@@ -92,7 +95,7 @@ namespace DiFfRG
                                                      * (1 / (ctype)2)            // divide the cos integral out
                                                      / powr<d>(2 * (ctype)M_PI); // fourier factor
                            const ctype weight = 2 * ptr_ang_quadrature_w[idx_y] * ptr_x_quadrature_w[idx_x] * x_extent *
-                                                ptr_q0_quadrature_w[idx_z - q0_summands] * (q0_extent - integral_start);
+                                                (ptr_q0_quadrature_w[idx_z - q0_summands] * log_ext * q0);
 
                            value += int_element * weight *
                                     (KERNEL::kernel(q, cos, q0, k, t...) + KERNEL::kernel(q, cos, -q0, k, t...));

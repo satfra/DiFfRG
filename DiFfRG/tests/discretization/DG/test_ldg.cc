@@ -81,7 +81,7 @@ TEST_CASE("Test LDG on Constant model", "[discretization][ldg]")
   Assembler assembler(discretization, model, json);
 
   // Set up the initial condition
-  FlowingVariables initial_condition(discretization);
+  FE::FlowingVariables initial_condition(discretization);
   initial_condition.interpolate(model);
   const VectorType &src = initial_condition.spatial_data();
 

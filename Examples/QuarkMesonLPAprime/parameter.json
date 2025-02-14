@@ -14,7 +14,7 @@
     "x_quadrature_order": 32,
     "angle_quadrature_order": 8,
     "x0_quadrature_order": 16,
-    "x0_summands": 0,
+    "x0_summands": 8,
     "q0_quadrature_order": 16,
     "q0_summands": 8,
     "x_extent_tolerance": 1e-4,

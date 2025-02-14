@@ -66,7 +66,11 @@ namespace DiFfRG
     template <typename... T> NT get(const ctype k, const T &...t) const
     {
       constexpr int d = 4;
-      using std::sqrt;
+      using std::sqrt, std::exp, std::log;
+
+      const ctype integral_start = (2 * x0_summands * (ctype)M_PI * m_T) / k;
+      const ctype log_start = log(integral_start + (m_T == 0) * ctype(1e-3));
+      const ctype log_ext = log(x0_extent / (integral_start + (m_T == 0) * ctype(1e-3)));
 
       const auto constant = KERNEL::constant(k, t...);
       return constant +
@@ -88,11 +92,10 @@ namespace DiFfRG
                              (powr<d - 3>(q) / (ctype)2 * powr<2>(k)) // x = p^2 / k^2 integral
                              * (k)                                    // x0 = q0 / k integral
                              / powr<d>(2 * (ctype)M_PI);              // fourier factor
-                         const ctype integral_start = (2 * x0_summands * (ctype)M_PI * m_T) / k;
                          for (uint idx_0 = 0; idx_0 < grid_sizes[3] - x0_summands; ++idx_0) {
                            const ctype q0 =
-                               k * integral_start + ptr_x0_quadrature_p[idx_0] * k * (x0_extent - integral_start);
-                           const ctype m_weight = weight * ptr_x0_quadrature_w[idx_0] * (x0_extent - integral_start);
+                               k * (exp(log_start + log_ext * ptr_x0_quadrature_p[idx_0]) - (m_T == 0) * ctype(1e-3));
+                           const ctype m_weight = weight * (ptr_x0_quadrature_w[idx_0] * log_ext * q0 / k);
 
                            value +=
                                int_element_int * m_weight *

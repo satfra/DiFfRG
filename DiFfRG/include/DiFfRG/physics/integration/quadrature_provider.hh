@@ -1,16 +1,41 @@
 #pragma once
 
-// standard library
-#include <map>
-#include <vector>
-
 // DiFfRG
 #include <DiFfRG/common/cuda_prefix.hh>
 #include <DiFfRG/common/types.hh>
 #include <DiFfRG/common/utils.hh>
 
+// standard library
+#include <map>
+#include <string>
+#include <vector>
+
+// external libraries
+#include <gsl/gsl_integration.h>
+
 namespace DiFfRG
 {
+  struct Quadrature {
+    Quadrature(const uint order, const std::string type = "legendre");
+    ~Quadrature();
+
+    const double *get_nodes() const;
+    const double *get_weights() const;
+
+    uint get_order() const;
+    const std::string &get_type() const;
+
+  private:
+    const std::string type;
+    const uint order;
+
+    gsl_integration_fixed_workspace *w;
+    const gsl_integration_fixed_type *T;
+
+    double *nodes;
+    double *weights;
+  };
+
   /**
    * @brief A class that provides quadrature points and weights, in host and device memory.
    * The quadrature points and weights are computed using deal.II's QGauss class.

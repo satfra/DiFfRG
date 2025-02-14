@@ -39,7 +39,10 @@ namespace DiFfRG
 
     if (idx_z >= x0_summands) {
       const ctype integral_start = (2 * x0_summands * (ctype)M_PI * m_T) / k;
-      const ctype q0 = k * integral_start + x0_quadrature_p[idx_z - x0_summands] * k * (x0_extent - integral_start);
+      const ctype log_start = log(integral_start + (m_T == 0) * ctype(1e-3));
+      const ctype log_ext = log(x0_extent / (integral_start + (m_T == 0) * ctype(1e-3)));
+
+      const ctype q0 = k * (exp(log_start + log_ext * x0_quadrature_p[idx_z - x0_summands]) - (m_T == 0) * ctype(1e-3));
 
       const ctype int_element = S_dm1                                      // solid nd angle
                                 * (powr<d - 3>(q) / (ctype)2 * powr<2>(k)) // x = p^2 / k^2 integral
@@ -47,7 +50,7 @@ namespace DiFfRG
                                 * (1 / (ctype)2)                           // divide the cos integral out
                                 / powr<d>(2 * (ctype)M_PI);                // fourier factor
       const ctype weight = 2 * ang_quadrature_w[idx_y] * x_quadrature_w[idx_x] * x_extent *
-                           x0_quadrature_w[idx_z - x0_summands] * (x0_extent - integral_start);
+                           (x0_quadrature_w[idx_z - x0_summands] * log_ext * q0 / k);
 
       res = int_element * weight * (KERNEL::kernel(q, cos, q0, k, t...) + KERNEL::kernel(q, cos, -q0, k, t...));
     } else {

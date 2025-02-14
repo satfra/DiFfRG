@@ -178,9 +178,9 @@ namespace DiFfRG
      */
     bool is_finite() const
     {
-      if constexpr (std::is_floating_point_v<NT>) {
+      if constexpr (std::is_floating_point_v<NT> || std::is_same_v<NT, autodiff::real>) {
         for (uint i = 0; i < N * M; ++i)
-          if (!std::isfinite(data[i])) return false;
+          if (!isfinite(data[i])) return false;
       }
       return true;
     }

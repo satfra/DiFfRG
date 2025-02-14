@@ -12,9 +12,9 @@
 
 namespace DiFfRG
 {
-
   template <typename T>
   concept IsContainer = requires(T x) { x[0]; };
+
   namespace get_type
   {
     namespace internal

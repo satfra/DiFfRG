@@ -136,7 +136,15 @@ namespace DiFfRG
   void ConfigurationHelper::print_usage_message()
   {
     std::string help_text = R"(
-This is a DiFfRG simulation. You can pass the following optional parameters:
+  ╭━━━━╮ ╭━━━╮╭━┳━━━━┳━━━━╮
+  ╰╮╭╮ ┃ ┃╭━━╯┃╭┫╭━━╮┃╭━╮ ┃
+   ┃┃┃ ┣━┫╰━━┳╯╰┫╰━━╯┃┃ ╰━╯
+   ┃┃┃ ┣━┫╭━━┻╮╭┫╭╮ ╭┫┃╭━━╮
+  ╭╯╰╯ ┃ ┃┃for┃┃┃┃┃ ╰┫╰┻━━┃
+  ╰━━━━┻━┻╯   ╰╯╰╯╰━━┻━━━━╯
+    The Discretisation Framework for functional Renormalisation Group flows.
+
+This is a DiFfRG simulation. You can pass the following optional parameters to this executable:
   --help                      shows this text
   --generate-parameter-file   generates a parameter file with some default values
   -p                          specifiy a parameter file other than the standard parameter.json
@@ -201,16 +209,20 @@ This is a DiFfRG simulation. You can pass the following optional parameters:
            {"x0_summands", 8},
            {"q0_quadrature_order", 16},
            {"q0_summands", 8},
-           {"x_extent_tolerance", 1e-4},
-           {"x0_extent_tolerance", 1e-4},
-           {"q0_extent_tolerance", 1e-4},
+           {"x_extent_tolerance", 1e-5},
+           {"x0_extent_tolerance", 1e-5},
+           {"q0_extent_tolerance", 1e-6},
            {"jacobian_quadrature_factor", 0.5}}},
          {"discretization",
           {{"fe_order", 3},
            {"threads", 8},
-           {"batch_size", 64},
+           {"batch_size", 16},
            {"overintegration", 0},
            {"output_subdivisions", 2},
+
+           {"EoM_abs_tol", 1e-12},
+           {"EoM_max_iter", 100},
+
            {"grid", {{"x_grid", "0:0.1:1"}, {"y_grid", "0:0.1:1"}, {"z_grid", "0:0.1:1"}, {"refine", 0}}},
            {"adaptivity",
             {{"start_adapt_at", 0.},
@@ -224,7 +236,7 @@ This is a DiFfRG simulation. You can pass the following optional parameters:
            {"explicit",
             {{"dt", 1e-2}, {"minimal_dt", 1e-6}, {"maximal_dt", 1e-1}, {"abs_tol", 1e-4}, {"rel_tol", 1e-4}}},
            {"implicit",
-            {{"dt", 1e-4}, {"minimal_dt", 1e-6}, {"maximal_dt", 1e-1}, {"abs_tol", 1e-14}, {"rel_tol", 1e-7}}}}},
+            {{"dt", 1e-4}, {"minimal_dt", 1e-6}, {"maximal_dt", 1e-1}, {"abs_tol", 1e-13}, {"rel_tol", 1e-7}}}}},
          {"output", {{"verbosity", 0}, {"folder", "output/"}, {"name", "output"}}}});
 
     std::ofstream file(parameter_file);

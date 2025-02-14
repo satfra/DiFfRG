@@ -87,7 +87,7 @@ bool run(std::string test_name, double expected_precision)
   TimeStepper time_stepper(json, &assembler, &data_out, &mesh_adaptor);
 
   // Set up the initial condition
-  FlowingVariables initial_condition(discretization);
+  FE::FlowingVariables initial_condition(discretization);
   initial_condition.interpolate(model);
 
   // Now we start the timestepping

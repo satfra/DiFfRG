@@ -1,11 +1,28 @@
-// external libraries
-#include <deal.II/base/quadrature_lib.h>
-
 // DiFfRG
 #include <DiFfRG/physics/integration/quadrature_provider.hh>
 
 namespace DiFfRG
 {
+  Quadrature::Quadrature(const uint order, const std::string type) : order(order), type(type)
+  {
+    if (type == "legendre")
+      T = gsl_integration_fixed_legendre;
+    else
+      throw std::runtime_error("Unknown quadrature type: " + type);
+    w = gsl_integration_fixed_alloc(T, order, 0.0, 1.0, 0.0, 0.0);
+
+    nodes = gsl_integration_fixed_nodes(w);
+    weights = gsl_integration_fixed_weights(w);
+  }
+
+  Quadrature::~Quadrature() { gsl_integration_fixed_free(w); }
+
+  const double *Quadrature::get_nodes() const { return nodes; }
+  const double *Quadrature::get_weights() const { return weights; }
+
+  uint Quadrature::get_order() const { return order; }
+  const std::string &Quadrature::get_type() const { return type; }
+
   QuadratureProvider::QuadratureProvider()
   {
 #ifdef __CUDACC__
@@ -82,9 +99,9 @@ namespace DiFfRG
     // compute the quadrature of size quadrature_size
     // and store it in points[quadrature_size] and weights[quadrature_size]
 
-    const auto quadrature = dealii::QGauss<1>(quadrature_size);
-    const auto &points = quadrature.get_points();
-    const auto &weights = quadrature.get_weights();
+    const auto quadrature = Quadrature(quadrature_size, "legendre");
+    const auto *nodes = quadrature.get_nodes();
+    const auto *weights = quadrature.get_weights();
 
     // resize containers
     auto &m_points = this->points_d[quadrature_size];
@@ -94,7 +111,7 @@ namespace DiFfRG
 
     // store the points and weights
     for (uint i = 0; i < quadrature_size; ++i) {
-      m_points[i] = points[i][0];
+      m_points[i] = nodes[i];
       m_weights[i] = weights[i];
     }
   }
@@ -102,10 +119,9 @@ namespace DiFfRG
   {
     // compute the quadrature of size quadrature_size
     // and store it in points[quadrature_size] and weights[quadrature_size]
-
-    const auto quadrature = dealii::QGauss<1>(quadrature_size);
-    const auto &points = quadrature.get_points();
-    const auto &weights = quadrature.get_weights();
+    const auto quadrature = Quadrature(quadrature_size, "legendre");
+    const auto *nodes = quadrature.get_nodes();
+    const auto *weights = quadrature.get_weights();
 
     // resize containers
     auto &m_points = this->points_f[quadrature_size];
@@ -115,7 +131,7 @@ namespace DiFfRG
 
     // store the points and weights
     for (uint i = 0; i < quadrature_size; ++i) {
-      m_points[i] = points[i][0];
+      m_points[i] = nodes[i];
       m_weights[i] = weights[i];
     }
   }

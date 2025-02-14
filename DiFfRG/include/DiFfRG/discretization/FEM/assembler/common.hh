@@ -19,8 +19,8 @@
 #include <tbb/tbb.h>
 
 #include <DiFfRG/common/utils.hh>
+#include <DiFfRG/discretization/common/EoM.hh>
 #include <DiFfRG/discretization/common/abstract_assembler.hh>
-#include <DiFfRG/discretization/common/utils.hh>
 #include <DiFfRG/discretization/data/data_output.hh>
 
 namespace DiFfRG

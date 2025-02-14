@@ -63,17 +63,16 @@ The framework has been tested with the following systems:
 ```bash
 $ pacman -S git cmake gcc blas-openblas blas64-openblas paraview python doxygen graphviz gsl
 ```
-In case you want to run with CUDA, as of January 2025 you have to have very specific versions of CUDA and gcc installed. Currently, the gcc13 compiler in the Arch package repository is incompatible with CUDA. To configure a system with a compatible CUDA+gcc configuration, them install directly from the Arch package archive
+For a CUDA-enabled build, additionally 
 ```bash
-$ pacman -U https://archive.archlinux.org/packages/g/gcc12/gcc12-12.3.0-6-x86_64.pkg.tar.zst \
-            https://archive.archlinux.org/packages/g/gcc12-libs/gcc12-libs-12.3.0-6-x86_64.pkg.tar.zst \
-            https://archive.archlinux.org/packages/c/cuda/cuda-12.3.2-1-x86_64.pkg.tar.zst
+$ pacman -S cuda
 ```
+
 
 #### Rocky Linux
 ```bash
-$ dnf --enablerepo=devel install -y gcc-toolset-12 cmake git openblas-devel doxygen doxygen-latex python3 python3-pip gsl-devel
-$ scl enable gcc-toolkit-12 bash
+$ dnf --enablerepo=devel install -y gcc-toolset-12 cmake git openblas-devel doxygen doxygen-latex python3 python3-pip gsl-devel patch
+$ scl enable gcc-toolset-12 bash
 ```
 
 The second line is necessary to switch into a shell where `g++-12` is available
@@ -81,7 +80,11 @@ The second line is necessary to switch into a shell where `g++-12` is available
 #### Ubuntu
 ```bash
 $ apt-get update
-$ apt-get install git cmake libopenblas-dev paraview build-essential python3 doxygen libeigen3-dev cuda graphviz libgsl-dev
+$ apt-get install git cmake libopenblas-dev paraview build-essential python3 doxygen libeigen3-dev graphviz libgsl-dev
+```
+For a CUDA-enabled build, additionally 
+```bash
+$ apt-get install cuda
 ```
 
 #### MacOS
@@ -169,11 +172,36 @@ All backend code is contained in the DiFfRG directory.
 
 Several simulations are defined in the Applications directory, which can be used as a starting point for your own simulations.
 
-# Tips
+# Tips and FAQ
+
+## Logfiles and install issues
+
+During building and installing DiFfRG, logs are created at every step. You may find the logs for the setup of external dependencies in `external/logs` and the logs for the build of DiFfRG itself in `logs/`.
+
+If DiFfRG fails to build on your machine, first check the appropriate logfile. If DiFfRG proves to be incompatible with your machine, please open an Issue on GitHub [here](https://github.com/satfra/DiFfRG/issues), or alternatively send an email to the author (see the [publication](https://arxiv.org/abs/2412.13043)).
+
+
+## Contributing
+
+DiFfRG is a work in progress. If you find some feature missing, a bug, or some other kind of improvement, you can get involved in the further development of DiFfRG. 
+
+Thanks to the collaborative nature of GitHub, you can simply fork the project and work on a private copy on your own GitHub account. Feel also encouraged to open an [issue](https://github.com/satfra/DiFfRG/issues), or if you already have a (partially) ready contribution, open a [pull request](https://github.com/satfra/DiFfRG/pulls).
+
+
+## Configuration files
+
+A DiFfRG simulation requires you to provide a valid `parameters.json` file in the execution path, or alternatively provide another JSON-file using the `-p` flag (see below).
+
+To generate a "stock" `parameters.json` in the current folder, you can call any DiFfRG application as
+```bash
+$ ./my_simulation --generate-parameter-file
+```
+Before usage, don't forget to put in the parameters you defined in your own simulation!
+
 
 ## Progress output
 
-To see how fast the simulation progresses, one can set the `verbosity` parameter either in the parameter file,
+To monitor the progress of the simulation, one can set the `verbosity` parameter either in the parameter file,
 ```json
 {
   "output": {
@@ -186,10 +214,11 @@ or from the CLI,
 $ ./my_simulation -si /output/verbosity=1
 ```
 
+
 ## Modifying parameters from the CLI
 
 Any DiFfRG simulation using the `DiFfRG::ConfigurationHelper` class can be asked to give some syntax pertaining to the configuration:
-```
+```bash
 $ ./my_simulation --help
 This is a DiFfRG simulation. You can pass the following optional parameters:
   --help                      shows this text
@@ -200,22 +229,31 @@ This is a DiFfRG simulation. You can pass the following optional parameters:
   -sb                         overwrite a boolean parameter. This should be in the format '-s physical/use_sth=true'
   -ss                         overwrite a string parameter. This should be in the format '-s physical/a=hello'
 ```
+e.g.
+```bash
+$ ./my_simulation -sd /physical/Lambda=1.0
+```
 
 ## Timestepper choice
 
 In general, the `IDA` timestepper from the `SUNDIALS`-suite has proven to be the optimal choice for any fRG-flow with convexity restoration. Additionally, this solver allows for out-of-the-box solving of additional algebraic systems, which is handy for more complicated fRG setups.
 
-However, a set of alternative steppers is also provided - `ARKode` provides adaptive explicit, implicit and ImEx steppers, and furthermore explicit and implicit Euler, as well as TRBDF2 are seperately implemented. The use of the latter three is however discouraged, as the `SUNDIALS`-timesteppers always give better performace.
-
 If solving purely variable-dependent systems, one of the `Boost` time steppers, `Boost_RK45`, `Boost_RK78` or `Boost_ABM`. The latter is especially excellent for extremely large systems which have no extremely fast dynamics, but lacks adaptive timestepping. In practice, choosing `Boost_ABM` over one of the RK steppers may speed up a Yang-Mills simulation with full momentum dependences by more than a factor of 10.
+
+For systems with both spatial discretisations and variables, consider one of the implicit-explicit mixtures, `SUNDIALS_IDA_Boost_RK45`,  `SUNDIALS_IDA_Boost_RK78` or `SUNDIALS_IDA_Boost_ABM`.
 
 # Other Libraries used
 
+The following third-party libraries are utilised by DiFfRG. They are automatically built and installed DiFfRG during the build process.
+
 - The main backend for field-space discretization is [deal.II](https://www.dealii.org/), which provides the entire FEM-machinery as well as many other utility components.
 - For performant and convenient calculation of Jacobian matrices we use the [autodiff](https://github.com/autodiff/autodiff) library, which implements automatic forward and backwards differentiation in C++ and also in CUDA.
-- Time integration relies heavily on the [SUNDIALS](https://computing.llnl.gov/projects/sundials) suite, specifically on the IDAs and ARKODE solvers.
+- Time integration relies heavily on the [SUNDIALS](https://computing.llnl.gov/projects/sundials) suite, specifically on the IDAs solver.
 - [Rapidcsv](https://github.com/d99kris/rapidcsv) for quick processing of .csv files.
 - [Catch2](https://github.com/catchorg/Catch2) for unit testing.
 - [RMM](https://github.com/rapidsai/rmm), a memory manager for CUDA, which is used for GPU-accelerated loop integrations.
 - [QMC](https://github.com/mppmu/qmc) for adaptive Quasi-Monte-Carlo integration.
 - [spdlog](https://github.com/gabime/spdlog) for logging.
+- [Doxygen Awesome](https://github.com/jothepro/doxygen-awesome-css) for a modern doxygen theme.
+- [Boost](https://www.boost.org/) provides explicit time-stepping and various math algorithms.
+- [Eigen](https://eigen.tuxfamily.org/) for some linear-algebra related tasks.

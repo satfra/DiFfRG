@@ -1,50 +1,13 @@
 #!/bin/bash
 
+echo
 echo "Working directory is $(pwd)"
 SCRIPT_PATH="$(
   cd -- "$(dirname "$0")" >/dev/null 2>&1
   pwd -P
 )"
 source $SCRIPT_PATH/build_scripts/setup_permissions.sh
-
-# ##############################################################################
-# Utility
-# ##############################################################################
-
-expandPath() {
-  local path
-  local -a pathElements resultPathElements
-  IFS=':' read -r -a pathElements <<<"$1"
-  : "${pathElements[@]}"
-  for path in "${pathElements[@]}"; do
-    : "$path"
-    case $path in
-    "~+"/*)
-      path=$PWD/${path#"~+/"}
-      ;;
-    "~-"/*)
-      path=$OLDPWD/${path#"~-/"}
-      ;;
-    "~"/*)
-      path=$HOME/${path#"~/"}
-      ;;
-    "~"*)
-      username=${path%%/*}
-      username=${username#"~"}
-      IFS=: read -r _ _ _ _ _ homedir _ < <(getent passwd "$username")
-      if [[ $path = */* ]]; then
-        path=${homedir}/${path#*/}
-      else
-        path=$homedir
-      fi
-      ;;
-    esac
-    resultPathElements+=("$path")
-  done
-  local result
-  printf -v result '%s:' "${resultPathElements[@]}"
-  printf '%s\n' "${result%:}"
-}
+source $SCRIPT_PATH/build_scripts/expand_path.sh
 
 usage_msg="Build script for building and installing the DiFfRG library. 
 For configuration of build flags, please edit the config file.
@@ -124,22 +87,21 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
   cd ${SCRIPTPATH}
 
   # Make sure the install directory is absolute
-  idir=$(expandPath ${option_install_library}/)
-  #idir=$(readlink --canonicalize ${idir})
-  echo "DiFfRG library will be installed in ${idir}"
+  INSTALLPATH=$(expandPath ${option_install_library}/)
+  echo "DiFfRG library will be installed in ${INSTALLPATH}"
 
   if [[ ${CUDA_OPT} == "-DUSE_CUDA=ON" ]]; then
-    echo "Using CUDA to build DiFfRG library."
+    echo "  Using CUDA to build DiFfRG library."
   else
-    echo "Not using CUDA to build DiFfRG library. To switch it on, use the -c flag!"
+    echo "  Not using CUDA to build DiFfRG library. To switch it on, use the -c flag!"
   fi
 
-  echo "Running CMake..."
+  echo "  Running CMake..."
   mkdir -p ${BUILDPATH}
   cd $BUILDPATH
   cmake \
-    -DCMAKE_INSTALL_PREFIX=${idir}/ \
-    -DBUNDLED_DIR=${idir}/bundled \
+    -DCMAKE_INSTALL_PREFIX=${INSTALLPATH}/ \
+    -DBUNDLED_DIR=${INSTALLPATH}/bundled \
     ${CUDA_OPT} \
     -DCMAKE_CUDA_FLAGS="${CUDA_FLAGS}" \
     -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
@@ -151,21 +113,26 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
     exit 1
   }
 
-  echo "Updating DiFfRG..."
+  echo "  Updating DiFfRG..."
   make -j ${THREADS} &>${LOGPATH}/DiFfRG_make.log || {
-    echo "    Failed to build DiFfRG, aborting."
+    echo "    Failed to build DiFfRG, see logfile in '${LOGPATH}/DiFfRG_make.log'."
     exit 1
   }
 
-  echo "Updating documentation..."
+  echo "  Updating documentation..."
   make -j ${THREADS} documentation &>${LOGPATH}/DiFfRG_documentation.log || { echo "    Failed to build DiFfRG documentation."; }
 
-  echo "Installing..."
-  SuperUser=$(get_execution_permissions $INSTALL_PATH)
-  $SuperUser make install -j ${THREADS} &>${LOGPATH}/DiFfRG_install.log
-  $SuperUser cp -r ${SCRIPTPATH}/python ${idir}/
+  SuperUser=$(get_execution_permissions $INSTALLPATH)
+  echo "  Installing library..."
+  $SuperUser make install -j ${THREADS} &>${LOGPATH}/DiFfRG_install.log || {
+    echo "    Failed to install DiFfRG, see logfile in '${LOGPATH}/DiFfRG_install.log'."
+    exit 1
+  }
+  echo "  Python package is being installed to ${INSTALLPATH}python/"
+  $SuperUser cp -r ${SCRIPTPATH}/python ${INSTALLPATH}/ || {
+    echo "    Failed to copy DiFfRG python package."
+  }
 
-  echo "Done."
   echo
 
   cd ${SCRIPTPATH}
@@ -181,17 +148,19 @@ if [[ -z ${option_setup_mathematica+x} ]]; then
   option_setup_mathematica=${option_setup_mathematica:-Y}
 fi
 if [[ ${option_setup_mathematica} != "n" ]] && [[ ${option_setup_mathematica} != "N" ]]; then
-  echo "    Checking for mathematica installation..."
+  echo "Checking for mathematica installation..."
   if command -v math &>/dev/null; then
 
     # We use the math command to determine the mathematica applications folder
     math_app_folder=$(math -run 'FileNameJoin[{$UserBaseDirectory,"Applications"}]//Print;Exit[]' | tail -n1)
     mkdir -p ${math_app_folder}
 
+    echo "  DiFfRG mathematica package will be installed to ${math_app_folder}"
+
     # Check if a DiFfRG mathematica package is already installed
     if [[ -d ${math_app_folder}/DiFfRG ]]; then
       echo "    DiFfRG mathematica package already installed in ${math_app_folder}"
-      read -p "        Do you want to overwrite it? [y/N] " option_overwrite_mathematica
+      read -p "    Do you want to overwrite it? [y/N] " option_overwrite_mathematica
       option_overwrite_mathematica=${option_overwrite_mathematica:-N}
       if [[ ${option_overwrite_mathematica} == "n" ]] || [[ ${option_overwrite_mathematica} == "N" ]]; then
         echo "    Aborting."
@@ -201,15 +170,29 @@ if [[ ${option_setup_mathematica} != "n" ]] && [[ ${option_setup_mathematica} !=
     fi
 
     # Copy the DiFfRG mathematica package to the mathematica applications folder
-    echo "    Installing DiFfRG mathematica package to ${math_app_folder}"
+    echo "  Installing DiFfRG mathematica package to ${math_app_folder}"
     cp -r ${SCRIPTPATH}/Mathematica/DiFfRG ${math_app_folder} || {
       echo "    Failed to install DiFfRG mathematica package, aborting."
       exit 1
     }
   else
-    echo "Mathematica: 'math' command could not be found"
+    echo "    Mathematica: 'math' command could not be found"
     exit 1
   fi
+
+  echo
 fi
 
-echo
+# ##############################################################################
+# Finish
+# ##############################################################################
+
+echo "Done. Have fun with 
+  ╭━━━━╮ ╭━━━╮╭━┳━━━━┳━━━━╮
+  ╰╮╭╮ ┃ ┃╭━━╯┃╭┫╭━━╮┃╭━╮ ┃
+   ┃┃┃ ┣━┫╰━━┳╯╰┫╰━━╯┃┃ ╰━╯
+   ┃┃┃ ┣━┫╭━━┻╮╭┫╭╮ ╭┫┃╭━━╮
+  ╭╯╰╯ ┃ ┃┃for┃┃┃┃┃ ╰┫╰┻━━┃
+  ╰━━━━┻━┻╯   ╰╯╰╯╰━━┻━━━━╯
+    The Discretisation Framework for functional Renormalisation Group flows.
+  "
