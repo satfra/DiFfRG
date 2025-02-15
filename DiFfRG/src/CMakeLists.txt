@@ -33,7 +33,7 @@ if(USE_CUDA)
     APPEND
     DiFfRG_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/common/cuda_prefix.cu
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/integration/quadrature_provider.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/common/quadrature/quadrature_provider.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_1D.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_2D.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_3D.cu
@@ -46,7 +46,7 @@ else()
   list(
     APPEND
     DiFfRG_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/integration/quadrature_provider.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/common/quadrature/quadrature_provider.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_1D.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_2D.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/physics/interpolation/linear_interpolation_3D.cc

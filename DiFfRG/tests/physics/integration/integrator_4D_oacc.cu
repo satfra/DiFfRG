@@ -3,10 +3,10 @@
 
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/common/polynomials.hh>
-#include <DiFfRG/physics/integration/integrator_4D_openAcc.hh>
-#include <DiFfRG/physics/integration/integrator_4D_gpu_fq.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 #include <DiFfRG/physics/integration/integrator_4D_gpu.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/physics/integration/integrator_4D_gpu_fq.hh>
+#include <DiFfRG/physics/integration/integrator_4D_openAcc.hh>
 
 #include <deal.II/base/timer.h>
 
@@ -124,30 +124,32 @@ TEST_CASE("Test 4D cpu momentum integrals", "[4D integration][quadrature integra
   }
 
   {
-  std::vector<Integrator4DGPU_fq<double, PolyIntegrand, 64, 24>> integrators;
-  double k = 0.1;
-  double q_extent = std::sqrt(x_extent * powr<2>(k));
-  for(uint i = 0; i < 1024; ++i) {
-    integrators.emplace_back(Integrator4DGPU_fq<double, PolyIntegrand, 64, 24>(quadrature_provider, {{64, 24, 24, 24}}, x_extent));
-  }
+    std::vector<Integrator4DGPU_fq<double, PolyIntegrand, 64, 24>> integrators;
+    double k = 0.1;
+    double q_extent = std::sqrt(x_extent * powr<2>(k));
+    for (uint i = 0; i < 1024; ++i) {
+      integrators.emplace_back(
+          Integrator4DGPU_fq<double, PolyIntegrand, 64, 24>(quadrature_provider, {{64, 24, 24, 24}}, x_extent));
+    }
 
-  dealii::Timer timer;
-  for(uint i = 0; i < 1024; ++i)
-    integrators[i].get(k, 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0.);
-  std::cout << "FQ: Time get 1024 integrals: " << timer.wall_time() << std::endl;
+    dealii::Timer timer;
+    for (uint i = 0; i < 1024; ++i)
+      integrators[i].get(k, 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0.);
+    std::cout << "FQ: Time get 1024 integrals: " << timer.wall_time() << std::endl;
   }
 
   {
-  std::vector<Integrator4DGPU<double, PolyIntegrand>> integrators;
-  double k = 0.1;
-  double q_extent = std::sqrt(x_extent * powr<2>(k));
-  for(uint i = 0; i < 1024; ++i) {
-    integrators.emplace_back(Integrator4DGPU<double, PolyIntegrand>(quadrature_provider, {{64, 24, 24, 24}}, x_extent));
-  }
+    std::vector<Integrator4DGPU<double, PolyIntegrand>> integrators;
+    double k = 0.1;
+    double q_extent = std::sqrt(x_extent * powr<2>(k));
+    for (uint i = 0; i < 1024; ++i) {
+      integrators.emplace_back(
+          Integrator4DGPU<double, PolyIntegrand>(quadrature_provider, {{64, 24, 24, 24}}, x_extent));
+    }
 
-  dealii::Timer timer;
-  for(uint i = 0; i < 1024; ++i)
-    integrators[i].get(k, 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0.);
+    dealii::Timer timer;
+    for (uint i = 0; i < 1024; ++i)
+      integrators[i].get(k, 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 0.);
     std::cout << "GPU: Time get 1024 integrals: " << timer.wall_time() << std::endl;
   }
 };

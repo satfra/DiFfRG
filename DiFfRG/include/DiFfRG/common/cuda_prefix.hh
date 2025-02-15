@@ -40,4 +40,8 @@ using cudaTextureObject_t = unsigned long long;
 #define __device__
 #endif
 
+#ifndef __constant__
+#define __constant__
+#endif
+
 #endif

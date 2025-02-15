@@ -5,7 +5,7 @@
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/common/polynomials.hh>
 #include <DiFfRG/physics/integration/integrator_1D_cartesian_gpu.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 
 using namespace DiFfRG;
 

@@ -3,8 +3,8 @@
 
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/common/polynomials.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 #include <DiFfRG/physics/integration/integrator_cpu.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
 #include <DiFfRG/physics/loop_integrals.hh>
 
 using namespace DiFfRG;
@@ -31,8 +31,8 @@ public:
   }
 };
 
-TEMPLATE_TEST_CASE_SIG("Test cpu momentum integrals", "[double][integration][quadrature integration]", ((int dim), dim), (1),
-                       (2), (3), (4))
+TEMPLATE_TEST_CASE_SIG("Test cpu momentum integrals", "[double][integration][quadrature integration]", ((int dim), dim),
+                       (1), (2), (3), (4))
 {
   const double x_extent = GENERATE(take(1, random(1., 2.)));
   QuadratureProvider quadrature_provider;
@@ -98,8 +98,8 @@ TEMPLATE_TEST_CASE_SIG("Test cpu momentum integrals", "[double][integration][qua
   }
 }
 
-TEMPLATE_TEST_CASE_SIG("Test complex cpu momentum integrals", "[complex<double>][integration][quadrature integration]", ((int dim), dim), (1),
-                       (2), (3), (4))
+TEMPLATE_TEST_CASE_SIG("Test complex cpu momentum integrals", "[complex<double>][integration][quadrature integration]",
+                       ((int dim), dim), (1), (2), (3), (4))
 {
   const double x_extent = GENERATE(take(1, random(1., 2.)));
   QuadratureProvider quadrature_provider;
@@ -142,7 +142,8 @@ TEMPLATE_TEST_CASE_SIG("Test complex cpu momentum integrals", "[complex<double>]
     int_poly *= Polynomial(coeff_integrand);
     const double reference_integral = constant + S_d(dim) * int_poly.integral(0., q_extent) / powr<dim>(2. * M_PI);
 
-    const double integral = real(integrator.request(k, constant, poly[0], poly[1], poly[2], poly[3], poly[4], poly[5]).get());
+    const double integral =
+        real(integrator.request(k, constant, poly[0], poly[1], poly[2], poly[3], poly[4], poly[5]).get());
 
     if (!is_close(reference_integral, integral, 1e-6)) {
       std::cerr << "dim: " << dim << "| reference: " << reference_integral << "| integral: " << integral

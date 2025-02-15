@@ -4,7 +4,7 @@
 #include <future>
 
 // DiFfRG
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 
 namespace DiFfRG
 {

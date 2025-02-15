@@ -7,7 +7,7 @@
 #include <DiFfRG/physics/integration/integrator_3D_gpu.hh>
 #include <DiFfRG/physics/integration/integrator_4D_2ang_gpu.hh>
 #include <DiFfRG/physics/integration/integrator_4D_2ang_cpu.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 #include <DiFfRG/physics/utils.hh>
 
 using namespace DiFfRG;

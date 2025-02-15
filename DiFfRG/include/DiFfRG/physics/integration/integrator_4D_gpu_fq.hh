@@ -14,9 +14,9 @@
 
 // DiFfRG
 #include <DiFfRG/common/cuda_prefix.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 
-#include <DiFfRG/physics/quadrature/quadratures.hh>
+#include <DiFfRG/common/quadrature/quadratures.hh>
 
 namespace DiFfRG
 {

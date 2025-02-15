@@ -6,7 +6,7 @@
 #include <DiFfRG/physics/integration/integrator_4D_cpu.hh>
 #include <DiFfRG/physics/integration/integrator_4D_gpu.hh>
 #include <DiFfRG/physics/integration/integrator_4D_qmc.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 #include <DiFfRG/physics/utils.hh>
 
 #include "../boilerplate/3_angle/flows.hh"  
