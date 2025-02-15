@@ -16,16 +16,12 @@ namespace DiFfRG
   /**
    * @brief Diagonalizes a symmetric tridiagonal matrix.
    *
+   * Adapted from https://people.math.sc.edu/burkardt/cpp_src/cpp_src.html
+   *
    * This routine is a slightly modified version of the EISPACK routine to
    * perform the implicit QL algorithm on a symmetric tridiagonal matrix.
-   *
-   * The authors thank the authors of EISPACK for permission to use this
-   * routine.
-   *
-   * It has been modified to produce the product Q' * Z, where Z is an input
+   * It produces the product Q' * Z, where Z is an input
    * vector and Q is the orthogonal matrix diagonalizing the input matrix.
-   * The changes consist (essentialy) of applying the orthogonal transformations
-   * directly to Z as they are generated.
    *
    * @param d The diagonal elements of the input matrix. On output, d is overwritten by the eigenvalues of the symmetric
    * tridiagonal matrix.

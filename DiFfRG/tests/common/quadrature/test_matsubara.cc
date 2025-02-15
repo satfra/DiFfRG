@@ -8,15 +8,34 @@ using namespace DiFfRG;
 
 TEST_CASE("Test matsubara quadrature rule", "[double][quadrature][matsubara]")
 {
-  MatsubaraQuadrature<double> mq(1.0, 1.0);
-  std::cout << "nodes: (";
-  for (uint i = 0; i < mq.size(); ++i) {
-    std::cout << mq.nodes()[i] << ", ";
+  SECTION("Simple test")
+  {
+    const double T = GENERATE(take(5, random(0.01, 1.0)));
+    MatsubaraQuadrature<double> mq(T, 1.);
+
+    const auto f = [&](const double x) { return 1. / (1. + powr<2>(x)); };
+
+    const double reference = 0.5 * 1. / std::tanh(0.5 / T);
+    const double sum = mq.sum(f);
+
+    CHECK(sum == Catch::Approx(reference));
   }
-  std::cout << ")\n";
-  std::cout << "weights: (";
-  for (uint i = 0; i < mq.size(); ++i) {
-    std::cout << mq.weights()[i] << ", ";
+  SECTION("Test with different parameters")
+  {
+    const double T = GENERATE(take(5, random(0.01, 1.0)));
+    const double a = GENERATE(take(5, random(0.1, 1.0)));
+    const double b = GENERATE(take(5, random(0.01, 0.1)));
+
+    MatsubaraQuadrature<double> mq(T, a);
+
+    const auto f = [&](const double x) { return 1. / (powr<2>(a) + b * x + powr<2>(x)); };
+
+    const double reference =
+        -(std::sinh(std::sqrt(4 * std::pow(a, 2) - std::pow(b, 2)) / (2. * T)) /
+          (std::sqrt(4 * std::pow(a, 2) - std::pow(b, 2)) *
+           (std::cos(b / (2. * T)) - std::cosh(std::sqrt(4 * std::pow(a, 2) - std::pow(b, 2)) / (2. * T)))));
+
+    const double result = mq.sum(f);
+    CHECK(result == Catch::Approx(reference));
   }
-  std::cout << ")\n";
 }
