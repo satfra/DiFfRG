@@ -37,7 +37,7 @@ namespace DiFfRG
         : T(T), typical_E(typical_E)
     {
       // Determine the number of nodes in the quadrature rule.
-      const NT E_max = 100 * std::abs(typical_E);
+      const NT E_max = 10 * std::abs(typical_E);
       m_size = 5 + int(std::sqrt(4 * E_max / (M_PI * M_PI * std::abs(T))));
       m_size = (size_t)std::ceil(m_size / (double)step) * step;
       m_size = std::max(min_size, std::min(max_size, m_size));
