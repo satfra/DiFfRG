@@ -1,11 +1,13 @@
 #pragma once
 
 // DiFfRG
+#include <DiFfRG/common/cuda_prefix.hh>
 #include <DiFfRG/common/quadrature/diagonalization.hh>
 #include <DiFfRG/common/types.hh>
 #include <DiFfRG/common/utils.hh>
 
 // standard library
+#include <string>
 #include <vector>
 
 namespace DiFfRG
@@ -41,4 +43,38 @@ namespace DiFfRG
       w[i] = mu0 * powr<2>(w[i]);
     }
   }
+
+  enum class QuadratureType { legendre, chebyshev, laguerre, hermite, jacobi, count };
+
+  template <typename NT> class Quadrature
+  {
+  public:
+    Quadrature();
+    Quadrature(const size_t order, const QuadratureType _t);
+
+    void reinit(const size_t order, const QuadratureType _t);
+
+    const std::vector<NT> &nodes() const;
+    const std::vector<NT> &weights() const;
+
+    const NT *device_nodes();
+    const NT *device_weights();
+
+    size_t size() const;
+    QuadratureType get_type() const;
+
+  private:
+    QuadratureType _t;
+    uint order;
+
+    std::vector<NT> m_nodes;
+    std::vector<NT> m_weights;
+#ifdef USE_CUDA
+    thrust::device_vector<NT> m_device_nodes;
+    thrust::device_vector<NT> m_device_weights;
+
+    void move_device_data();
+#endif
+  };
+
 } // namespace DiFfRG

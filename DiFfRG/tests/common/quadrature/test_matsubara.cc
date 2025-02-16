@@ -22,7 +22,7 @@ TEST_CASE("Test matsubara quadrature rule", "[double][quadrature][matsubara]")
   }
   SECTION("Test with different parameters")
   {
-    const double T = GENERATE(take(5, random(0.01, 1.0)));
+    const double T = GENERATE(take(5, random(0.001, 0.1)));
     const double a = GENERATE(take(5, random(0.1, 1.0)));
     const double b = GENERATE(take(5, random(0.01, 0.1)));
 
