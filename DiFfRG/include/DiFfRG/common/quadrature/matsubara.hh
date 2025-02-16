@@ -87,8 +87,18 @@ namespace DiFfRG
     }
 
 #ifdef USE_CUDA
+    /**
+     * @brief Return the device-side nodes of the quadrature rule.
+     *
+     * @return const NT*
+     */
     const NT *device_nodes();
 
+    /**
+     * @brief Return the device-side weights of the quadrature rule.
+     *
+     * @return const NT*
+     */
     const NT *device_weights();
 #endif
 
@@ -113,6 +123,10 @@ namespace DiFfRG
     thrust::device_vector<NT> device_x;
     thrust::device_vector<NT> device_w;
 
+    /**
+     * @brief Move the nodes and weights to the device, if they are not already there.
+     *
+     */
     void move_device_data();
 #endif
   };

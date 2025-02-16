@@ -14,6 +14,11 @@ namespace DiFfRG
     this->order = order;
     this->_t = _t;
 
+#ifdef USE_CUDA
+    m_device_nodes.clear();
+    m_device_weights.clear();
+#endif
+
     gsl_integration_fixed_workspace *w;
     const gsl_integration_fixed_type *T;
 

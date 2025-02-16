@@ -18,18 +18,15 @@ namespace DiFfRG
   public:
     using ctype = typename get_type::ctype<NT>;
 
-    IntegratorFiniteTq0TBB(QuadratureProvider &quadrature_provider, const std::array<uint, 2> grid_sizes,
-                           const ctype x_extent, const ctype q0_extent, const uint q0_summands, const JSONValue &json)
-        : IntegratorFiniteTq0TBB(quadrature_provider, grid_sizes, x_extent, q0_extent, q0_summands,
-                                 json.get_double("/physical/T"))
+    IntegratorFiniteTq0TBB(QuadratureProvider &quadrature_provider, const std::array<uint, 1> grid_sizes,
+                           const ctype x_extent, const JSONValue &json)
+        : IntegratorFiniteTq0TBB(quadrature_provider, grid_sizes, x_extent, json.get_double("/physical/T"))
     {
     }
 
-    IntegratorFiniteTq0TBB(QuadratureProvider &quadrature_provider, const std::array<uint, 2> _grid_sizes,
-                           const ctype x_extent, const ctype q0_extent, const uint _q0_summands, const ctype T,
-                           const uint max_block_size = 0)
-        : quadrature_provider(quadrature_provider), grid_sizes{{_grid_sizes[0], _grid_sizes[1] + _q0_summands}},
-          x_extent(x_extent), q0_extent(q0_extent), original_q0_summands(_q0_summands), m_T(T)
+    IntegratorFiniteTq0TBB(QuadratureProvider &quadrature_provider, const std::array<uint, 1> _grid_sizes,
+                           const ctype x_extent, const ctype T, const uint max_block_size = 0)
+        : quadrature_provider(quadrature_provider), grid_sizes{{_grid_sizes[0]}}, x_extent(x_extent), m_T(T)
     {
       ptr_x_quadrature_p = quadrature_provider.get_points<ctype>(grid_sizes[0]).data();
       ptr_x_quadrature_w = quadrature_provider.get_weights<ctype>(grid_sizes[0]).data();
@@ -39,25 +36,22 @@ namespace DiFfRG
       (void)max_block_size;
     }
 
-    void set_T(const ctype T)
+    void set_T(const ctype T, const ctype typical_E = 0)
     {
       m_T = T;
-      if (is_close(m_T, 0.))
-        q0_summands = 0;
-      else
-        q0_summands = original_q0_summands;
-      ptr_q0_quadrature_p = quadrature_provider.get_points<ctype>(grid_sizes[1] - q0_summands).data();
-      ptr_q0_quadrature_w = quadrature_provider.get_weights<ctype>(grid_sizes[1] - q0_summands).data();
-    }
+      m_E = is_close(typical_E, 0.) ? m_T : typical_E;
 
-    void set_q0_extent(const ctype val) { q0_extent = val; }
+      matsubara_size = quadrature_provider.get_matsubara_points<ctype>(m_T, m_E).size();
+      ptr_matsubara_quadrature_p = quadrature_provider.get_matsubara_points<ctype>(m_T, m_E).data();
+      ptr_matsubara_quadrature_w = quadrature_provider.get_matsubara_weights<ctype>(m_T, m_E).data();
+    }
 
     IntegratorFiniteTq0TBB(const IntegratorFiniteTq0TBB &other)
         : quadrature_provider(other.quadrature_provider), grid_sizes(other.grid_sizes),
           ptr_x_quadrature_p(other.ptr_x_quadrature_p), ptr_x_quadrature_w(other.ptr_x_quadrature_w),
-          ptr_q0_quadrature_p(other.ptr_q0_quadrature_p), ptr_q0_quadrature_w(other.ptr_q0_quadrature_w),
-          x_extent(other.x_extent), q0_extent(other.q0_extent), original_q0_summands(other.q0_summands),
-          q0_summands(other.q0_summands), m_T(other.m_T)
+          ptr_matsubara_quadrature_p(other.ptr_matsubara_quadrature_p),
+          ptr_matsubara_quadrature_w(other.ptr_matsubara_quadrature_w), x_extent(other.x_extent),
+          matsubara_size(other.matsubara_size), m_T(other.m_T), m_E(other.m_E)
     {
     }
 
@@ -66,42 +60,27 @@ namespace DiFfRG
       const ctype S_dm1 = 2 * std::pow(M_PI, (d - 1) / 2.) / std::tgamma((d - 1) / 2.);
       using std::sqrt, std::exp, std::log;
 
-      const ctype integral_start = (2 * q0_summands * (ctype)M_PI * m_T);
-      const ctype log_start = log(integral_start + (m_T == 0) * ctype(1e-3));
-      const ctype log_ext = log(q0_extent / (integral_start + (m_T == 0) * ctype(1e-3)));
-
       const auto constant = KERNEL::constant(k, t...);
       return constant +
              tbb::parallel_reduce(
-                 tbb::blocked_range2d<uint, uint>(0, grid_sizes[0], 0, grid_sizes[1]), NT(0),
+                 tbb::blocked_range2d<uint, uint>(0, grid_sizes[0], 0, matsubara_size), NT(0),
                  [&](const tbb::blocked_range2d<uint, uint> &r, NT value) -> NT {
                    for (uint idx_x = r.rows().begin(); idx_x != r.rows().end(); ++idx_x) {
                      const ctype q = k * sqrt(ptr_x_quadrature_p[idx_x] * x_extent);
+
+                     const ctype x_weight = ptr_x_quadrature_w[idx_x] * x_extent;
+                     const ctype int_element = S_dm1                                      // solid nd angle
+                                               * (powr<d - 3>(q) / (ctype)2 * powr<2>(k)) // x = p^2 / k^2 integral
+                                               / powr<d - 1>(2 * (ctype)M_PI);            // fourier factor
+
                      for (uint idx_y = r.cols().begin(); idx_y != r.cols().end(); ++idx_y) {
                        // integral part
-                       if (idx_y >= q0_summands) {
-                         const ctype q0 = exp(log_start + log_ext * ptr_q0_quadrature_p[idx_y - q0_summands]) -
-                                          (m_T == 0) * ctype(1e-3);
-                         const ctype int_element = S_dm1                                      // solid nd angle
-                                                   * (powr<d - 3>(q) / (ctype)2 * powr<2>(k)) // x = p^2 / k^2 integral
-                                                   / powr<d>(2 * (ctype)M_PI);                // fourier factor
-                         const ctype weight = ptr_x_quadrature_w[idx_x] * x_extent *
-                                              (ptr_q0_quadrature_w[idx_y - q0_summands] * log_ext * q0);
+                       const ctype q0 = ptr_matsubara_quadrature_p[idx_y];
+                       const ctype weight = x_weight * ptr_matsubara_quadrature_w[idx_y];
 
-                         value +=
-                             int_element * weight * (KERNEL::kernel(q, q0, k, t...) + KERNEL::kernel(q, -q0, k, t...));
-                       }
-                       // sum part
-                       else {
-                         const ctype q0 = 2 * (ctype)M_PI * m_T * idx_y;
-                         const ctype int_element = m_T * S_dm1                                // temp * solid nd angle
-                                                   * (powr<d - 3>(q) / (ctype)2 * powr<2>(k)) // x = p^2 / k^2 integral
-                                                   / powr<d - 1>(2 * (ctype)M_PI);            // fourier factor
-                         const ctype weight = ptr_x_quadrature_w[idx_x] * x_extent;
-                         value += int_element * weight *
-                                  (idx_y == 0 ? KERNEL::kernel(q, (ctype)0, k, t...)
-                                              : KERNEL::kernel(q, q0, k, t...) + KERNEL::kernel(q, -q0, k, t...));
-                       }
+                       value +=
+                           int_element * weight * (KERNEL::kernel(q, q0, k, t...) + KERNEL::kernel(q, -q0, k, t...));
+                       if (idx_y == 0) value += int_element * x_weight * m_T * KERNEL::kernel(q, (ctype)0, k, t...);
                      }
                    }
                    return value;
@@ -120,14 +99,12 @@ namespace DiFfRG
     const std::array<uint, 2> grid_sizes;
 
     const ctype x_extent;
-    ctype q0_extent;
-    const uint original_q0_summands;
-    uint q0_summands;
-    ctype m_T;
+    ctype m_T, m_E;
 
     const ctype *ptr_x_quadrature_p;
     const ctype *ptr_x_quadrature_w;
-    const ctype *ptr_q0_quadrature_p;
-    const ctype *ptr_q0_quadrature_w;
+    const ctype *ptr_matsubara_quadrature_p;
+    const ctype *ptr_matsubara_quadrature_w;
+    uint matsubara_size;
   };
 } // namespace DiFfRG

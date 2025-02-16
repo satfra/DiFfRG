@@ -30,6 +30,11 @@ namespace DiFfRG
     this->T = T;
     this->typical_E = typical_E;
 
+#ifdef USE_CUDA
+    device_x.clear();
+    device_w.clear();
+#endif
+
     // Determine the number of nodes in the quadrature rule.
     m_size = predict_size(T, typical_E, step);
     m_size = std::max(min_size, std::min(max_size, m_size));
