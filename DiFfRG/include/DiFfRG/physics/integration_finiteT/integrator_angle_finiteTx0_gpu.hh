@@ -32,7 +32,7 @@ namespace DiFfRG
     uint idx = idx_z * len_x * len_y + idx_y * len_x + idx_x;
 
     const ctype q = k * sqrt(x_quadrature_p[idx_x] * x_extent);
-    const ctype S_dm1 = 2 * pow(M_PI, (d - 1.) / 2.) / tgamma((d - 1.) / 2.);
+    constexpr ctype S_dm1 = S_d_prec<ctype>(d - 1);
     const ctype cos = 2 * (ang_quadrature_p[idx_y] - (ctype)0.5);
 
     NT res = 0.;

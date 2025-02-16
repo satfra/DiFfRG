@@ -20,9 +20,9 @@ namespace DiFfRG
   template <typename ctype, typename NT, typename KERNEL, typename... T>
   __global__ void gridreduce_4d_finiteTq0(NT *dest, const ctype *x_quadrature_p, const ctype *x_quadrature_w,
                                           const ctype *ang_quadrature_p, const ctype *ang_quadrature_w,
-                                          const ctype *q0_quadrature_p, const ctype *q0_quadrature_w,
-                                          const ctype x_extent, const ctype q0_extent, const uint q0_quadrature_size,
-                                          const uint q0_summands, const ctype m_T, const ctype k, T... t)
+                                          const ctype *matsubara_quadrature_p, const ctype *matsubara_quadrature_w,
+                                          const ctype x_extent, const uint matsubara_size, const ctype m_T,
+                                          const ctype k, T... t)
   {
     constexpr uint d = 4;
 
@@ -36,36 +36,19 @@ namespace DiFfRG
     const ctype q = k * sqrt(x_quadrature_p[idx_x] * x_extent);
     const ctype cos = 2 * (ang_quadrature_p[idx_y] - (ctype)0.5);
     const ctype phi = 2 * (ctype)M_PI * ang_quadrature_p[idx_z];
-    const ctype weight =
+    const ctype x_weight =
         2 * (ctype)M_PI * ang_quadrature_w[idx_z] * 2 * ang_quadrature_w[idx_y] * x_quadrature_w[idx_x] * x_extent;
 
-    NT res = 0;
-
-    // integral
-    const ctype int_element_int = (powr<d - 3>(q) / (ctype)2 * powr<2>(k)) // x = p^2 / k^2 integral
-                                  / powr<d>(2 * (ctype)M_PI);              // fourier factor
-
-    const ctype integral_start = (2 * q0_summands * (ctype)M_PI * m_T);
-    const ctype log_start = log(integral_start + (m_T == 0) * ctype(1e-3));
-    const ctype log_ext = log(q0_extent / (integral_start + (m_T == 0) * ctype(1e-3)));
-
-    for (uint idx_0 = 0; idx_0 < q0_quadrature_size; ++idx_0) {
-      const ctype q0 = exp(log_start + log_ext * q0_quadrature_p[idx_0]) - (m_T == 0) * ctype(1e-3);
-      const ctype m_weight = weight * (q0_quadrature_w[idx_0] * log_ext * q0);
-
-      res += int_element_int * m_weight *
-             (KERNEL::kernel(q, cos, phi, q0, k, t...) + KERNEL::kernel(q, cos, phi, -q0, k, t...));
-    }
-
     // sum
-    const ctype int_element_sum = m_T                                        // solid nd angle
-                                  * (powr<d - 3>(q) / (ctype)2 * powr<2>(k)) // x = p^2 / k^2 integral
-                                  / powr<d - 1>(2 * (ctype)M_PI);            // fourier factor
-    for (uint idx_0 = 0; idx_0 < q0_summands; ++idx_0) {
-      const ctype q0 = 2 * (ctype)M_PI * m_T * idx_0;
-      res += int_element_sum * weight *
-             (idx_0 == 0 ? KERNEL::kernel(q, cos, phi, (ctype)0, k, t...)
-                         : KERNEL::kernel(q, cos, phi, q0, k, t...) + KERNEL::kernel(q, cos, phi, -q0, k, t...));
+    const ctype int_element = (powr<d - 3>(q) / (ctype)2 * powr<2>(k)) // x = p^2 / k^2 integral
+                              / powr<d - 1>(2 * (ctype)M_PI);          // fourier factor
+
+    NT res = int_element * x_weight * m_T * KERNEL::kernel(q, cos, phi, (ctype)0, k, t...);
+    for (uint idx_0 = 0; idx_0 < matsubara_size; ++idx_0) {
+      const ctype q0 = matsubara_quadrature_p[idx_0];
+      const ctype weight = x_weight * matsubara_quadrature_w[idx_0];
+      res +=
+          int_element * weight * (KERNEL::kernel(q, cos, phi, q0, k, t...) + KERNEL::kernel(q, cos, phi, -q0, k, t...));
     }
 
     dest[idx] = res;
@@ -76,31 +59,34 @@ namespace DiFfRG
   public:
     using ctype = typename get_type::ctype<NT>;
 
-    Integrator4DFiniteTq0GPU(QuadratureProvider &quadrature_provider, const std::array<uint, 4> grid_sizes,
-                             const ctype x_extent, const ctype q0_extent, const uint q0_summands, const JSONValue &json)
-        : Integrator4DFiniteTq0GPU(quadrature_provider, grid_sizes, x_extent, q0_extent, q0_summands,
-                                   json.get_double("/physical/T"), json.get_uint("/integration/cudathreadsperblock"))
+    Integrator4DFiniteTq0GPU(QuadratureProvider &quadrature_provider, const std::array<uint, 3> grid_sizes,
+                             const ctype x_extent, const JSONValue &json)
+        : Integrator4DFiniteTq0GPU(quadrature_provider, grid_sizes, x_extent, json.get_double("/physical/T"),
+                                   json.get_uint("/integration/cudathreadsperblock"))
     {
     }
 
-    Integrator4DFiniteTq0GPU(QuadratureProvider &quadrature_provider, const std::array<uint, 4> _grid_sizes,
-                             const ctype x_extent, const ctype q0_extent, const uint _q0_summands, const ctype T,
-                             const uint max_block_size = 256)
-        : quadrature_provider(quadrature_provider),
-          grid_sizes({_grid_sizes[0], _grid_sizes[1], _grid_sizes[2], _grid_sizes[3] + _q0_summands}),
-          device_data_size(grid_sizes[0] * grid_sizes[1] * grid_sizes[2]), x_extent(x_extent), q0_extent(q0_extent),
-          original_q0_summands(_q0_summands),
-          pool(rmm::mr::get_current_device_resource(), (device_data_size / 256 + 1) * 256)
+    Integrator4DFiniteTq0GPU(QuadratureProvider &quadrature_provider, const std::array<uint, 3> _grid_sizes,
+                             const ctype x_extent, const ctype T, const uint max_block_size = 256)
+        : quadrature_provider(quadrature_provider), grid_sizes({_grid_sizes[0], _grid_sizes[1], _grid_sizes[2], 0}),
+          device_data_size(grid_sizes[0] * grid_sizes[1] * grid_sizes[2]), x_extent(x_extent),
+          pool(rmm::mr::get_current_device_resource(), (device_data_size / 256 + 1) * 256), manual_E(false),
+          max_block_size(max_block_size)
     {
       if (grid_sizes[2] != grid_sizes[1])
         throw std::runtime_error("Grid sizes must be currently equal for all angular dimensions!");
+
+      set_T(T);
+    }
+
+    void reinit()
+    {
+      device_data_size = grid_sizes[0] * grid_sizes[1] * grid_sizes[2] * grid_sizes[3];
 
       ptr_x_quadrature_p = quadrature_provider.get_device_points<ctype>(grid_sizes[0]);
       ptr_x_quadrature_w = quadrature_provider.get_device_weights<ctype>(grid_sizes[0]);
       ptr_ang_quadrature_p = quadrature_provider.get_device_points<ctype>(grid_sizes[1]);
       ptr_ang_quadrature_w = quadrature_provider.get_device_weights<ctype>(grid_sizes[1]);
-
-      set_T(T);
 
       block_sizes = {max_block_size, max_block_size, max_block_size};
       // choose block sizes such that the size is both as close to max_block_size as possible and the individual sizes
@@ -125,57 +111,78 @@ namespace DiFfRG
       threads_per_block = dim3(threads1, threads2, threads3);
     }
 
-    void set_T(const ctype T)
+    /**
+     * @brief Set the temperature and typical energy scale of the integrator and recompute the Matsubara quadrature
+     * rule.
+     *
+     * @param T The temperature.
+     * @param E A typical energy scale, which determines the number of nodes in the quadrature rule.
+     */
+    void set_T(const ctype T, const ctype E = 0)
     {
       m_T = T;
-      if (is_close(T, 0.))
-        q0_summands = 0;
-      else
-        q0_summands = original_q0_summands;
-      ptr_q0_quadrature_p = quadrature_provider.get_device_points<ctype>(grid_sizes[3] - q0_summands);
-      ptr_q0_quadrature_w = quadrature_provider.get_device_weights<ctype>(grid_sizes[3] - q0_summands);
+      // the default typical energy scale will default the matsubara size to 11.
+      m_E = is_close(E, 0.) ? 10 * m_T : E;
+      manual_E = !is_close(E, 0.);
+
+      const auto old_size = grid_sizes[3];
+      grid_sizes[3] = quadrature_provider.get_matsubara_points<ctype>(m_T, m_E).size();
+
+      if (old_size != grid_sizes[3]) {
+        ptr_matsubara_quadrature_p = quadrature_provider.get_device_matsubara_points<ctype>(m_T, m_E);
+        ptr_matsubara_quadrature_w = quadrature_provider.get_device_matsubara_weights<ctype>(m_T, m_E);
+        reinit();
+      }
     }
 
-    void set_q0_extent(const ctype val) { q0_extent = val; }
+    /**
+     * @brief Set the typical energy scale of the integrator and recompute the Matsubara quadrature rule.
+     *
+     * @param E The typical energy scale.
+     */
+    void set_E(const ctype E) { set_T(m_T, E); }
 
     Integrator4DFiniteTq0GPU(const Integrator4DFiniteTq0GPU &other)
         : quadrature_provider(other.quadrature_provider), grid_sizes(other.grid_sizes),
           device_data_size(other.device_data_size), ptr_x_quadrature_p(other.ptr_x_quadrature_p),
           ptr_x_quadrature_w(other.ptr_x_quadrature_w), ptr_ang_quadrature_p(other.ptr_ang_quadrature_p),
-          ptr_ang_quadrature_w(other.ptr_ang_quadrature_w), ptr_q0_quadrature_p(other.ptr_q0_quadrature_p),
-          ptr_q0_quadrature_w(other.ptr_q0_quadrature_w), x_extent(other.x_extent), q0_extent(other.q0_extent),
-          original_q0_summands(other.original_q0_summands), q0_summands(other.q0_summands), m_T(other.m_T),
-          pool(rmm::mr::get_current_device_resource(), (device_data_size / 256 + 1) * 256)
+          ptr_ang_quadrature_w(other.ptr_ang_quadrature_w),
+          ptr_matsubara_quadrature_p(other.ptr_matsubara_quadrature_p),
+          ptr_matsubara_quadrature_w(other.ptr_matsubara_quadrature_w), x_extent(other.x_extent), m_T(other.m_T),
+          pool(rmm::mr::get_current_device_resource(), (device_data_size / 256 + 1) * 256),
+          max_block_size(other.max_block_size), manual_E(other.manual_E), m_E(other.m_E)
     {
       block_sizes = other.block_sizes;
       num_blocks = other.num_blocks;
       threads_per_block = other.threads_per_block;
     }
 
-    template <typename... T> NT get(const ctype k, const T &...t) const
+    template <typename... T> NT get(const ctype k, const T &...t)
     {
+      if (!manual_E) set_T(m_T, k);
+
       const auto cuda_stream = cuda_stream_pool.get_stream();
       rmm::device_uvector<NT> device_data(device_data_size, cuda_stream, &pool);
       gridreduce_4d_finiteTq0<ctype, NT, KERNEL>
           <<<num_blocks, threads_per_block, 0, rmm::cuda_stream_per_thread.value()>>>(
               device_data.data(), ptr_x_quadrature_p, ptr_x_quadrature_w, ptr_ang_quadrature_p, ptr_ang_quadrature_w,
-              ptr_q0_quadrature_p, ptr_q0_quadrature_w, x_extent, q0_extent, grid_sizes[3] - q0_summands, q0_summands,
-              m_T, k, t...);
+              ptr_matsubara_quadrature_p, ptr_matsubara_quadrature_w, x_extent, grid_sizes[3], m_T, k, t...);
       check_cuda();
       return KERNEL::constant(k, t...) + thrust::reduce(thrust::cuda::par.on(rmm::cuda_stream_per_thread.value()),
                                                         device_data.begin(), device_data.end(), NT(0),
                                                         thrust::plus<NT>());
     }
 
-    template <typename... T> std::future<NT> request(const ctype k, const T &...t) const
+    template <typename... T> std::future<NT> request(const ctype k, const T &...t)
     {
+      if (!manual_E) set_T(m_T, k);
+
       const auto cuda_stream = cuda_stream_pool.get_stream();
       std::shared_ptr<rmm::device_uvector<NT>> device_data =
           std::make_shared<rmm::device_uvector<NT>>(device_data_size, cuda_stream, &pool);
       gridreduce_4d_finiteTq0<ctype, NT, KERNEL><<<num_blocks, threads_per_block, 0, cuda_stream.value()>>>(
           (*device_data).data(), ptr_x_quadrature_p, ptr_x_quadrature_w, ptr_ang_quadrature_p, ptr_ang_quadrature_w,
-          ptr_q0_quadrature_p, ptr_q0_quadrature_w, x_extent, q0_extent, grid_sizes[3] - q0_summands, q0_summands, m_T,
-          k, t...);
+          ptr_matsubara_quadrature_p, ptr_matsubara_quadrature_w, x_extent, grid_sizes[3], m_T, k, t...);
       check_cuda();
       const NT constant = KERNEL::constant(k, t...);
 
@@ -188,24 +195,23 @@ namespace DiFfRG
   private:
     QuadratureProvider &quadrature_provider;
 
-    const std::array<uint, 4> grid_sizes;
+    std::array<uint, 4> grid_sizes;
     std::array<uint, 3> block_sizes;
 
-    const uint device_data_size;
+    uint device_data_size;
 
     const ctype *ptr_x_quadrature_p;
     const ctype *ptr_x_quadrature_w;
     const ctype *ptr_ang_quadrature_p;
     const ctype *ptr_ang_quadrature_w;
-    const ctype *ptr_q0_quadrature_p;
-    const ctype *ptr_q0_quadrature_w;
+    const ctype *ptr_matsubara_quadrature_p;
+    const ctype *ptr_matsubara_quadrature_w;
 
     const ctype x_extent;
-    ctype q0_extent;
-    const uint original_q0_summands;
-    uint q0_summands;
-    ctype m_T;
+    ctype m_T, m_E;
+    bool manual_E;
 
+    const uint max_block_size;
     dim3 num_blocks;
     dim3 threads_per_block;
 
@@ -236,10 +242,8 @@ namespace DiFfRG
     using ctype = typename get_type::ctype<NT>;
 
     Integrator4DFiniteTq0GPU(QuadratureProvider &quadrature_provider, const std::array<uint, 4> grid_sizes,
-                             const ctype x_extent, const ctype q0_extent, const uint q0_summands, const ctype T,
-                             const uint max_block_size = 256)
-        : Integrator4DFiniteTq0TBB<NT, KERNEL>(quadrature_provider, grid_sizes, x_extent, q0_extent, q0_summands, T,
-                                               max_block_size)
+                             const ctype x_extent, const ctype T, const uint max_block_size = 256)
+        : Integrator4DFiniteTq0TBB<NT, KERNEL>(quadrature_provider, grid_sizes, x_extent, T, max_block_size)
     {
     }
   };

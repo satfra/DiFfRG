@@ -96,6 +96,31 @@ namespace DiFfRG
   }
 
   /**
+   * @brief Surface of a d-dimensional sphere (precompiled)
+   *
+   * @tparam NT Type of the number
+   * @param d Dimension of the sphere
+   */
+  template <typename NT> consteval NT S_d_prec(uint d)
+  {
+    if (d == 1)
+      return 2;
+    else if (d == 2)
+      return static_cast<NT>(2) * static_cast<NT>(M_PI);
+    else if (d == 3)
+      return static_cast<NT>(4) * static_cast<NT>(M_PI);
+    else if (d == 4)
+      return static_cast<NT>(2) * powr<2>(static_cast<NT>(M_PI));
+    else if (d == 5)
+      return static_cast<NT>(8) * powr<2>(static_cast<NT>(M_PI)) / static_cast<NT>(3);
+    else if (d == 6)
+      return powr<3>(static_cast<NT>(M_PI));
+    else if (d == 7)
+      return static_cast<NT>(16) * powr<3>(static_cast<NT>(M_PI)) / static_cast<NT>(15);
+    return std::numeric_limits<NT>::quiet_NaN();
+  }
+
+  /**
    * @brief A compile-time evaluatable theta function
    */
   template <typename NumberType>
