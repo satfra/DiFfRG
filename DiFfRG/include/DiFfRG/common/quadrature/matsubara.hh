@@ -14,7 +14,7 @@ namespace DiFfRG
    * @brief A quadrature rule for (bosonic) Matsubara frequencies, based on the method of Monien [1]. This class
    * provides nodes and weights for the summation
    * \f[
-   * T \sum_{n=1}^{\infty} f(2\pi n T) \approx T \sum_{i=1}^{N-1} w_i f(x_i)
+   * T \sum_{n=\in \mathbb{Z}} f(2\pi n T) \approx \sum_{n=1}^{N} w_i (f(x_i) + f(-x_i)) + T f(0)
    * \f]
    *
    * [1] H. Monien, "Gaussian quadrature for sums: a rapidly convergent summation scheme", Math. Comp. 79, 857 (2010).
@@ -25,6 +25,14 @@ namespace DiFfRG
   template <typename NT> class MatsubaraQuadrature
   {
   public:
+    /**
+     * @brief Calculate the number of nodes needed for a given temperature and typical energy scale.
+     *
+     * @param T The temperature.
+     * @param typical_E A typical energy scale.
+     * @param step The step size of considered node sizes (e.g. step=2 implies only even numbers of nodes).
+     * @return size_t The number of nodes needed.
+     */
     static size_t predict_size(const NT T, const NT typical_E = 1., const size_t step = 1);
 
     /**
@@ -33,12 +41,23 @@ namespace DiFfRG
      * @param T The temperature.
      * @param typical_E A typical energy scale, which determines the number of nodes in the quadrature rule.
      * @param step The step size of considered node sizes (e.g. step=2 implies only even numbers of nodes).
+     * @param min_size Minimum number of nodes.
+     * @param max_size Maximum number of nodes.
      */
     MatsubaraQuadrature(const NT T, const NT typical_E = 1., const size_t step = 1, const size_t min_size = 0,
                         const size_t max_size = powr<10>(2));
 
     MatsubaraQuadrature();
 
+    /**
+     * @brief Update the quadrature rule with new parameters.
+     *
+     * @param T  The temperature.
+     * @param typical_E A typical energy scale, which determines the number of nodes in the quadrature rule.
+     * @param step The step size of considered node sizes (e.g. step=2 implies only even numbers of nodes).
+     * @param min_size Minimum number of nodes.
+     * @param max_size Maximum number of nodes.
+     */
     void reinit(const NT T, const NT typical_E = 1., const size_t step = 1, const size_t min_size = 0,
                 const size_t max_size = powr<10>(2));
 
@@ -120,12 +139,18 @@ namespace DiFfRG
     size_t m_size;
 
 #ifdef USE_CUDA
+    /**
+     * @brief Device-side nodes of the quadrature rule.
+     */
     thrust::device_vector<NT> device_x;
+
+    /**
+     * @brief Device-side weights of the quadrature rule.
+     */
     thrust::device_vector<NT> device_w;
 
     /**
      * @brief Move the nodes and weights to the device, if they are not already there.
-     *
      */
     void move_device_data();
 #endif
