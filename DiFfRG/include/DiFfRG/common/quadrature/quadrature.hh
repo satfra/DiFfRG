@@ -69,12 +69,11 @@ namespace DiFfRG
 
     std::vector<NT> m_nodes;
     std::vector<NT> m_weights;
-#ifdef USE_CUDA
+#ifdef __CUDACC__
     thrust::device_vector<NT> m_device_nodes;
     thrust::device_vector<NT> m_device_weights;
 
     void move_device_data();
 #endif
   };
-
 } // namespace DiFfRG
