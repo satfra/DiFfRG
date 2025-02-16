@@ -1,7 +1,6 @@
 #pragma once
 
 // DiFfRG
-#include "matsubara.hh"
 #include <DiFfRG/common/cuda_prefix.hh>
 #include <DiFfRG/common/quadrature/matsubara.hh>
 #include <DiFfRG/common/quadrature/quadrature.hh>
