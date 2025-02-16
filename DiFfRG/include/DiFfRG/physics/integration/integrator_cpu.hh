@@ -50,7 +50,7 @@ namespace DiFfRG
      */
     template <typename... T> NT get(const ctype k, const T &...t) const
     {
-      const ctype S_d = 2. * std::pow(M_PI, d / 2.) / std::tgammal(d / 2.);
+      constexpr ctype S_d = S_d_prec<ctype>(d);
       using std::sqrt;
 
       return KERNEL::constant(k, t...) +

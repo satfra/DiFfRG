@@ -30,7 +30,7 @@ namespace DiFfRG
     const ctype cos = 2 * (ang_quadrature_p[idx_y] - (ctype)0.5);
     const ctype weight = 2 * ang_quadrature_w[idx_y] * x_quadrature_w[idx_x] * x_extent;
     const ctype q = k * sqrt(x_quadrature_p[idx_x] * x_extent);
-    const ctype S_d = 2 * pow(M_PI, d / 2.) / tgamma(d / 2.);
+    constexpr ctype S_d = S_d_prec<ctype>(d);
     const ctype int_element = S_d                                        // solid nd angle
                               * (powr<d - 2>(q) / (ctype)2 * powr<2>(k)) // x = p^2 / k^2 integral
                               * (1 / (ctype)2)                           // divide the cos integral out

@@ -903,13 +903,13 @@ ccFlow="#include \"flows.hh\"
                     [&](double q0) { return 1. / powr<2>(powr<2>(q0) + powr<2>(k)); }),
                     grid_size_int{{x_quadrature_order}},
                     grid_sizes_int_fT{{x_quadrature_order, x0_quadrature_order}},
-                    grid_sizes_angle_int{{x_quadrature_order, 2 * angle_quadrature_order, x0_quadrature_order}},
+                    grid_sizes_angle_int{{x_quadrature_order, angle_quadrature_order, x0_quadrature_order}},
                     grid_sizes_4D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, x0_quadrature_order}},
-                      grid_sizes_2D_cartesian_int{{x_quadrature_order, x_quadrature_order}},
-                      grid_sizes_3D_cartesian_int{{x_quadrature_order, x_quadrature_order, x_quadrature_order}}"<>
+                    grid_sizes_2D_cartesian_int{{x_quadrature_order, x_quadrature_order}},
+                    grid_sizes_3D_cartesian_int{{x_quadrature_order, x_quadrature_order, x_quadrature_order}}"<>
 StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, grid_size_int, x_extent, json)"&,integratorList]]<>
 StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, "<>GridSelectorFiniteT[#["Angles"]]<>", x_extent, x0_extent, x0_summands, json)"&,integratorx0List]]<>
-StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, "<>GridSelectorFiniteT[#["Angles"]]<>", x_extent, q0_extent, x0_summands, json)"&,integratorq0List]]<>"
+StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, "<>GridSelectorFiniteT[#["Angles"]]<>", x_extent, json)"&,integratorq0List]]<>"
 {
 }
 ";
@@ -1714,7 +1714,7 @@ namespace DiFfRG
     class "<>className<>"
     {
     public:
-      "<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes, const "<>computeType<>" x_extent, const "<>computeType<>" q0_extent, const uint q0_summands, const JSONValue& json);
+      "<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json);
       "<>className<>"(const "<>className<>"& other);
       ~"<>className<>"();
 
@@ -1748,8 +1748,7 @@ If[kernel["AD"],"
           return get_CT(std::forward<T>(t)...);"]<>"
       }
 
-      void set_T(const "<>computeType<>" value);
-      void set_q0_extent(const "<>computeType<>" value);
+      void set_T(const "<>computeType<>" T, const "<>computeType<>" E = 0);
 
     private:
       std::future<"<>computeType<>"> request_CT(const "<>computeType<>" k, "<>paramList<>");
@@ -1763,8 +1762,6 @@ If[kernel["AD"],"
       const std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes;
       std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> jac_grid_sizes;
       const "<>computeType<>" x_extent;
-      const "<>computeType<>" q0_extent;
-      const uint q0_summands;
       const "<>computeType<>" jacobian_quadrature_factor;
       const JSONValue json;
 
@@ -1786,41 +1783,35 @@ namespace DiFfRG
 {
   namespace Flows
   {
-    "<>className<>"::"<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes, const "<>computeType<>" x_extent, const "<>computeType<>" q0_extent, const uint q0_summands, const JSONValue& json)
+    "<>className<>"::"<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json)
         : quadrature_provider(quadrature_provider), grid_sizes(grid_sizes), x_extent(x_extent), 
-          q0_extent(q0_extent), q0_summands(q0_summands), jacobian_quadrature_factor(json.get_double(\"/integration/jacobian_quadrature_factor\")), json(json)"<>"
+          jacobian_quadrature_factor(json.get_double(\"/integration/jacobian_quadrature_factor\")), json(json)"<>"
     {
-      integrator = std::make_unique<"<>integrator<>">(quadrature_provider, grid_sizes, x_extent, q0_extent, q0_summands, json);"<>
+      integrator = std::make_unique<"<>integrator<>">(quadrature_provider, grid_sizes, x_extent, json);"<>
 If[kernel["AD"],"
       for(uint i = 0; i < "<>ToString[kernel["Angles"]+2]<>"; ++i)
         jac_grid_sizes[i] = uint(jacobian_quadrature_factor * grid_sizes[i]);
-      integrator_AD = std::make_unique<"<>integratorAD<>">(quadrature_provider, jac_grid_sizes, x_extent, q0_extent, q0_summands, json);",""]<>"
+      integrator_AD = std::make_unique<"<>integratorAD<>">(quadrature_provider, jac_grid_sizes, x_extent, json);",""]<>"
     }
 
     "<>className<>"::"<>className<>"(const "<>className<>"& other)
         : quadrature_provider(other.quadrature_provider), grid_sizes(other.grid_sizes), jac_grid_sizes(other.jac_grid_sizes), x_extent(other.x_extent), 
-          q0_extent(other.q0_extent), q0_summands(other.q0_summands), jacobian_quadrature_factor(other.jacobian_quadrature_factor), json(other.json),
+          jacobian_quadrature_factor(other.jacobian_quadrature_factor), json(other.json),
           integrator(std::make_unique<"<>integrator<>">(other.quadrature_provider, other.grid_sizes, 
-            other.x_extent, other.q0_extent, other.q0_summands, other.json))"<>
+            other.x_extent, other.json))"<>
 If[kernel["AD"],",
           integrator_AD(std::make_unique<"<>integratorAD<>">(other.quadrature_provider, other.jac_grid_sizes, 
-            other.x_extent, other.q0_extent, other.q0_summands, other.json))",""]<>"
+            other.x_extent, other.json))",""]<>"
     {
     }
 
     "<>className<>"::~"<>className<>"() = default;
 
-    void  "<>className<>"::set_T(const "<>computeType<>" value)
+    void  "<>className<>"::set_T(const "<>computeType<>" T, const"<>computeType<>" E)
     {
-      integrator->set_T(value);"<>
+      integrator->set_T(T, E);"<>
       If[kernel["AD"],"
-      integrator_AD->set_T(value);",""]<>"
-    }
-    void  "<>className<>"::set_q0_extent(const "<>computeType<>" value)
-    {
-      integrator->set_q0_extent(value);"<>
-      If[kernel["AD"],"
-      integrator_AD->set_q0_extent(value);",""]<>"
+      integrator_AD->set_T(T, E);",""]<>"
     }
 
     std::future<"<>computeType<>"> "<>className<>"::request_CT(const "<>computeType<>" k, "<>paramList<>")
