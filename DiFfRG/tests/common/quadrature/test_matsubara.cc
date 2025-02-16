@@ -18,7 +18,8 @@ TEST_CASE("Test matsubara quadrature rule", "[double][quadrature][matsubara]")
     const double reference = 0.5 * 1. / std::tanh(0.5 / T);
     const double sum = mq.sum(f);
 
-    CHECK(sum == Catch::Approx(reference));
+    constexpr double expected_precision = 1e-13;
+    CHECK(sum == Catch::Approx(reference).epsilon(expected_precision));
   }
   SECTION("Test with different parameters")
   {
@@ -36,7 +37,9 @@ TEST_CASE("Test matsubara quadrature rule", "[double][quadrature][matsubara]")
            (std::cos(b / (2. * T)) - std::cosh(std::sqrt(4 * std::pow(a, 2) - std::pow(b, 2)) / (2. * T)))));
 
     const double result = mq.sum(f);
-    CHECK(result == Catch::Approx(reference));
+
+    constexpr double expected_precision = 1e-13;
+    CHECK(result == Catch::Approx(reference).epsilon(expected_precision));
   }
   SECTION("Test at T=0")
   {
@@ -50,8 +53,8 @@ TEST_CASE("Test matsubara quadrature rule", "[double][quadrature][matsubara]")
     const double reference = 1 / (2. * a);
 
     const double result = mq.sum(f);
-    if (!(result == Catch::Approx(reference).margin(5e-6)))
-      std::cout << "result: " << result << "| reference: " << reference << std::endl;
-    CHECK(result == Catch::Approx(reference).margin(5e-6));
+
+    constexpr double expected_precision = 3e-6;
+    CHECK(result == Catch::Approx(reference).epsilon(expected_precision));
   }
 }

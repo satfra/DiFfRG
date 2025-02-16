@@ -76,7 +76,10 @@ namespace DiFfRG
 
     template <typename... T> NT get(const ctype k, const T &...t)
     {
-      if (!manual_E) set_T(m_T, k);
+      if (!manual_E && (std::abs(k - m_E) / std::max(k, m_E) > 2.5e-2)) {
+        set_T(m_T, k);
+        manual_E = false;
+      }
 
       constexpr int d = 4;
       using std::sqrt, std::exp, std::log;

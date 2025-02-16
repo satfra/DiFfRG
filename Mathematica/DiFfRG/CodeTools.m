@@ -383,8 +383,8 @@ Switch[kernel["Angles"],
 
 GridSelectorFiniteT=<|
 0->"grid_sizes_int_fT",
-1->"grid_sizes_angle_int",
-2->"grid_sizes_4D_int"
+1->"grid_sizes_angle_int_fT",
+2->"grid_sizes_4D_int_fT"
 |>;
 
 DeviceChoice["CPU"]="TBB";
@@ -814,12 +814,17 @@ ccFlow="#include \"flows.hh\"
 
 "<>name<>"FlowEquations::"<>name<>"FlowEquations(const JSONValue& json)
   : FlowEquations(json, [](double x) { return powr<-1>(x + __REGULATOR__::RB(1., x)) * __REGULATOR__::RBdot(1., x); }),
+
                       grid_size_int{{x_quadrature_order}},
                       grid_sizes_angle_int{{x_quadrature_order, 2 * angle_quadrature_order}},
                       grid_sizes_3D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order}},
                       grid_sizes_4D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, angle_quadrature_order}},
+
                       grid_sizes_2D_cartesian_int{{x_quadrature_order, x_quadrature_order}},
-                      grid_sizes_3D_cartesian_int{{x_quadrature_order, x_quadrature_order, x_quadrature_order}}"<>
+                      grid_sizes_3D_cartesian_int{{x_quadrature_order, x_quadrature_order, x_quadrature_order}},
+
+                      quadrature_provider(json)
+"<>
 StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, "<>GridSelector[#]<>", x_extent, json)"&,integratorList]]<>"
 {
 }
@@ -882,9 +887,13 @@ public:
 
 private:
   const std::array<uint, 1> grid_size_int;
-  const std::array<uint, 2> grid_sizes_int_fT;
-  const std::array<uint, 3> grid_sizes_angle_int;
+  const std::array<uint, 2> grid_sizes_angle_int;
+  const std::array<uint, 3> grid_sizes_3D_int;
   const std::array<uint, 4> grid_sizes_4D_int;
+
+  const std::array<uint, 2> grid_sizes_int_fT;
+  const std::array<uint, 3> grid_sizes_angle_int_fT;
+  const std::array<uint, 4> grid_sizes_4D_int_fT;
 
   const std::array<uint, 2> grid_sizes_2D_cartesian_int;
   const std::array<uint, 3> grid_sizes_3D_cartesian_int;
@@ -898,18 +907,28 @@ ccFlow="#include \"flows.hh\"
 
 "<>name<>"FlowEquations::"<>name<>"FlowEquations(const JSONValue& json)
   : FlowEquationsFiniteT(json, json.get_double(\"/physical/T\"),
+
                     [&](double q2) { return 1. / (q2 + __REGULATOR__::RB(powr<2>(k), q2)) * __REGULATOR__::RBdot(powr<2>(k), q2); },
                     [&](double q0) { return 1. / (powr<2>(q0) + __REGULATOR__::RB(powr<2>(k), powr<2>(q0))) * __REGULATOR__::RBdot(powr<2>(k), powr<2>(q0)); }, 
                     [&](double q0) { return 1. / powr<2>(powr<2>(q0) + powr<2>(k)); }),
+
                     grid_size_int{{x_quadrature_order}},
+                    grid_sizes_angle_int{{x_quadrature_order, angle_quadrature_order}},
+                    grid_sizes_3D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order}},
+                    grid_sizes_4D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, angle_quadrature_order}},
+
                     grid_sizes_int_fT{{x_quadrature_order, x0_quadrature_order}},
-                    grid_sizes_angle_int{{x_quadrature_order, angle_quadrature_order, x0_quadrature_order}},
-                    grid_sizes_4D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, x0_quadrature_order}},
+                    grid_sizes_angle_int_fT{{x_quadrature_order, angle_quadrature_order, x0_quadrature_order}},
+                    grid_sizes_4D_int_fT{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, x0_quadrature_order}},
+
                     grid_sizes_2D_cartesian_int{{x_quadrature_order, x_quadrature_order}},
-                    grid_sizes_3D_cartesian_int{{x_quadrature_order, x_quadrature_order, x_quadrature_order}}"<>
+                    grid_sizes_3D_cartesian_int{{x_quadrature_order, x_quadrature_order, x_quadrature_order}}
+
+                    quadrature_provider(json)
+"<>
 StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, grid_size_int, x_extent, json)"&,integratorList]]<>
 StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, "<>GridSelectorFiniteT[#["Angles"]]<>", x_extent, x0_extent, x0_summands, json)"&,integratorx0List]]<>
-StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, "<>GridSelectorFiniteT[#["Angles"]]<>", x_extent, json)"&,integratorq0List]]<>"
+StringJoin[Map[",\n                      "<>#["Name"]<>"_integrator(quadrature_provider, "<>GridSelector[#]<>", x_extent, json)"&,integratorq0List]]<>"
 {
 }
 ";
@@ -1714,7 +1733,7 @@ namespace DiFfRG
     class "<>className<>"
     {
     public:
-      "<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json);
+      "<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json);
       "<>className<>"(const "<>className<>"& other);
       ~"<>className<>"();
 
@@ -1759,8 +1778,8 @@ If[kernel["AD"],"
 ""]<>"
 
       QuadratureProvider& quadrature_provider;
-      const std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes;
-      std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> jac_grid_sizes;
+      const std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> grid_sizes;
+      std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> jac_grid_sizes;
       const "<>computeType<>" x_extent;
       const "<>computeType<>" jacobian_quadrature_factor;
       const JSONValue json;
@@ -1783,13 +1802,13 @@ namespace DiFfRG
 {
   namespace Flows
   {
-    "<>className<>"::"<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json)
+    "<>className<>"::"<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json)
         : quadrature_provider(quadrature_provider), grid_sizes(grid_sizes), x_extent(x_extent), 
           jacobian_quadrature_factor(json.get_double(\"/integration/jacobian_quadrature_factor\")), json(json)"<>"
     {
       integrator = std::make_unique<"<>integrator<>">(quadrature_provider, grid_sizes, x_extent, json);"<>
 If[kernel["AD"],"
-      for(uint i = 0; i < "<>ToString[kernel["Angles"]+2]<>"; ++i)
+      for(uint i = 0; i < "<>ToString[kernel["Angles"]+1]<>"; ++i)
         jac_grid_sizes[i] = uint(jacobian_quadrature_factor * grid_sizes[i]);
       integrator_AD = std::make_unique<"<>integratorAD<>">(quadrature_provider, jac_grid_sizes, x_extent, json);",""]<>"
     }
@@ -1807,7 +1826,7 @@ If[kernel["AD"],",
 
     "<>className<>"::~"<>className<>"() = default;
 
-    void  "<>className<>"::set_T(const "<>computeType<>" T, const"<>computeType<>" E)
+    void  "<>className<>"::set_T(const "<>computeType<>" T, const "<>computeType<>" E)
     {
       integrator->set_T(T, E);"<>
       If[kernel["AD"],"

@@ -142,7 +142,10 @@ namespace DiFfRG
 
     template <typename... T> NT get(const ctype k, const T &...t)
     {
-      if (!manual_E) set_T(m_T, k);
+      if (!manual_E && (std::abs(k - m_E) / std::max(k, m_E) > 2.5e-2)) {
+        set_T(m_T, k);
+        manual_E = false;
+      }
 
       const auto cuda_stream = cuda_stream_pool.get_stream();
       rmm::device_uvector<NT> device_data(device_data_size, cuda_stream, &pool);
@@ -156,7 +159,10 @@ namespace DiFfRG
 
     template <typename... T> std::future<NT> request(const ctype k, const T &...t)
     {
-      if (!manual_E) set_T(m_T, k);
+      if (!manual_E && (std::abs(k - m_E) / std::max(k, m_E) > 2.5e-2)) {
+        set_T(m_T, k);
+        manual_E = false;
+      }
 
       const auto cuda_stream = cuda_stream_pool.get_stream();
       std::shared_ptr<rmm::device_uvector<NT>> device_data =

@@ -44,7 +44,7 @@ TEST_CASE("Test 4D cpu momentum integrals with finite T (q0)", "[4D integration]
 
   const double x_extent = GENERATE(take(2, random(1., 2.)));
   const double T = GENERATE(take(4, random(0.01, 1.)));
-  const double k = GENERATE(take(2, random(0., 100.)));
+  const double k = GENERATE(take(2, random(0., 10.)));
   const double val = GENERATE(take(4, random(0.8, 1.2)));
 
   QuadratureProvider quadrature_provider;

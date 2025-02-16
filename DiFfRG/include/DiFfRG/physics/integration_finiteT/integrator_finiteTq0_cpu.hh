@@ -74,7 +74,10 @@ namespace DiFfRG
 
     template <typename... T> NT get(const ctype k, const T &...t)
     {
-      if (!manual_E) set_T(m_T, k);
+      if (!manual_E && (std::abs(k - m_E) / std::max(k, m_E) > 2.5e-2)) {
+        set_T(m_T, k);
+        manual_E = false;
+      }
 
       constexpr ctype S_dm1 = S_d_prec<ctype>(d - 1);
       using std::sqrt, std::exp, std::log;
@@ -116,7 +119,7 @@ namespace DiFfRG
   private:
     QuadratureProvider &quadrature_provider;
 
-    const std::array<uint, 2> grid_sizes;
+    std::array<uint, 2> grid_sizes;
 
     const ctype x_extent;
     ctype m_T, m_E;

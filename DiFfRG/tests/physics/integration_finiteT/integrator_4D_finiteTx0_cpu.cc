@@ -77,13 +77,11 @@ TEST_CASE("Test 4D cpu momentum integrals with finite T (x0)", "[4D integration]
   SECTION("Compare against q0 integrator")
   {
     const double q_extent = std::sqrt(x_extent * powr<2>(k));
-    const double q0_extent = x0_extent * k;
     const double val = GENERATE(take(4, random(0.8, 1.2)));
     const double reference_integral = V_d(dim - 1, q_extent) / powr<dim - 1>(2. * M_PI) // spatial part
                                       / T / std::tanh(0.5 / val) / 2. / val;            // sum
 
-    Integrator4DFiniteTq0TBB<double, PolyIntegrand> integrator_cpu(quadrature_provider, {{64, 12, 12, x0_int_order}},
-                                                                   x_extent, q0_extent, x0_summands, T);
+    Integrator4DFiniteTq0TBB<double, PolyIntegrand> integrator_cpu(quadrature_provider, {{64, 12, 12}}, x_extent, T);
 
     const double int_gpu =
         integrator
