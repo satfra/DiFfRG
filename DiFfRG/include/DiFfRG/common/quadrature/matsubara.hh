@@ -1,8 +1,8 @@
 #pragma once
 
 // DiFfRG
+#include <DiFfRG/common/cuda_prefix.hh>
 #include <DiFfRG/common/math.hh>
-#include <DiFfRG/common/quadrature/quadrature.hh>
 
 // C++ standard library
 #include <cmath>
@@ -25,6 +25,8 @@ namespace DiFfRG
   template <typename NT> class MatsubaraQuadrature
   {
   public:
+    static size_t predict_size(const NT T, const NT typical_E = 1., const size_t step = 1);
+
     /**
      * @brief Create a new quadrature rule for Matsubara frequencies.
      *
@@ -33,67 +35,49 @@ namespace DiFfRG
      * @param step The step size of considered node sizes (e.g. step=2 implies only even numbers of nodes).
      */
     MatsubaraQuadrature(const NT T, const NT typical_E = 1., const size_t step = 1, const size_t min_size = 0,
-                        const size_t max_size = powr<10>(2))
-        : T(T), typical_E(typical_E)
-    {
-      // Determine the number of nodes in the quadrature rule.
-      const NT E_max = 10 * std::abs(typical_E);
-      m_size = 5 + int(std::sqrt(4 * E_max / (M_PI * M_PI * std::abs(T))));
-      m_size = (size_t)std::ceil(m_size / (double)step) * step;
-      m_size = std::max(min_size, std::min(max_size, m_size));
+                        const size_t max_size = powr<10>(2));
 
-      // construct the recurrence relation for the quadrature rule from [1]
-      std::vector<NT> a(m_size, 0.);
-      std::vector<NT> b(m_size, 0.);
+    MatsubaraQuadrature();
 
-      for (size_t j = 0; j < m_size; ++j) {
-        const double j1 = j + 1;
-        a[j] = 2 * powr<2>(M_PI) / (4 * j + 1) / (4 * j + 5);
-        b[j] = powr<4>(M_PI) / ((4 * j1 - 1) * (4 * j1 + 3)) / powr<2>(4 * j1 + 1);
-      }
-      a[0] = powr<2>(M_PI) / 15.;
-
-      const NT mu0 = powr<2>(M_PI) / 6.;
-
-      // compute the nodes and weights of the quadrature rule
-      make_quadrature(a, b, mu0, x, w);
-
-      // normalize the weights and scale the nodes
-      for (size_t i = 0; i < m_size; ++i) {
-        w[i] = T * w[i] / x[i];
-        x[i] = 2. * M_PI * T / std::sqrt(x[i]);
-      }
-    }
+    void reinit(const NT T, const NT typical_E = 1., const size_t step = 1, const size_t min_size = 0,
+                const size_t max_size = powr<10>(2));
 
     /**
      * @brief Get the nodes of the quadrature rule.
      *
      * @return The nodes of the quadrature rule.
      */
-    const std::vector<NT> &nodes() const { return x; }
+    const std::vector<NT> &nodes() const;
 
     /**
      * @brief Get the weights of the quadrature rule.
      *
      * @return The weights of the quadrature rule.
      */
-    const std::vector<NT> &weights() const { return w; }
+    const std::vector<NT> &weights() const;
 
     /**
      * @brief Get the size of the quadrature rule.
      */
-    size_t size() const { return m_size; }
+    size_t size() const;
 
     /**
      * @brief Get the temperature of the quadrature rule.
      */
-    NT get_T() const { return T; }
+    NT get_T() const;
 
     /**
      * @brief Get the typical energy scale of the quadrature rule.
      */
-    NT get_typical_E() const { return typical_E; }
+    NT get_typical_E() const;
 
+    /**
+     * @brief Compute a matsubara sum of a given function.
+     *
+     * @tparam F The function type.
+     * @param f The function to be summed. Must have signature NT f(NT x).
+     * @return NT The Matsubara sum of the function.
+     */
     template <typename F> NT sum(const F &f) const
     {
       NT sum = T * f(static_cast<NT>(0));
@@ -102,8 +86,14 @@ namespace DiFfRG
       return sum;
     }
 
+#ifdef USE_CUDA
+    const NT *device_nodes();
+
+    const NT *device_weights();
+#endif
+
   private:
-    const double T, typical_E;
+    double T, typical_E;
     /**
      * @brief Nodes of the quadrature rule.
      */
@@ -118,6 +108,12 @@ namespace DiFfRG
      * @brief The number of nodes in the quadrature rule.
      */
     size_t m_size;
-  };
 
+#ifdef USE_CUDA
+    thrust::device_vector<NT> device_x;
+    thrust::device_vector<NT> device_w;
+
+    void move_device_data();
+#endif
+  };
 } // namespace DiFfRG
