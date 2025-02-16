@@ -12,7 +12,7 @@ namespace DiFfRG
   template <typename NT> int MatsubaraQuadrature<NT>::predict_size(const NT T, const NT typical_E, const int step)
   {
     const NT relative_distance = abs(typical_E) / abs(T + 1e-16);
-    if (relative_distance > 4.4e+2) return -32;
+    if (is_close(T, NT(0)) || relative_distance > 4.4e+2) return -vacuum_quad_size;
 
     const NT E_max = 20 * std::abs(typical_E);
     int size = 5 + int(std::sqrt(4 * E_max / (M_PI * M_PI * std::abs(T))));
@@ -23,11 +23,13 @@ namespace DiFfRG
   template <typename NT>
   MatsubaraQuadrature<NT>::MatsubaraQuadrature(const NT T, const NT typical_E, const int step, const int min_size,
                                                const int max_size)
+      : vacuum_quad_size(48)
+
   {
     reinit(T, typical_E, step, min_size, max_size);
   }
 
-  template <typename NT> MatsubaraQuadrature<NT>::MatsubaraQuadrature() {}
+  template <typename NT> MatsubaraQuadrature<NT>::MatsubaraQuadrature() : m_size(0), vacuum_quad_size(48) {}
 
   template <typename NT>
   void MatsubaraQuadrature<NT>::reinit(const NT T, const NT typical_E, const int step, const int min_size,
@@ -117,7 +119,9 @@ namespace DiFfRG
   template <typename NT> void MatsubaraQuadrature<NT>::reinit_0()
   {
     this->T = 0;
+    m_size = abs(m_size);
     if (m_size % 2 != 0) m_size++;
+    if (is_close(typical_E, NT(0))) this->typical_E = 1.;
 
     // obtain a gauss-legendre quadrature rule for the interval [0, 1]
     Quadrature<NT> quad(m_size / 2, QuadratureType::legendre);

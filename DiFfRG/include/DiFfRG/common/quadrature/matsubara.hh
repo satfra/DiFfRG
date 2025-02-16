@@ -34,7 +34,7 @@ namespace DiFfRG
      * @return int The number of nodes needed. If the number is negative, the T=0-limit has been reached (usually if
      * typical_E / T > 4.4e+2, which is 64 nodes).
      */
-    static int predict_size(const NT T, const NT typical_E = 1., const int step = 1);
+    int predict_size(const NT T, const NT typical_E = 1., const int step = 1);
 
     /**
      * @brief Create a new quadrature rule for Matsubara frequencies.
@@ -123,7 +123,7 @@ namespace DiFfRG
 #endif
 
   private:
-    double T, typical_E;
+    NT T, typical_E;
     /**
      * @brief Nodes of the quadrature rule.
      */
@@ -149,16 +149,18 @@ namespace DiFfRG
      * @brief Device-side weights of the quadrature rule.
      */
     thrust::device_vector<NT> device_w;
+#endif
 
     /**
      * @brief Move the nodes and weights to the device, if they are not already there.
      */
     void move_device_data();
-#endif
 
     /**
      * @brief Construct a quadrature rule for T=0.
      */
     void reinit_0();
+
+    int vacuum_quad_size;
   };
 } // namespace DiFfRG
