@@ -4,19 +4,25 @@
 #include <DiFfRG/common/quadrature/matsubara.hh>
 #include <DiFfRG/common/quadrature/quadrature.hh>
 
+// Standard library
+#include <cmath>
+
 namespace DiFfRG
 {
-  template <typename NT> size_t MatsubaraQuadrature<NT>::predict_size(const NT T, const NT typical_E, const size_t step)
+  template <typename NT> int MatsubaraQuadrature<NT>::predict_size(const NT T, const NT typical_E, const int step)
   {
-    const NT E_max = 10 * std::abs(typical_E);
-    size_t size = 5 + int(std::sqrt(4 * E_max / (M_PI * M_PI * std::abs(T))));
-    size = (size_t)std::ceil(size / (double)step) * step;
+    const NT relative_distance = abs(typical_E) / abs(T + 1e-16);
+    if (relative_distance > 4.4e+2) return -32;
+
+    const NT E_max = 20 * std::abs(typical_E);
+    int size = 5 + int(std::sqrt(4 * E_max / (M_PI * M_PI * std::abs(T))));
+    size = (int)std::ceil(size / (double)step) * step;
     return size;
   }
 
   template <typename NT>
-  MatsubaraQuadrature<NT>::MatsubaraQuadrature(const NT T, const NT typical_E, const size_t step, const size_t min_size,
-                                               const size_t max_size)
+  MatsubaraQuadrature<NT>::MatsubaraQuadrature(const NT T, const NT typical_E, const int step, const int min_size,
+                                               const int max_size)
   {
     reinit(T, typical_E, step, min_size, max_size);
   }
@@ -24,26 +30,31 @@ namespace DiFfRG
   template <typename NT> MatsubaraQuadrature<NT>::MatsubaraQuadrature() {}
 
   template <typename NT>
-  void MatsubaraQuadrature<NT>::reinit(const NT T, const NT typical_E, const size_t step, const size_t min_size,
-                                       const size_t max_size)
+  void MatsubaraQuadrature<NT>::reinit(const NT T, const NT typical_E, const int step, const int min_size,
+                                       const int max_size)
   {
     this->T = T;
     this->typical_E = typical_E;
 
-#ifdef USE_CUDA
+#ifdef __CUDACC__
     device_x.clear();
     device_w.clear();
 #endif
 
     // Determine the number of nodes in the quadrature rule.
     m_size = predict_size(T, typical_E, step);
+    if (m_size < 0) {
+      m_size = abs(m_size);
+      reinit_0();
+      return;
+    }
     m_size = std::max(min_size, std::min(max_size, m_size));
 
     // construct the recurrence relation for the quadrature rule from [1]
     std::vector<NT> a(m_size, 0.);
     std::vector<NT> b(m_size, 0.);
 
-    for (size_t j = 0; j < m_size; ++j) {
+    for (int j = 0; j < m_size; ++j) {
       const double j1 = j + 1;
       a[j] = 2 * powr<2>(M_PI) / (4 * j + 1) / (4 * j + 5);
       b[j] = powr<4>(M_PI) / ((4 * j1 - 1) * (4 * j1 + 3)) / powr<2>(4 * j1 + 1);
@@ -56,7 +67,7 @@ namespace DiFfRG
     make_quadrature(a, b, mu0, x, w);
 
     // normalize the weights and scale the nodes
-    for (size_t i = 0; i < m_size; ++i) {
+    for (int i = 0; i < m_size; ++i) {
       w[i] = T * w[i] / x[i];
       x[i] = 2. * M_PI * T / std::sqrt(x[i]);
     }
@@ -65,7 +76,7 @@ namespace DiFfRG
   template <typename NT> const std::vector<NT> &MatsubaraQuadrature<NT>::nodes() const { return x; }
   template <typename NT> const std::vector<NT> &MatsubaraQuadrature<NT>::weights() const { return w; }
 
-  template <typename NT> size_t MatsubaraQuadrature<NT>::size() const { return m_size; }
+  template <typename NT> int MatsubaraQuadrature<NT>::size() const { return m_size; }
   template <typename NT> NT MatsubaraQuadrature<NT>::get_T() const { return T; }
   template <typename NT> NT MatsubaraQuadrature<NT>::get_typical_E() const { return typical_E; }
 
@@ -101,6 +112,39 @@ namespace DiFfRG
       thrust::copy(w.begin(), w.end(), device_w.begin());
     }
 #endif
+  }
+
+  template <typename NT> void MatsubaraQuadrature<NT>::reinit_0()
+  {
+    this->T = 0;
+    if (m_size % 2 != 0) m_size++;
+
+    // obtain a gauss-legendre quadrature rule for the interval [0, 1]
+    Quadrature<NT> quad(m_size / 2, QuadratureType::legendre);
+
+    // resize the nodes and weights
+    x.resize(m_size);
+    w.resize(m_size);
+
+    // strategy: divide into two parts, one with linear and one with logarithmic scaling
+    // the dividing point is an order of magnitude above the typical energy scale
+    const long double div = 1e+1 * abs(typical_E);
+
+    // the nodes with a linear scale
+    for (int i = 0; i < m_size / 2; ++i) {
+      x[i] = quad.nodes()[i] * div;
+      w[i] = quad.weights()[i] * div / NT(2 * M_PI);
+    }
+
+    // the nodes with a logarithmic scale
+    using std::log, std::exp, std::abs, std::min;
+    const long double extent = 1e6 * abs(typical_E);
+    const long double log_start = log(div);
+    const long double log_ext = log(extent / div);
+    for (int i = 0; i < m_size / 2; ++i) {
+      x[i + m_size / 2] = exp(log_start + log_ext * quad.nodes()[i]);
+      w[i + m_size / 2] = (quad.weights()[i] * log_ext * x[i + m_size / 2]) / NT(2 * M_PI);
+    }
   }
 
   // explicit instantiation

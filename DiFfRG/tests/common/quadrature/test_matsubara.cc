@@ -38,4 +38,20 @@ TEST_CASE("Test matsubara quadrature rule", "[double][quadrature][matsubara]")
     const double result = mq.sum(f);
     CHECK(result == Catch::Approx(reference));
   }
+  SECTION("Test at T=0")
+  {
+    const double T = 0.;
+    const double a = GENERATE(take(20, random(0.01, 10.0)));
+
+    MatsubaraQuadrature<double> mq(T, a);
+
+    const auto f = [&](const double x) { return 1. / (powr<2>(a) + powr<2>(x)); };
+
+    const double reference = 1 / (2. * a);
+
+    const double result = mq.sum(f);
+    if (!(result == Catch::Approx(reference).margin(5e-6)))
+      std::cout << "result: " << result << "| reference: " << reference << std::endl;
+    CHECK(result == Catch::Approx(reference).margin(5e-6));
+  }
 }

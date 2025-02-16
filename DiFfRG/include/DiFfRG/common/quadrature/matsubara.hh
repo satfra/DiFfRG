@@ -31,9 +31,10 @@ namespace DiFfRG
      * @param T The temperature.
      * @param typical_E A typical energy scale.
      * @param step The step size of considered node sizes (e.g. step=2 implies only even numbers of nodes).
-     * @return size_t The number of nodes needed.
+     * @return int The number of nodes needed. If the number is negative, the T=0-limit has been reached (usually if
+     * typical_E / T > 4.4e+2, which is 64 nodes).
      */
-    static size_t predict_size(const NT T, const NT typical_E = 1., const size_t step = 1);
+    static int predict_size(const NT T, const NT typical_E = 1., const int step = 1);
 
     /**
      * @brief Create a new quadrature rule for Matsubara frequencies.
@@ -44,8 +45,8 @@ namespace DiFfRG
      * @param min_size Minimum number of nodes.
      * @param max_size Maximum number of nodes.
      */
-    MatsubaraQuadrature(const NT T, const NT typical_E = 1., const size_t step = 1, const size_t min_size = 0,
-                        const size_t max_size = powr<10>(2));
+    MatsubaraQuadrature(const NT T, const NT typical_E = 1., const int step = 1, const int min_size = 0,
+                        const int max_size = powr<10>(2));
 
     MatsubaraQuadrature();
 
@@ -58,8 +59,8 @@ namespace DiFfRG
      * @param min_size Minimum number of nodes.
      * @param max_size Maximum number of nodes.
      */
-    void reinit(const NT T, const NT typical_E = 1., const size_t step = 1, const size_t min_size = 0,
-                const size_t max_size = powr<10>(2));
+    void reinit(const NT T, const NT typical_E = 1., const int step = 1, const int min_size = 0,
+                const int max_size = powr<10>(2));
 
     /**
      * @brief Get the nodes of the quadrature rule.
@@ -78,7 +79,7 @@ namespace DiFfRG
     /**
      * @brief Get the size of the quadrature rule.
      */
-    size_t size() const;
+    int size() const;
 
     /**
      * @brief Get the temperature of the quadrature rule.
@@ -100,7 +101,7 @@ namespace DiFfRG
     template <typename F> NT sum(const F &f) const
     {
       NT sum = T * f(static_cast<NT>(0));
-      for (size_t i = 0; i < m_size; ++i)
+      for (int i = 0; i < m_size; ++i)
         sum += w[i] * (f(x[i]) + f(-x[i]));
       return sum;
     }
@@ -136,9 +137,9 @@ namespace DiFfRG
     /**
      * @brief The number of nodes in the quadrature rule.
      */
-    size_t m_size;
+    int m_size;
 
-#ifdef USE_CUDA
+#ifdef __CUDACC__
     /**
      * @brief Device-side nodes of the quadrature rule.
      */
@@ -154,5 +155,10 @@ namespace DiFfRG
      */
     void move_device_data();
 #endif
+
+    /**
+     * @brief Construct a quadrature rule for T=0.
+     */
+    void reinit_0();
   };
 } // namespace DiFfRG
