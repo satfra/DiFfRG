@@ -292,7 +292,7 @@ public:
 
   template <int dim, typename Vector> Point<dim> EoM_postprocess(const Point<dim> &EoM, const Vector &) const
   {
-    std::cout << "EoM change: " << last_EoM - EoM[0] << std::endl;
+    //std::cout << "EoM change: " << last_EoM - EoM[0] << std::endl;
     if (lock_EoM || last_EoM - EoM[0] > 5e-4) {
       lock_EoM = true;
       return Point<dim>(last_EoM);

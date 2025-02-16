@@ -1,11 +1,12 @@
 template <typename REG> class hPhi0_kernel
 {
 public:
-  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9, typename T10, typename T11, typename T12,
-            typename T13>
-  static __forceinline__ __host__ __device__ auto kernel(const double q, const double cos1, const double q0, const double k, const T1 p0f, const T2 p, const T3 Nc, const T4 Nf,
-                                                         const T5 T, const T6 muq, const T7 etaQ, const T8 etaPhi, const T9 hPhi, const T10 d1V, const T11 d2V, const T12 d3V,
-                                                         const T13 rhoPhi)
+  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8,
+            typename T9, typename T10, typename T11, typename T12, typename T13>
+  static __forceinline__ __host__ __device__ auto
+  kernel(const double q, const double cos1, const double q0, const double k, const T1 p0f, const T2 p, const T3 Nc,
+         const T4 Nf, const T5 T, const T6 muq, const T7 etaQ, const T8 etaPhi, const T9 hPhi, const T10 d1V,
+         const T11 d2V, const T12 d3V, const T13 rhoPhi)
   {
     // optimization definitions
     const double DiFfRGREPL1 = RB(powr<2>(k), powr<2>(q));
@@ -14,20 +15,30 @@ public:
     // flow
     return real(
         0.5 * powr<3>(hPhi) *
-            ((1. - 1. * powr<2>(Nf)) * powr<-2>(DiFfRGREPL1 + d1V + powr<2>(q) + powr<2>(q0)) + powr<-2>(DiFfRGREPL1 + d1V + 2. * d2V * rhoPhi + powr<2>(q) + powr<2>(q0))) *
+            ((1. - 1. * powr<2>(Nf)) * powr<-2>(DiFfRGREPL1 + d1V + powr<2>(q) + powr<2>(q0)) +
+             powr<-2>(DiFfRGREPL1 + d1V + 2. * d2V * rhoPhi + powr<2>(q) + powr<2>(q0))) *
             powr<-1>(rhoPhi * powr<2>(hPhi) + Nf * powr<2>(p0f - 1. * q0) +
-                     Nf * powr<2>((sqrt(-2. * cos1 * p * q + powr<2>(p) + powr<2>(q))) + RF(powr<2>(k), -2. * cos1 * p * q + powr<2>(p) + powr<2>(q)))) *
-            (-1. * DiFfRGREPL1 * etaPhi + RBdot(powr<2>(k), powr<2>(q))) -
-        1. * Nf * powr<3>(hPhi) *
-            ((-1. + powr<2>(Nf)) * powr<-1>(DiFfRGREPL1 + d1V + powr<2>(q) + powr<2>(q0)) - 1. * powr<-1>(DiFfRGREPL1 + d1V + 2. * d2V * rhoPhi + powr<2>(q) + powr<2>(q0))) *
-            powr<-2>(rhoPhi * powr<2>(hPhi) + Nf * powr<2>(p0f + q0) + Nf * powr<2>(DiFfRGREPL2 + (sqrt(2. * cos1 * p * q + powr<2>(p) + powr<2>(q))))) *
-            (DiFfRGREPL2 + (sqrt(2. * cos1 * p * q + powr<2>(p) + powr<2>(q)))) * (-1. * DiFfRGREPL2 * etaQ + RFdot(powr<2>(k), 2. * cos1 * p * q + powr<2>(p) + powr<2>(q))));
+                     Nf * powr<2>((sqrt(-2. * cos1 * p * q + powr<2>(p) + powr<2>(q))) +
+                                  RF(powr<2>(k), -2. * cos1 * p * q + powr<2>(p) + powr<2>(q)))) *
+            (-1. * DiFfRGREPL1 * etaPhi + RBdot(powr<2>(k), powr<2>(q))) +
+        Nf * powr<3>(hPhi) *
+            (-2. * d2V * rhoPhi + DiFfRGREPL1 * (-2. + powr<2>(Nf)) + d1V * (-2. + powr<2>(Nf)) +
+             2. * d2V * rhoPhi * powr<2>(Nf) - 2. * powr<2>(q) + powr<2>(Nf) * powr<2>(q) - 2. * powr<2>(q0) +
+             powr<2>(Nf) * powr<2>(q0)) *
+            powr<-1>(DiFfRGREPL1 + d1V + powr<2>(q) + powr<2>(q0)) *
+            powr<-1>(DiFfRGREPL1 + d1V + 2. * d2V * rhoPhi + powr<2>(q) + powr<2>(q0)) *
+            powr<-2>(Nf * powr<2>(DiFfRGREPL2) + rhoPhi * powr<2>(hPhi) +
+                     Nf * (2. * cos1 * p * q + 2. * p0f * q0 + powr<2>(p) + powr<2>(p0f) + powr<2>(q) + powr<2>(q0)) +
+                     2. * DiFfRGREPL2 * Nf * (sqrt(2. * cos1 * p * q + powr<2>(p) + powr<2>(q)))) *
+            (DiFfRGREPL2 + (sqrt(2. * cos1 * p * q + powr<2>(p) + powr<2>(q)))) *
+            (DiFfRGREPL2 * etaQ - 1. * RFdot(powr<2>(k), 2. * cos1 * p * q + powr<2>(p) + powr<2>(q))));
   }
 
-  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9, typename T10, typename T11, typename T12,
-            typename T13>
-  static __forceinline__ __host__ __device__ auto constant(const double k, const T1 p0f, const T2 p, const T3 Nc, const T4 Nf, const T5 T, const T6 muq, const T7 etaQ,
-                                                           const T8 etaPhi, const T9 hPhi, const T10 d1V, const T11 d2V, const T12 d3V, const T13 rhoPhi)
+  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8,
+            typename T9, typename T10, typename T11, typename T12, typename T13>
+  static __forceinline__ __host__ __device__ auto
+  constant(const double k, const T1 p0f, const T2 p, const T3 Nc, const T4 Nf, const T5 T, const T6 muq, const T7 etaQ,
+           const T8 etaPhi, const T9 hPhi, const T10 d1V, const T11 d2V, const T12 d3V, const T13 rhoPhi)
   {
     // flow
     return (0.5 * etaPhi + etaQ) * hPhi;

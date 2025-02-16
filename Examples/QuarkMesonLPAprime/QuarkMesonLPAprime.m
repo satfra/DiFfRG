@@ -290,7 +290,7 @@ bp=Map[bosonp0Rule,bosonList];
 qp=Join[Map[quarkp0PlusRule,quarkInList],Map[quarkp0MinusRule,quarkOutList]];
 fp=Join[Map[fermionp0PlusRule,fermionInList],Map[fermionp0MinusRule,fermionOutList]];
 ap=Join[bp,qp,fp];
-Return[((#//separateScalarProductsFiniteT)//.ap)&]
+Return[((#//SeparateScalarProductsFiniteT)//.ap)&]
 ]
 
 
@@ -350,11 +350,12 @@ Print["Projection check is ", sanity, ", should be -1"]
 
 
 ProjectionetaQ=(ProjectoretaQ Diagramsqbq)//.PreTraceRules;
-etaQLoop=QCDQuickSimp[TraceDiagrams[6,"etaQ",ProjectionetaQ]//.PostTraceRules//p0Projection]//.cospq->cos1;
-MakeKernelFiniteTq0[kerneletaQ,kernelParameterList,Re[etaQLoop]]
-
-
 TraceDiagrams[6,"etaQ",ProjectionetaQ]
+etaQLoop=SumDiagrams[6,"etaQ",0,QCDSimp[#//.PostTraceRules//p0Projection]&]//.cospq->cos1;
+MakeKernel[kerneletaQ,kernelParameterList,Re[etaQLoop]]
+
+
+SumDiagrams[6,"etaQ",0,#&,"sum_unprocessed"]
 
 
 (*Diagrams*)
@@ -381,12 +382,14 @@ Print["Projection check is ", sanity, ", should be 1"]
 
 
 ProjectionetaPhi=(ProjectoretaPhi DiagramsPhiPhi)//.PreTraceRules//p0Projection;
-etaPhiLoop=TraceDiagrams[6,"etaPhi",ProjectionetaPhi]//.PostTraceRules//p0Projection//QCDQuickSimp;
-etaPhiLoop=-QCDQuickSimp[(etaPhiLoop-(etaPhiLoop//.p->0))/ sps[p,p]]//.cospq->cos1;
-MakeKernelFiniteTq0[kerneletaPhi,kernelParameterList,Re[etaPhiLoop]]
-
-
 TraceDiagrams[6,"etaPhi",ProjectionetaPhi]
+
+etaPhiLoop=SumDiagrams[6,"etaPhi",QCDSimp[#//.PostTraceRules//p0Projection]&]//.cospq->cos1;
+etaPhiLoop=-QCDQuickSimp[(etaPhiLoop-(etaPhiLoop//.p->0))/ sps[p,p]];
+MakeKernel[kerneletaPhi,kernelParameterList,Re[etaPhiLoop]]
+
+
+SumDiagrams[6,"etaPhi",0,#&,"sum_unprocessed"]
 
 
 (*Diagrams*)
@@ -413,8 +416,13 @@ Print["Projection check is ", sanity, ", should be hPhi"]
 
 
 Projectionh\[Phi]=(Projectorh\[Phi] Diagramsqbq)//.PreTraceRules;
-h\[Phi]Loop=QCDQuickSimp[TraceDiagrams[8,"hPhi",Projectionh\[Phi]]//.PostTraceRules//p0Projection]//.cospq->cos1;
-h\[Phi]Renorm=(etaPhi/2+etaQ)hPhi;MakeKernelFiniteTq0[kernelhPhi,kernelParameterList,Re[h\[Phi]Loop],h\[Phi]Renorm];
+TraceDiagrams[8,"hPhi",Projectionh\[Phi]]
+
+h\[Phi]Loop=SumDiagrams[8,"hPhi",QCDQuickSimp[#//.PostTraceRules//p0Projection]&]//.cospq->cos1;
+h\[Phi]Renorm=(etaPhi/2+etaQ)hPhi;MakeKernel[kernelhPhi,kernelParameterList,Re[h\[Phi]Loop],h\[Phi]Renorm];
+
+
+SumDiagrams[8,"hPhi",#&,"sum_unprocessed"]
 
 
 DiagramsVsidx=DeriveFunctionalEquation[SetupfRG,{},"OutputLevel"->"SuperindexDiagrams"];
@@ -423,11 +431,11 @@ DiagramsV=SuperindexToFullDiagrams[DiagramsVsidx,SetupfRG,{}];
 PlotSuperindexDiagram[DiagramsVsidx,SetupfRG,"EdgeStyle"->DiagramStyle]
 
 
-$Assumptions=$Assumptions&&A0>=0&& gAqbq1>=0&&muq>=0&&q>p>0&&q>0&&k>0&&-1<cos<1&&-d1V-q^2-2 d2V rhoPhi-RB[k^2,q^2]<0&&-d1V-q^2-RB[k^2,q^2]<0&&-m2Quark-q^2-2 q RF[k^2,q^2]-RF[k^2,q^2]^2<0;
+$Assumptions=$Assumptions&&A0>=0&& gAqbq1>=0&&muq>=0&&q>p>0&&q>0&&k>0&&-1<cos<1&&-m2Sigma-q^2-RB[k^2,q^2]<0&&-d1V-q^2-RB[k^2,q^2]<0&&-m2Quark-q^2-2 q RF[k^2,q^2]-RF[k^2,q^2]^2<0;
 
 ProjectedV=DiagramsV//.PreTraceRules;
 VLoop=ExpandScalarProductsFiniteT[Map[FormTrace[PreTrace[#]]&,ProjectedV]]//Simplify;
-VLoop=VLoop//.PostTraceRules//.hPhi->Sqrt[(m2Quark 2Nf)/(2rhoPhi)]//.2 d2V rhoPhi->m2Sigma-d1V//QCDSimp;
+VLoop=VLoop//.PostTraceRules//.hPhi->Sqrt[(m2Quark 2Nf)/(2rhoPhi)]//.2 d2V rhoPhi->m2Sigma-d1V//QCDSimp
 VLoop=(Map[MatsubaraSum[#,q0,T]&,VLoop]//Expand)//.Tanh[a__]:>Tanh[FullSimplify[a]]//SafeFiniteTFunctions[#,T]&//QCDSimp;
 
 VLoop=VLoop//.m2Quark->hPhi^2/(2Nf) 2rhoPhi//.m2Sigma->d1V+2rhoPhi d2V//QCDSimp
