@@ -13,7 +13,7 @@
 
 // DiFfRG
 #include <DiFfRG/common/cuda_prefix.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 
 namespace DiFfRG
 {
@@ -114,7 +114,7 @@ namespace DiFfRG
       uint optimize_dim = 2;
       while (block_sizes[0] * block_sizes[1] * block_sizes[2] > max_block_size || block_sizes[0] > grid_sizes[0] ||
              block_sizes[1] > grid_sizes[1] || block_sizes[2] > grid_sizes[2]) {
-        block_sizes[optimize_dim]--;
+        if (block_sizes[optimize_dim] > 1) block_sizes[optimize_dim]--;
         while (grid_sizes[optimize_dim] % block_sizes[optimize_dim] != 0)
           block_sizes[optimize_dim]--;
         optimize_dim = (optimize_dim + 2) % 3;

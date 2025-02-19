@@ -19,6 +19,9 @@
 
 
 
+Exit[]
+
+
 (* ::Input::Initialization:: *)
 Get["DiFfRG`"]
 SetDirectory[GetDirectory[]];
@@ -177,10 +180,6 @@ SetupfRG = <|
 DiagramStyle={
 A->Orange,c->{Dotted,Black}
 };
-
-
-AddCodeOptimizeFunctions[RBdot[__],RFdot[__],RB[__],RF[__]]
-ShowCodeOptimizeFunctions[]
 
 
 (* ::Input::Initialization:: *)
@@ -344,10 +343,10 @@ Print["Projection check is ", sanity, ", should be m2A"]
 
 
 ProjectionZA=(ProjectorZA DiagramsAA)//.PreTraceRulesGluonsTadpole//.PreTraceRules;
-TraceDiagrams[4,"ZA",ProjectionZA]
+TraceDiagrams[0,"ZA",ProjectionZA]
 
-ZA0Loop=SumDiagrams[4,"ZA",0,QCDSimp[QCDSimp[#//.PostTraceRules]//.cospq->cos1//.p->0]&,"sum0"];
-ZALoop=SumDiagrams[4,"ZA",0,QCDSimp[#//.PostTraceRules]//.cospq->cos1&,"sum"];
+ZA0Loop=SumDiagrams[0,"ZA",0,QCDSimp[QCDSimp[#//.PostTraceRules]//.cospq->cos1//.p->0]&,"sum0"];
+ZALoop=SumDiagrams[0,"ZA",0,QCDSimp[#//.PostTraceRules]//.cospq->cos1&,"sum"];
 
 MakeKernel[kernelZA,kernelParameterList,ZALoop/p^2]
 MakeKernel[kernelm2A,kernelParameterList,ZA0Loop]

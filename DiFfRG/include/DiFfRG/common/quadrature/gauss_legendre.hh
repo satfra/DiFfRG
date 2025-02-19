@@ -1,5 +1,7 @@
 #pragma once
 
+#include <DiFfRG/common/cuda_prefix.hh>
+
 namespace DiFfRG
 {
   template <size_t N, typename ctype> struct GLQuadrature {

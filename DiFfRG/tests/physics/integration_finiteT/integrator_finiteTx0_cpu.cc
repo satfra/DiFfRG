@@ -3,7 +3,7 @@
 
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/common/polynomials.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 #include <DiFfRG/physics/integration_finiteT/integrator_finiteTq0_cpu.hh>
 #include <DiFfRG/physics/integration_finiteT/integrator_finiteTx0_cpu.hh>
 
@@ -70,14 +70,11 @@ TEMPLATE_TEST_CASE_SIG("Test cpu momentum integrals finite T (x0)", "[integratio
   SECTION("Compare against q0 integrator")
   {
     const double q_extent = std::sqrt(x_extent * powr<2>(k));
-    const double q0_extent = x0_extent * k;
     const double val = GENERATE(take(4, random(0.8, 1.2)));
     const double reference_integral = V_d(dim - 1, q_extent) / powr<dim - 1>(2. * M_PI) // spatial part
                                       / T / std::tanh(0.5 / val) / 2. / val;            // sum
 
-    IntegratorFiniteTq0TBB<dim, double, PolyIntegrand> integrator_cpu(quadrature_provider, {{64, x0_int_order}},
-                                                                      x_extent, q0_extent, x0_summands, T);
-
+    IntegratorFiniteTq0TBB<dim, double, PolyIntegrand> integrator_cpu(quadrature_provider, {{64}}, x_extent, T);
     const double int_gpu = integrator.request(k, 0., 1., 0., 0., 0., 0., 0., powr<2>(T), 0., powr<2>(val), 0.).get();
     const double int_cpu =
         integrator_cpu.request(k, 0., 1., 0., 0., 0., 0., 0., powr<2>(T), 0., powr<2>(val), 0.).get();

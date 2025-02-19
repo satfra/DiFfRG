@@ -3,7 +3,7 @@
 
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/common/polynomials.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 #include <DiFfRG/physics/integration_finiteT/integrator_angle_finiteTx0_cpu.hh>
 #include <DiFfRG/physics/integration_finiteT/integrator_angle_finiteTx0_gpu.hh>
 

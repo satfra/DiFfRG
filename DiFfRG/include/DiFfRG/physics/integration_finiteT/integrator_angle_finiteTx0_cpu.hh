@@ -7,7 +7,7 @@
 #include <tbb/tbb.h>
 
 // DiFfRG
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 
 namespace DiFfRG
 {
@@ -68,7 +68,7 @@ namespace DiFfRG
 
     template <typename... T> NT get(const ctype k, const T &...t) const
     {
-      const ctype S_dm1 = 2 * std::pow(M_PI, (d - 1) / 2.) / std::tgamma((d - 1) / 2.);
+      constexpr ctype S_dm1 = S_d_prec<ctype>(d - 1);
       using std::sqrt, std::exp, std::log;
 
       const ctype integral_start = (2 * x0_summands * (ctype)M_PI * m_T) / k;

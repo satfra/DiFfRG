@@ -1,6 +1,6 @@
 #pragma once
 
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 
 #include <DiFfRG/physics/integration_finiteT/integrator_4D_finiteTq0_cpu.hh>
 #include <DiFfRG/physics/integration_finiteT/integrator_4D_finiteTq0_gpu.hh>

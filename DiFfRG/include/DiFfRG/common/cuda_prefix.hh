@@ -6,6 +6,7 @@
 #include "cuda.h"
 #include "cuda_runtime.h"
 #include <thrust/device_vector.h>
+#include <thrust/memory.h>
 
 namespace DiFfRG
 {
@@ -38,6 +39,10 @@ using cudaTextureObject_t = unsigned long long;
 
 #ifndef __device__
 #define __device__
+#endif
+
+#ifndef __constant__
+#define __constant__
 #endif
 
 #endif

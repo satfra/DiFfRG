@@ -3,7 +3,7 @@
 
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/common/polynomials.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 #include <DiFfRG/physics/integration_finiteT/integrator_4D_finiteTq0_cpu.hh>
 
 using namespace DiFfRG;
@@ -43,16 +43,12 @@ TEST_CASE("Test 4D cpu momentum integrals with finite T (q0)", "[4D integration]
   constexpr int dim = 4;
 
   const double x_extent = GENERATE(take(2, random(1., 2.)));
-  const double q0_summands = 32;
-  const uint q0_int_order = 64;
   const double T = GENERATE(take(4, random(0.01, 1.)));
-  const double k = GENERATE(take(2, random(0., 100.)));
-  const double q0_extent = 10000 * 2. * M_PI;
+  const double k = GENERATE(take(2, random(0., 10.)));
   const double val = GENERATE(take(4, random(0.8, 1.2)));
 
   QuadratureProvider quadrature_provider;
-  Integrator4DFiniteTq0TBB<double, PolyIntegrand> integrator(quadrature_provider, {{64, 16, 16, q0_int_order}},
-                                                             x_extent, q0_extent, q0_summands, T);
+  Integrator4DFiniteTq0TBB<double, PolyIntegrand> integrator(quadrature_provider, {{64, 16, 16}}, x_extent, T);
 
   SECTION("Test integral")
   {

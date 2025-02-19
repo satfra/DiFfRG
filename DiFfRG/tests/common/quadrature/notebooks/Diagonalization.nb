@@ -1,0 +1,1029 @@
+(* Content-type: application/vnd.wolfram.mathematica *)
+
+(*** Wolfram Notebook File ***)
+(* http://www.wolfram.com/nb *)
+
+(* CreatedBy='Wolfram 14.1' *)
+
+(*CacheID: 234*)
+(* Internal cache information:
+NotebookFileLineBreakTest
+NotebookFileLineBreakTest
+NotebookDataPosition[       154,          7]
+NotebookDataLength[     51725,       1019]
+NotebookOptionsPosition[     49489,        972]
+NotebookOutlinePosition[     49883,        988]
+CellTagsIndexPosition[     49840,        985]
+WindowFrame->Normal*)
+
+(* Beginning of Notebook Content *)
+Notebook[{
+
+Cell[CellGroupData[{
+Cell["2x2 matrix ", "Section",
+ CellChangeTimes->{{3.9486134741047287`*^9, 
+  3.948613486938285*^9}},ExpressionUUID->"837f8368-4ad9-4417-bc8d-\
+be4373129d4a"],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[{
+ RowBox[{
+  RowBox[{"matrix", "=", 
+   RowBox[{"{", 
+    RowBox[{
+     RowBox[{"{", 
+      RowBox[{"a", ",", "c"}], "}"}], ",", 
+     RowBox[{"{", 
+      RowBox[{"c", ",", "b"}], "}"}]}], "}"}]}], ";"}], "\[IndentingNewLine]", 
+ RowBox[{"%", "//", "MatrixForm"}]}], "Input",
+ CellChangeTimes->{{3.948613561631867*^9, 3.948613570262946*^9}},
+ CellLabel->
+  "In[275]:=",ExpressionUUID->"0178d0f6-6684-4209-aadb-d0ca564cf78a"],
+
+Cell[BoxData[
+ TagBox[
+  RowBox[{"(", "\[NoBreak]", GridBox[{
+     {"a", "c"},
+     {"c", "b"}
+    },
+    GridBoxAlignment->{"Columns" -> {{Center}}, "Rows" -> {{Baseline}}},
+    GridBoxSpacings->{"Columns" -> {
+        Offset[0.27999999999999997`], {
+         Offset[0.7]}, 
+        Offset[0.27999999999999997`]}, "Rows" -> {
+        Offset[0.2], {
+         Offset[0.4]}, 
+        Offset[0.2]}}], "\[NoBreak]", ")"}],
+  Function[BoxForm`e$, 
+   MatrixForm[BoxForm`e$]]]], "Output",
+ CellChangeTimes->{{3.948613565936912*^9, 3.948613570443865*^9}, 
+   3.948613967212644*^9},
+ CellLabel->
+  "Out[276]//MatrixForm=",ExpressionUUID->"fd44d166-e337-4a7a-b286-\
+fa99d598cf61"]
+}, Open  ]],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[{
+ RowBox[{"eigs", "=", 
+  RowBox[{"matrix", "//", "Eigenvalues"}]}], "\[IndentingNewLine]", 
+ RowBox[{"StringReplace", "[", 
+  RowBox[{
+   RowBox[{
+    RowBox[{
+     RowBox[{"eigs", "[", 
+      RowBox[{"[", "1", "]"}], "]"}], "//", "CForm"}], "//", "ToString"}], 
+   ",", 
+   RowBox[{"{", 
+    RowBox[{
+     RowBox[{"\"\<Sqrt\>\"", "->", "\"\<std::sqrt\>\""}], ",", 
+     RowBox[{"\"\<Power\>\"", "->", "\"\<std::pow\>\""}]}], "}"}]}], 
+  "]"}], "\[IndentingNewLine]", 
+ RowBox[{"StringReplace", "[", 
+  RowBox[{
+   RowBox[{
+    RowBox[{
+     RowBox[{"eigs", "[", 
+      RowBox[{"[", "2", "]"}], "]"}], "//", "CForm"}], "//", "ToString"}], 
+   ",", 
+   RowBox[{"{", 
+    RowBox[{
+     RowBox[{"\"\<Sqrt\>\"", "->", "\"\<std::sqrt\>\""}], ",", 
+     RowBox[{"\"\<Power\>\"", "->", "\"\<std::pow\>\""}]}], "}"}]}], 
+  "]"}]}], "Input",
+ CellChangeTimes->{{3.948610849898533*^9, 3.948610993735227*^9}, 
+   3.948611128259161*^9, 3.9486119015628157`*^9, 3.948613572951599*^9},
+ CellLabel->
+  "In[277]:=",ExpressionUUID->"a8bf161b-9c5c-4da4-994b-800d8a6e8b69"],
+
+Cell[BoxData[
+ RowBox[{"{", 
+  RowBox[{
+   RowBox[{
+    FractionBox["1", "2"], " ", 
+    RowBox[{"(", 
+     RowBox[{"a", "+", "b", "-", 
+      SqrtBox[
+       RowBox[{
+        SuperscriptBox["a", "2"], "-", 
+        RowBox[{"2", " ", "a", " ", "b"}], "+", 
+        SuperscriptBox["b", "2"], "+", 
+        RowBox[{"4", " ", 
+         SuperscriptBox["c", "2"]}]}]]}], ")"}]}], ",", 
+   RowBox[{
+    FractionBox["1", "2"], " ", 
+    RowBox[{"(", 
+     RowBox[{"a", "+", "b", "+", 
+      SqrtBox[
+       RowBox[{
+        SuperscriptBox["a", "2"], "-", 
+        RowBox[{"2", " ", "a", " ", "b"}], "+", 
+        SuperscriptBox["b", "2"], "+", 
+        RowBox[{"4", " ", 
+         SuperscriptBox["c", "2"]}]}]]}], ")"}]}]}], "}"}]], "Output",
+ CellChangeTimes->{{3.9486108660221233`*^9, 3.9486109598235073`*^9}, 
+   3.948610994061638*^9, 3.948611902573187*^9, 3.948613968202199*^9},
+ CellLabel->
+  "Out[277]=",ExpressionUUID->"a65ec89f-962a-413c-a4bc-b8336cbc0d1b"],
+
+Cell[BoxData["\<\"(a + b - std::sqrt(std::pow(a,2) - 2*a*b + std::pow(b,2) + \
+4*std::pow(c,2)))/2.\"\>"], "Output",
+ CellChangeTimes->{{3.9486108660221233`*^9, 3.9486109598235073`*^9}, 
+   3.948610994061638*^9, 3.948611902573187*^9, 3.9486139682028008`*^9},
+ CellLabel->
+  "Out[278]=",ExpressionUUID->"a8e635fc-76b1-48d8-9ae3-0343c352d913"],
+
+Cell[BoxData["\<\"(a + b + std::sqrt(std::pow(a,2) - 2*a*b + std::pow(b,2) + \
+4*std::pow(c,2)))/2.\"\>"], "Output",
+ CellChangeTimes->{{3.9486108660221233`*^9, 3.9486109598235073`*^9}, 
+   3.948610994061638*^9, 3.948611902573187*^9, 3.948613968203351*^9},
+ CellLabel->
+  "Out[279]=",ExpressionUUID->"c45419cb-ffbc-46d1-9b7b-7202d1896d07"]
+}, Open  ]],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[{
+ RowBox[{"eigvecs", "=", 
+  RowBox[{"matrix", "//", "Eigenvectors"}]}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{"eigvecs", "=", 
+   RowBox[{"eigvecs", "/", 
+    RowBox[{"Map", "[", 
+     RowBox[{
+      RowBox[{
+       SuperscriptBox[
+        RowBox[{"Total", "[", 
+         SuperscriptBox["#", "2"], "]"}], 
+        RowBox[{"1", "/", "2"}]], "&"}], ",", "eigvecs"}], "]"}]}]}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{"StringReplace", "[", 
+  RowBox[{
+   RowBox[{
+    RowBox[{
+     RowBox[{"-", 
+      RowBox[{"eigvecs", "[", 
+       RowBox[{"[", 
+        RowBox[{"1", ",", "1"}], "]"}], "]"}]}], "//", "CForm"}], "//", 
+    "ToString"}], ",", 
+   RowBox[{"{", 
+    RowBox[{
+     RowBox[{"\"\<Sqrt\>\"", "->", "\"\<std::sqrt\>\""}], ",", 
+     RowBox[{"\"\<Power\>\"", "->", "\"\<std::pow\>\""}]}], "}"}]}], 
+  "]"}], "\[IndentingNewLine]", 
+ RowBox[{"StringReplace", "[", 
+  RowBox[{
+   RowBox[{
+    RowBox[{
+     RowBox[{"eigvecs", "[", 
+      RowBox[{"[", 
+       RowBox[{"2", ",", "1"}], "]"}], "]"}], "//", "CForm"}], "//", 
+    "ToString"}], ",", 
+   RowBox[{"{", 
+    RowBox[{
+     RowBox[{"\"\<Sqrt\>\"", "->", "\"\<std::sqrt\>\""}], ",", 
+     RowBox[{"\"\<Power\>\"", "->", "\"\<std::pow\>\""}]}], "}"}]}], 
+  "]"}]}], "Input",
+ CellChangeTimes->{{3.948611107363348*^9, 3.948611150895611*^9}, {
+   3.9486116382147703`*^9, 3.948611640906767*^9}, 3.9486117257595377`*^9, 
+   3.948611906292304*^9, 3.9486135754441566`*^9},
+ CellLabel->
+  "In[280]:=",ExpressionUUID->"e3da2448-8e59-4468-9ff9-5326e37a09c4"],
+
+Cell[BoxData[
+ RowBox[{"{", 
+  RowBox[{
+   RowBox[{"{", 
+    RowBox[{
+     RowBox[{"-", 
+      FractionBox[
+       RowBox[{
+        RowBox[{"-", "a"}], "+", "b", "+", 
+        SqrtBox[
+         RowBox[{
+          SuperscriptBox["a", "2"], "-", 
+          RowBox[{"2", " ", "a", " ", "b"}], "+", 
+          SuperscriptBox["b", "2"], "+", 
+          RowBox[{"4", " ", 
+           SuperscriptBox["c", "2"]}]}]]}], 
+       RowBox[{"2", " ", "c"}]]}], ",", "1"}], "}"}], ",", 
+   RowBox[{"{", 
+    RowBox[{
+     RowBox[{"-", 
+      FractionBox[
+       RowBox[{
+        RowBox[{"-", "a"}], "+", "b", "-", 
+        SqrtBox[
+         RowBox[{
+          SuperscriptBox["a", "2"], "-", 
+          RowBox[{"2", " ", "a", " ", "b"}], "+", 
+          SuperscriptBox["b", "2"], "+", 
+          RowBox[{"4", " ", 
+           SuperscriptBox["c", "2"]}]}]]}], 
+       RowBox[{"2", " ", "c"}]]}], ",", "1"}], "}"}]}], "}"}]], "Output",
+ CellChangeTimes->{{3.948611116235765*^9, 3.948611151200849*^9}, 
+   3.948611641261374*^9, 3.948611726326807*^9, 3.948611906644231*^9, 
+   3.9486139693368*^9},
+ CellLabel->
+  "Out[280]=",ExpressionUUID->"f62ef49b-67d9-430a-80a7-a1af399e6911"],
+
+Cell[BoxData["\<\"(-a + b + std::sqrt(std::pow(a,2) - 2*a*b + std::pow(b,2) + \
+4*std::pow(c,2)))/(2.*c*std::sqrt(1 + std::pow(-a + b + \
+std::sqrt(std::pow(a,2) - 2*a*b + std::pow(b,2) + \
+4*std::pow(c,2)),2)/(4.*std::pow(c,2))))\"\>"], "Output",
+ CellChangeTimes->{{3.948611116235765*^9, 3.948611151200849*^9}, 
+   3.948611641261374*^9, 3.948611726326807*^9, 3.948611906644231*^9, 
+   3.94861396933744*^9},
+ CellLabel->
+  "Out[282]=",ExpressionUUID->"6b1a7fbe-2d49-428c-a8bd-66ec13d02cc8"],
+
+Cell[BoxData["\<\"-0.5*(-a + b - std::sqrt(std::pow(a,2) - 2*a*b + \
+std::pow(b,2) + 4*std::pow(c,2)))/(c*std::sqrt(1 + std::pow(-a + b - \
+std::sqrt(std::pow(a,2) - 2*a*b + std::pow(b,2) + \
+4*std::pow(c,2)),2)/(4.*std::pow(c,2))))\"\>"], "Output",
+ CellChangeTimes->{{3.948611116235765*^9, 3.948611151200849*^9}, 
+   3.948611641261374*^9, 3.948611726326807*^9, 3.948611906644231*^9, 
+   3.9486139693381*^9},
+ CellLabel->
+  "Out[283]=",ExpressionUUID->"ad1011f4-976f-4230-b273-4948d8753fc2"]
+}, Open  ]]
+}, Open  ]],
+
+Cell[CellGroupData[{
+
+Cell["3 x3 matrix ", "Section",
+ CellChangeTimes->{{3.9486134741047287`*^9, 
+  3.948613481704236*^9}},ExpressionUUID->"608c1b24-946a-440f-ad08-\
+92a5476052a4"],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[{
+ RowBox[{
+  RowBox[{"matrix", "=", 
+   RowBox[{"{", 
+    RowBox[{
+     RowBox[{"{", 
+      RowBox[{"a0", ",", 
+       SqrtBox["b0"], ",", "0"}], "}"}], ",", 
+     RowBox[{"{", 
+      RowBox[{
+       SqrtBox["b0"], ",", "a1", ",", 
+       SqrtBox["b1"]}], "}"}], ",", 
+     RowBox[{"{", 
+      RowBox[{"0", ",", 
+       SqrtBox["b1"], ",", "a2"}], "}"}]}], "}"}]}], 
+  ";"}], "\[IndentingNewLine]", 
+ RowBox[{"%", "//", "MatrixForm"}]}], "Input",
+ CellChangeTimes->{{3.948612614627108*^9, 3.948612616391107*^9}, {
+  3.9486135776953983`*^9, 3.948613580378951*^9}},
+ CellLabel->
+  "In[249]:=",ExpressionUUID->"74590392-f083-4345-8ac8-cd0e11ded2b3"],
+
+Cell[BoxData[
+ TagBox[
+  RowBox[{"(", "\[NoBreak]", GridBox[{
+     {"a0", 
+      SqrtBox["b0"], "0"},
+     {
+      SqrtBox["b0"], "a1", 
+      SqrtBox["b1"]},
+     {"0", 
+      SqrtBox["b1"], "a2"}
+    },
+    GridBoxAlignment->{"Columns" -> {{Center}}, "Rows" -> {{Baseline}}},
+    GridBoxSpacings->{"Columns" -> {
+        Offset[0.27999999999999997`], {
+         Offset[0.7]}, 
+        Offset[0.27999999999999997`]}, "Rows" -> {
+        Offset[0.2], {
+         Offset[0.4]}, 
+        Offset[0.2]}}], "\[NoBreak]", ")"}],
+  Function[BoxForm`e$, 
+   MatrixForm[BoxForm`e$]]]], "Output",
+ CellChangeTimes->{3.9486126166047983`*^9, 3.9486135809091253`*^9},
+ CellLabel->
+  "Out[250]//MatrixForm=",ExpressionUUID->"c4774cc6-7cf8-47b1-a2c2-\
+379c8e73a9f0"]
+}, Open  ]],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[{
+ RowBox[{
+  RowBox[{"eigs", "=", 
+   RowBox[{
+    RowBox[{"(", 
+     RowBox[{
+      RowBox[{
+       RowBox[{"matrix", "//", "Eigenvalues"}], "//", "Simplify"}], "//", 
+      "ToRadicals"}], ")"}], "//", "N"}]}], ";"}], "\[IndentingNewLine]", 
+ RowBox[{"\"\<const double eig_1 = std::real(\>\"", "<>", 
+  RowBox[{"StringReplace", "[", 
+   RowBox[{
+    RowBox[{
+     RowBox[{
+      RowBox[{"eigs", "[", 
+       RowBox[{"[", "1", "]"}], "]"}], "//", "CForm"}], "//", "ToString"}], 
+    ",", 
+    RowBox[{"{", 
+     RowBox[{
+      RowBox[{
+      "\"\<Sqrt(\>\"", "->", "\"\<std::sqrt(std::complex<double>(1,0)*\>\""}],
+       ",", 
+      RowBox[{"\"\<Power\>\"", "->", "\"\<std::pow\>\""}], ",", 
+      RowBox[{"\"\<Complex\>\"", "->", "\"\<std::complex<double>\>\""}]}], 
+     "}"}]}], "]"}], "<>", "\"\<);\\n\>\"", "<>", "\[IndentingNewLine]", 
+  "\"\<const double eig_2 = std::real(\>\"", "<>", 
+  RowBox[{"StringReplace", "[", 
+   RowBox[{
+    RowBox[{
+     RowBox[{
+      RowBox[{"eigs", "[", 
+       RowBox[{"[", "2", "]"}], "]"}], "//", "CForm"}], "//", "ToString"}], 
+    ",", 
+    RowBox[{"{", 
+     RowBox[{
+      RowBox[{
+      "\"\<Sqrt(\>\"", "->", "\"\<std::sqrt(std::complex<double>(1,0)*\>\""}],
+       ",", 
+      RowBox[{"\"\<Power\>\"", "->", "\"\<std::pow\>\""}], ",", 
+      RowBox[{"\"\<Complex\>\"", "->", "\"\<std::complex<double>\>\""}]}], 
+     "}"}]}], "]"}], "<>", "\"\<);\\n\>\"", "<>", "\[IndentingNewLine]", 
+  "\"\<const double eig_3 = std::real(\>\"", "<>", 
+  RowBox[{"StringReplace", "[", 
+   RowBox[{
+    RowBox[{
+     RowBox[{
+      RowBox[{"eigs", "[", 
+       RowBox[{"[", "3", "]"}], "]"}], "//", "CForm"}], "//", "ToString"}], 
+    ",", 
+    RowBox[{"{", 
+     RowBox[{
+      RowBox[{
+      "\"\<Sqrt(\>\"", "->", "\"\<std::sqrt(std::complex<double>(1,0)*\>\""}],
+       ",", 
+      RowBox[{"\"\<Power\>\"", "->", "\"\<std::pow\>\""}], ",", 
+      RowBox[{"\"\<Complex\>\"", "->", "\"\<std::complex<double>\>\""}]}], 
+     "}"}]}], "]"}], "<>", "\"\<);\>\""}]}], "Input",
+ CellChangeTimes->{{3.948610849898533*^9, 3.948610993735227*^9}, 
+   3.948611128259161*^9, 3.9486119015628157`*^9, {3.948612233826511*^9, 
+   3.948612326872798*^9}, {3.9486123700031548`*^9, 3.948612403603065*^9}, {
+   3.94861244945577*^9, 3.948612457266765*^9}, {3.948612491075989*^9, 
+   3.948612565159233*^9}, {3.9486126310207033`*^9, 3.948612866015252*^9}, 
+   3.948613036808318*^9, {3.948613077527781*^9, 3.9486132046951733`*^9}, {
+   3.948613267259713*^9, 3.9486132689227448`*^9}, {3.948613317396731*^9, 
+   3.948613317787245*^9}, {3.948613441236875*^9, 3.94861344180822*^9}, 
+   3.948613586233718*^9, {3.9486137077432623`*^9, 3.948613711246706*^9}},
+ CellLabel->
+  "In[270]:=",ExpressionUUID->"ad2b0ad5-8f81-4c7c-8dfd-8de9bcd0dc79"],
+
+Cell[BoxData["\<\"const double eig_1 = std::real(0.3333333333333333*(a0 + a1 \
++ a2) - (0.41997368329829105*(-1.*std::pow(a0,2) + a0*a1 - 1.*std::pow(a1,2) \
++ a0*a2 + a1*a2 - 1.*std::pow(a2,2) - 3.*b0 - \
+3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) + a0*a1 - \
+1.*std::pow(a1,2) + a0*a2 + a1*a2 - 1.*std::pow(a2,2) - 3.*b0 - 3.*b1,3) + \
+std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + \
+2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - \
+3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + \
+2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + \
+9.*a2*b1,2)),0.3333333333333333) + \
+0.26456684199469993*std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) + a0*a1 - \
+1.*std::pow(a1,2) + a0*a2 + a1*a2 - 1.*std::pow(a2,2) - 3.*b0 - 3.*b1,3) + \
+std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + \
+2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - \
+3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + \
+2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + \
+9.*a2*b1,2)),0.3333333333333333));\\nconst double eig_2 = \
+std::real(0.3333333333333333*(a0 + a1 + a2) + \
+(std::complex<double>(0.20998684164914552,0.3637078786572404)*(-1.*std::pow(\
+a0,2) + a0*a1 - 1.*std::pow(a1,2) + a0*a2 + a1*a2 - 1.*std::pow(a2,2) - 3.*b0 \
+- 3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) + a0*a1 - \
+1.*std::pow(a1,2) + a0*a2 + a1*a2 - 1.*std::pow(a2,2) - 3.*b0 - 3.*b1,3) + \
+std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + \
+2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - \
+3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + \
+2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + \
+9.*a2*b1,2)),0.3333333333333333) - \
+std::complex<double>(0.13228342099734997,-0.22912160616643376)*std::pow(2.*\
+std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + \
+2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - \
+3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + \
+2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + \
+9.*a2*b1 + std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) \
++ a0*a1 - 1.*std::pow(a1,2) + a0*a2 + a1*a2 - 1.*std::pow(a2,2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1,2)),0.3333333333333333));\\nconst double \
+eig_3 = std::real(0.3333333333333333*(a0 + a1 + a2) + \
+(std::complex<double>(0.20998684164914552,-0.3637078786572404)*(-1.*std::pow(\
+a0,2) + a0*a1 - 1.*std::pow(a1,2) + a0*a2 + a1*a2 - 1.*std::pow(a2,2) - 3.*b0 \
+- 3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) + a0*a1 - \
+1.*std::pow(a1,2) + a0*a2 + a1*a2 - 1.*std::pow(a2,2) - 3.*b0 - 3.*b1,3) + \
+std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + \
+2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - \
+3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + \
+2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + \
+9.*a2*b1,2)),0.3333333333333333) - \
+std::complex<double>(0.13228342099734997,0.22912160616643376)*std::pow(2.*std:\
+:pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) \
+- 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - \
+3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + \
+9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) + a0*a1 - \
+1.*std::pow(a1,2) + a0*a2 + a1*a2 - 1.*std::pow(a2,2) - 3.*b0 - 3.*b1,3) + \
+std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + \
+2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - \
+3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + \
+2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + \
+9.*a2*b1,2)),0.3333333333333333));\"\>"], "Output",
+ CellChangeTimes->{
+  3.948612282290223*^9, 3.948612334439082*^9, 3.948612373574168*^9, 
+   3.948612405133926*^9, {3.948612450553111*^9, 3.948612457568665*^9}, {
+   3.9486124917614822`*^9, 3.948612532260067*^9}, 3.948612567543775*^9, {
+   3.9486126538116083`*^9, 3.94861268899382*^9}, {3.9486127447587023`*^9, 
+   3.948612810719412*^9}, {3.948612854899675*^9, 3.9486128663096724`*^9}, 
+   3.948613037145987*^9, {3.9486130850165043`*^9, 3.948613088104374*^9}, {
+   3.9486131481893597`*^9, 3.948613212326453*^9}, 3.94861326930245*^9, 
+   3.948613318124424*^9, 3.94861344242064*^9, 3.948613593033609*^9, 
+   3.948613720680245*^9},
+ CellLabel->
+  "Out[271]=",ExpressionUUID->"b28e1423-ff13-4ecb-9be8-bc4a6a967fc3"]
+}, Open  ]],
+
+Cell[CellGroupData[{
+
+Cell[BoxData[{
+ RowBox[{
+  RowBox[{"eigvecs", "=", 
+   RowBox[{"matrix", "//", "Eigenvectors"}]}], ";"}], "\[IndentingNewLine]", 
+ RowBox[{
+  RowBox[{
+   RowBox[{"eigvecs", "=", 
+    RowBox[{
+     RowBox[{
+      RowBox[{"eigvecs", "/", 
+       RowBox[{"Map", "[", 
+        RowBox[{
+         RowBox[{
+          SuperscriptBox[
+           RowBox[{"Total", "[", 
+            SuperscriptBox["#", "2"], "]"}], 
+           RowBox[{"1", "/", "2"}]], "&"}], ",", "eigvecs"}], "]"}]}], "//", 
+      "ToRadicals"}], "//", "N"}]}], ";"}], 
+  "\[IndentingNewLine]"}], "\[IndentingNewLine]", 
+ RowBox[{"\"\<const double eigvec_1 = std::real(\>\"", "<>", 
+  RowBox[{"StringReplace", "[", 
+   RowBox[{
+    RowBox[{
+     RowBox[{
+      RowBox[{
+       RowBox[{"eigvecs", "[", 
+        RowBox[{"[", 
+         RowBox[{"1", ",", "1"}], "]"}], "]"}], "//", "Simplify"}], "//", 
+      "CForm"}], "//", "ToString"}], ",", 
+    RowBox[{"{", 
+     RowBox[{
+      RowBox[{
+      "\"\<Sqrt(\>\"", "->", "\"\<std::sqrt(std::complex<double>(1,0)*\>\""}],
+       ",", 
+      RowBox[{"\"\<Power\>\"", "->", "\"\<std::pow\>\""}], ",", 
+      RowBox[{"\"\<Complex\>\"", "->", "\"\<std::complex<double>\>\""}]}], 
+     "}"}]}], "]"}], "<>", "\"\<);\\n\>\"", "<>", "\[IndentingNewLine]", 
+  "\"\<const double eigvec_2 = std::real(\>\"", "<>", 
+  RowBox[{"StringReplace", "[", 
+   RowBox[{
+    RowBox[{
+     RowBox[{
+      RowBox[{
+       RowBox[{"eigvecs", "[", 
+        RowBox[{"[", 
+         RowBox[{"2", ",", "1"}], "]"}], "]"}], "//", "Simplify"}], "//", 
+      "CForm"}], "//", "ToString"}], ",", 
+    RowBox[{"{", 
+     RowBox[{
+      RowBox[{
+      "\"\<Sqrt(\>\"", "->", "\"\<std::sqrt(std::complex<double>(1,0)*\>\""}],
+       ",", 
+      RowBox[{"\"\<Power\>\"", "->", "\"\<std::pow\>\""}], ",", 
+      RowBox[{"\"\<Complex\>\"", "->", "\"\<std::complex<double>\>\""}]}], 
+     "}"}]}], "]"}], "<>", "\"\<);\\n\>\"", "<>", "\[IndentingNewLine]", 
+  "\"\<const double eigvec_3 = std::real(\>\"", "<>", 
+  RowBox[{"StringReplace", "[", 
+   RowBox[{
+    RowBox[{
+     RowBox[{
+      RowBox[{
+       RowBox[{"eigvecs", "[", 
+        RowBox[{"[", 
+         RowBox[{"3", ",", "1"}], "]"}], "]"}], "//", "Simplify"}], "//", 
+      "CForm"}], "//", "ToString"}], ",", 
+    RowBox[{"{", 
+     RowBox[{
+      RowBox[{
+      "\"\<Sqrt(\>\"", "->", "\"\<std::sqrt(std::complex<double>(1,0)*\>\""}],
+       ",", 
+      RowBox[{"\"\<Power\>\"", "->", "\"\<std::pow\>\""}], ",", 
+      RowBox[{"\"\<Complex\>\"", "->", "\"\<std::complex<double>\>\""}]}], 
+     "}"}]}], "]"}], "<>", "\"\<);\>\""}]}], "Input",
+ CellChangeTimes->{{3.94861360713276*^9, 3.948613748891592*^9}},
+ CellLabel->
+  "In[272]:=",ExpressionUUID->"6fcac681-15ec-43a1-91c4-d01a16a72947"],
+
+Cell[BoxData["\<\"const double eigvec_1 = std::real((-1.*b1 + \
+(-0.3333333333333333*a0 + 0.6666666666666667*a1 - 0.3333333333333333*a2 + \
+(0.41997368329829105*(-1.*std::pow(a0,2) - 1.*std::pow(a1,2) + a1*a2 - \
+1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - 3.*b1))/std::pow(2.*std::pow(a0,3) \
+- 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - \
+3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - \
+3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + \
+9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) - \
+0.26456684199469993*std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333))*(-0.3333333333333333*a0 - \
+0.3333333333333333*a1 + 0.6666666666666667*a2 + \
+(0.41997368329829105*(-1.*std::pow(a0,2) - 1.*std::pow(a1,2) + a1*a2 - \
+1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - 3.*b1))/std::pow(2.*std::pow(a0,3) \
+- 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - \
+3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - \
+3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + \
+9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) - \
+0.26456684199469993*std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333)))/(std::sqrt(std::complex<double>(1,0)*b0)*std:\
+:sqrt(std::complex<double>(1,0)*b1)*std::sqrt(std::complex<double>(1,0)*1. + \
+std::pow(0.3333333333333333*a0 + 0.3333333333333333*a1 - \
+0.6666666666666667*a2 - (0.41997368329829105*(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) + \
+0.26456684199469993*std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333),2)/b1 + std::pow(-1.*b1 + \
+(-0.3333333333333333*a0 + 0.6666666666666667*a1 - 0.3333333333333333*a2 + \
+(0.41997368329829105*(-1.*std::pow(a0,2) - 1.*std::pow(a1,2) + a1*a2 - \
+1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - 3.*b1))/std::pow(2.*std::pow(a0,3) \
+- 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - \
+3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - \
+3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + \
+9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) - \
+0.26456684199469993*std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333))*(-0.3333333333333333*a0 - \
+0.3333333333333333*a1 + 0.6666666666666667*a2 + \
+(0.41997368329829105*(-1.*std::pow(a0,2) - 1.*std::pow(a1,2) + a1*a2 - \
+1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - 3.*b1))/std::pow(2.*std::pow(a0,3) \
+- 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - \
+3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - \
+3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + \
+9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) - \
+0.26456684199469993*std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333)),2)/(b0*b1))));\\nconst double eigvec_2 = \
+std::real((-1.*b1 + (-0.3333333333333333*a0 + 0.6666666666666667*a1 - \
+0.3333333333333333*a2 - \
+(std::complex<double>(0.20998684164914552,0.3637078786572404)*(-1.*std::pow(\
+a0,2) - 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 \
+- 3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) + \
+std::complex<double>(0.13228342099734997,-0.22912160616643376)*std::pow(2.*\
+std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + \
+2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - \
+3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + \
+2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + \
+9.*a2*b1 + std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) \
+- 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333))*(-0.3333333333333333*a0 - \
+0.3333333333333333*a1 + 0.6666666666666667*a2 - \
+(std::complex<double>(0.20998684164914552,0.3637078786572404)*(-1.*std::pow(\
+a0,2) - 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 \
+- 3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) + \
+std::complex<double>(0.13228342099734997,-0.22912160616643376)*std::pow(2.*\
+std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + \
+2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - \
+3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + \
+2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + \
+9.*a2*b1 + std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) \
+- 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333)))/(std::sqrt(std::complex<double>(1,0)*b0)*std:\
+:sqrt(std::complex<double>(1,0)*b1)*std::sqrt(std::complex<double>(1,0)*1. + \
+std::pow(0.3333333333333333*a0 + 0.3333333333333333*a1 - \
+0.6666666666666667*a2 + \
+(std::complex<double>(0.20998684164914552,0.3637078786572404)*(-1.*std::pow(\
+a0,2) - 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 \
+- 3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) - \
+std::complex<double>(0.13228342099734997,-0.22912160616643376)*std::pow(2.*\
+std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + \
+2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - \
+3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + \
+2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + \
+9.*a2*b1 + std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) \
+- 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333),2)/b1 + std::pow(-1.*b1 + \
+(-0.3333333333333333*a0 + 0.6666666666666667*a1 - 0.3333333333333333*a2 - \
+(std::complex<double>(0.20998684164914552,0.3637078786572404)*(-1.*std::pow(\
+a0,2) - 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 \
+- 3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) + \
+std::complex<double>(0.13228342099734997,-0.22912160616643376)*std::pow(2.*\
+std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + \
+2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - \
+3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + \
+2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + \
+9.*a2*b1 + std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) \
+- 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333))*(-0.3333333333333333*a0 - \
+0.3333333333333333*a1 + 0.6666666666666667*a2 - \
+(std::complex<double>(0.20998684164914552,0.3637078786572404)*(-1.*std::pow(\
+a0,2) - 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 \
+- 3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) + \
+std::complex<double>(0.13228342099734997,-0.22912160616643376)*std::pow(2.*\
+std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + \
+2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - \
+3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + \
+2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + \
+9.*a2*b1 + std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) \
+- 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333)),2)/(b0*b1))));\\nconst double eigvec_3 = \
+std::real((-1.*b1 + (-0.3333333333333333*a0 + 0.6666666666666667*a1 - \
+0.3333333333333333*a2 - \
+(std::complex<double>(0.20998684164914552,-0.3637078786572404)*(-1.*std::pow(\
+a0,2) - 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 \
+- 3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) + \
+std::complex<double>(0.13228342099734997,0.22912160616643376)*std::pow(2.*std:\
+:pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) \
+- 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - \
+3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + \
+9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333))*(-0.3333333333333333*a0 - \
+0.3333333333333333*a1 + 0.6666666666666667*a2 - \
+(std::complex<double>(0.20998684164914552,-0.3637078786572404)*(-1.*std::pow(\
+a0,2) - 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 \
+- 3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) + \
+std::complex<double>(0.13228342099734997,0.22912160616643376)*std::pow(2.*std:\
+:pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) \
+- 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - \
+3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + \
+9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333)))/(std::sqrt(std::complex<double>(1,0)*b0)*std:\
+:sqrt(std::complex<double>(1,0)*b1)*std::sqrt(std::complex<double>(1,0)*1. + \
+std::pow(0.3333333333333333*a0 + 0.3333333333333333*a1 - \
+0.6666666666666667*a2 + \
+(std::complex<double>(0.20998684164914552,-0.3637078786572404)*(-1.*std::pow(\
+a0,2) - 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 \
+- 3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) - \
+std::complex<double>(0.13228342099734997,0.22912160616643376)*std::pow(2.*std:\
+:pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) \
+- 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - \
+3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + \
+9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333),2)/b1 + std::pow(-1.*b1 + \
+(-0.3333333333333333*a0 + 0.6666666666666667*a1 - 0.3333333333333333*a2 - \
+(std::complex<double>(0.20998684164914552,-0.3637078786572404)*(-1.*std::pow(\
+a0,2) - 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 \
+- 3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) + \
+std::complex<double>(0.13228342099734997,0.22912160616643376)*std::pow(2.*std:\
+:pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) \
+- 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - \
+3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + \
+9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333))*(-0.3333333333333333*a0 - \
+0.3333333333333333*a1 + 0.6666666666666667*a2 - \
+(std::complex<double>(0.20998684164914552,-0.3637078786572404)*(-1.*std::pow(\
+a0,2) - 1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 \
+- 3.*b1))/std::pow(2.*std::pow(a0,3) - 3.*std::pow(a0,2)*a1 - \
+3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) - 3.*std::pow(a0,2)*a2 + \
+12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - 3.*a0*std::pow(a2,2) - \
+3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + 9.*a1*b0 - 18.*a2*b0 - \
+18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333) + \
+std::complex<double>(0.13228342099734997,0.22912160616643376)*std::pow(2.*std:\
+:pow(a0,3) - 3.*std::pow(a0,2)*a1 - 3.*a0*std::pow(a1,2) + 2.*std::pow(a1,3) \
+- 3.*std::pow(a0,2)*a2 + 12.*a0*a1*a2 - 3.*std::pow(a1,2)*a2 - \
+3.*a0*std::pow(a2,2) - 3.*a1*std::pow(a2,2) + 2.*std::pow(a2,3) + 9.*a0*b0 + \
+9.*a1*b0 - 18.*a2*b0 - 18.*a0*b1 + 9.*a1*b1 + 9.*a2*b1 + \
+std::sqrt(std::complex<double>(1,0)*4.*std::pow(-1.*std::pow(a0,2) - \
+1.*std::pow(a1,2) + a1*a2 - 1.*std::pow(a2,2) + a0*(a1 + a2) - 3.*b0 - \
+3.*b1,3) + std::pow(2.*std::pow(a0,3) + 2.*std::pow(a1,3) + \
+std::pow(a0,2)*(-3.*a1 - 3.*a2) - 3.*std::pow(a1,2)*a2 + 2.*std::pow(a2,3) - \
+18.*a2*b0 + a0*(-3.*std::pow(a1,2) + 12.*a1*a2 - 3.*std::pow(a2,2) + 9.*b0 - \
+18.*b1) + 9.*a2*b1 + a1*(-3.*std::pow(a2,2) + 9.*b0 + \
+9.*b1),2)),0.3333333333333333)),2)/(b0*b1))));\"\>"], "Output",
+ CellChangeTimes->{{3.948613612564547*^9, 3.948613690575469*^9}, 
+   3.948613775195499*^9},
+ CellLabel->
+  "Out[274]=",ExpressionUUID->"e3bddb7c-2567-49e2-9cb1-4196e3e8a7b7"]
+}, Open  ]]
+}, Open  ]]
+},
+WindowSize->{588.75, 351.75},
+WindowMargins->{{0, Automatic}, {Automatic, 0}},
+FrontEndVersion->"14.1 for Linux x86 (64-bit) (July 16, 2024)",
+StyleDefinitions->"Default.nb",
+ExpressionUUID->"49a2d318-553c-451b-8c02-c2541a7a9356"
+]
+(* End of Notebook Content *)
+
+(* Internal cache information *)
+(*CellTagsOutline
+CellTagsIndex->{}
+*)
+(*CellTagsIndex
+CellTagsIndex->{}
+*)
+(*NotebookFileOutline
+Notebook[{
+Cell[CellGroupData[{
+Cell[576, 22, 158, 3, 65, "Section",ExpressionUUID->"837f8368-4ad9-4417-bc8d-be4373129d4a"],
+Cell[CellGroupData[{
+Cell[759, 29, 438, 12, 51, "Input",ExpressionUUID->"0178d0f6-6684-4209-aadb-d0ca564cf78a"],
+Cell[1200, 43, 671, 20, 67, "Output",ExpressionUUID->"fd44d166-e337-4a7a-b286-fa99d598cf61"]
+}, Open  ]],
+Cell[CellGroupData[{
+Cell[1908, 68, 1068, 30, 73, "Input",ExpressionUUID->"a8bf161b-9c5c-4da4-994b-800d8a6e8b69"],
+Cell[2979, 100, 958, 28, 62, "Output",ExpressionUUID->"a65ec89f-962a-413c-a4bc-b8336cbc0d1b"],
+Cell[3940, 130, 341, 5, 53, "Output",ExpressionUUID->"a8e635fc-76b1-48d8-9ae3-0343c352d913"],
+Cell[4284, 137, 339, 5, 53, "Output",ExpressionUUID->"c45419cb-ffbc-46d1-9b7b-7202d1896d07"]
+}, Open  ]],
+Cell[CellGroupData[{
+Cell[4660, 147, 1534, 45, 155, "Input",ExpressionUUID->"e3da2448-8e59-4468-9ff9-5326e37a09c4"],
+Cell[6197, 194, 1160, 35, 141, "Output",ExpressionUUID->"f62ef49b-67d9-430a-80a7-a1af399e6911"],
+Cell[7360, 231, 491, 8, 93, "Output",ExpressionUUID->"6b1a7fbe-2d49-428c-a8bd-66ec13d02cc8"],
+Cell[7854, 241, 492, 8, 93, "Output",ExpressionUUID->"ad1011f4-976f-4230-b273-4948d8753fc2"]
+}, Open  ]]
+}, Open  ]],
+Cell[CellGroupData[{
+Cell[8395, 255, 159, 3, 65, "Section",ExpressionUUID->"608c1b24-946a-440f-ad08-92a5476052a4"],
+Cell[CellGroupData[{
+Cell[8579, 262, 660, 20, 61, "Input",ExpressionUUID->"74590392-f083-4345-8ac8-cd0e11ded2b3"],
+Cell[9242, 284, 750, 24, 108, "Output",ExpressionUUID->"c4774cc6-7cf8-47b1-a2c2-379c8e73a9f0"]
+}, Open  ]],
+Cell[CellGroupData[{
+Cell[10029, 313, 2762, 67, 224, "Input",ExpressionUUID->"ad2b0ad5-8f81-4c7c-8dfd-8de9bcd0dc79"],
+Cell[12794, 382, 6243, 92, 894, "Output",ExpressionUUID->"b28e1423-ff13-4ecb-9be8-bc4a6a967fc3"]
+}, Open  ]],
+Cell[CellGroupData[{
+Cell[19074, 479, 2718, 75, 220, "Input",ExpressionUUID->"6fcac681-15ec-43a1-91c4-d01a16a72947"],
+Cell[21795, 556, 27666, 412, 4300, "Output",ExpressionUUID->"e3bddb7c-2567-49e2-9cb1-4196e3e8a7b7"]
+}, Open  ]]
+}, Open  ]]
+}
+]
+*)
+
+(* End of internal cache information *)
+

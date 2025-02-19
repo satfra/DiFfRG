@@ -1,9 +1,11 @@
 template <typename REG> class m2A_kernel
 {
 public:
-  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9, typename T10>
-  static __forceinline__ __host__ __device__ auto kernel(const double q, const double cos1, const double k, const T1 p, const T2 &ZA3, const T3 &ZAcbc, const T4 &ZA4SP,
-                                                         const T5 &ZA4tadpole, const T6 &dtZc, const T7 &Zc, const T8 &dtZA, const T9 &ZA, const T10 m2A)
+  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8,
+            typename T9, typename T10>
+  static __forceinline__ __host__ __device__ auto
+  kernel(const double q, const double cos1, const double k, const T1 p, const T2 &ZA3, const T3 &ZAcbc, const T4 &ZA4SP,
+         const T5 &ZA4tadpole, const T6 &dtZc, const T7 &Zc, const T8 &dtZA, const T9 &ZA, const T10 m2A)
   {
     // optimization definitions
     const double DiFfRGREPL1 = dtZA(pow(1. + powr<6>(k), 0.16666666666666666));
@@ -16,16 +18,25 @@ public:
 
     // flow
     return -12. * (-1. + powr<2>(cos1)) * powr<2>(q) *
-               (DiFfRGREPL3 * DiFfRGREPL4 + DiFfRGREPL2 * (DiFfRGREPL1 + 50. * (-1. * DiFfRGREPL4 + DiFfRGREPL5) * powr<6>(k) * powr<-1>(1. + powr<6>(k)))) *
-               powr<-3>(DiFfRGREPL2 * DiFfRGREPL4 + DiFfRGREPL6 * powr<2>(q)) * powr<2>(ZA3(0.816496580927726 * q, 1., -0.5235987755982988)) +
-           (-7. + powr<2>(cos1)) * (DiFfRGREPL3 * DiFfRGREPL4 + DiFfRGREPL2 * (DiFfRGREPL1 + 50. * (-1. * DiFfRGREPL4 + DiFfRGREPL5) * powr<6>(k) * powr<-1>(1. + powr<6>(k)))) *
-               powr<-2>(DiFfRGREPL2 * DiFfRGREPL4 + DiFfRGREPL6 * powr<2>(q)) * ZA4tadpole(0.7071067811865475 * q, 1., -1.5707963267948966) +
-           2. * (-1. + powr<2>(cos1)) * powr<2>(q) * powr<2>(ZAcbc(0.816496580927726 * q, 1., 1.5707963267948966)) * powr<-3>(DiFfRGREPL2 * DiFfRGREPL7 + powr<2>(q) * Zc(q)) *
-               (DiFfRGREPL3 * DiFfRGREPL7 + DiFfRGREPL2 * dtZc(k) + DiFfRGREPL2 * (-50. * DiFfRGREPL7 + 50. * Zc(1.02 * k)));
+               (DiFfRGREPL3 * DiFfRGREPL4 + DiFfRGREPL2 * (DiFfRGREPL1 + 50. * (-1. * DiFfRGREPL4 + DiFfRGREPL5) *
+                                                                             powr<6>(k) * powr<-1>(1. + powr<6>(k)))) *
+               powr<-3>(DiFfRGREPL2 * DiFfRGREPL4 + DiFfRGREPL6 * powr<2>(q)) *
+               powr<2>(ZA3(0.816496580927726 * q, 1., -0.5235987755982988)) +
+           (-7. + powr<2>(cos1)) *
+               (DiFfRGREPL3 * DiFfRGREPL4 + DiFfRGREPL2 * (DiFfRGREPL1 + 50. * (-1. * DiFfRGREPL4 + DiFfRGREPL5) *
+                                                                             powr<6>(k) * powr<-1>(1. + powr<6>(k)))) *
+               powr<-2>(DiFfRGREPL2 * DiFfRGREPL4 + DiFfRGREPL6 * powr<2>(q)) *
+               ZA4tadpole(0.7071067811865475 * q, 1., -1.5707963267948966) +
+           2. * (-1. + powr<2>(cos1)) * powr<2>(q) * powr<2>(ZAcbc(0.816496580927726 * q, 1., 1.5707963267948966)) *
+               powr<-3>(DiFfRGREPL2 * DiFfRGREPL7 + powr<2>(q) * Zc(q)) *
+               (DiFfRGREPL3 * DiFfRGREPL7 + DiFfRGREPL2 * dtZc(k) +
+                DiFfRGREPL2 * (-50. * DiFfRGREPL7 + 50. * Zc(1.02 * k)));
   }
 
-  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9, typename T10>
-  static __forceinline__ __host__ __device__ auto constant(const double k, const T1 p, const T2 &ZA3, const T3 &ZAcbc, const T4 &ZA4SP, const T5 &ZA4tadpole, const T6 &dtZc,
+  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8,
+            typename T9, typename T10>
+  static __forceinline__ __host__ __device__ auto constant(const double k, const T1 p, const T2 &ZA3, const T3 &ZAcbc,
+                                                           const T4 &ZA4SP, const T5 &ZA4tadpole, const T6 &dtZc,
                                                            const T7 &Zc, const T8 &dtZA, const T9 &ZA, const T10 m2A)
   {
     // flow

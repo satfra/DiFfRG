@@ -1107,10 +1107,10 @@ Derivative[0,1][cos][p_,q_]=0;
 Derivative[1,0][cos][p_,q_]=0;
 cos[p_,p_]=1;
 
-SimplifyAllMomenta[q_,expr_]:=UseLorentzLinearity[expr]//.InsertOutputNaming@{
+SimplifyAllMomenta[q_,expr_,qffac_:\[Pi] T]:=UseLorentzLinearity[expr]//.InsertOutputNaming@{
 cos[p_,Symbol[ToString[q]<>"f"]]:>Symbol["cos"<>ToString[p]<>ToString[q]],
 TBvec[q,0]:>Symbol[ToString[q]<>"0"],
-TBvec[Symbol[ToString[q]<>"f"],0]:>(ClearAll[T];Symbol[ToString[q]<>"0"]+\[Pi] T)
+TBvec[Symbol[ToString[q]<>"f"],0]:>(ClearAll[T];Symbol[ToString[q]<>"0"]+qffac)
 }//.InsertOutputNaming@{
 cos[p_,r_]:>Symbol["cos"<>ToString[p]<>ToString[r]],
 TBvec[p_,0]:>Symbol[ToString[p]<>"0"],

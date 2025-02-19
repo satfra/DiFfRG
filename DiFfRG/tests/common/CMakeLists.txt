@@ -1,6 +1,8 @@
 # ##############################################################################
-# Test config helper
+# Test
 # ##############################################################################
+
+add_subdirectory(quadrature)
 
 add_executable(test_configuration_helper test_configuration_helper.cc)
 setup_test(test_configuration_helper)

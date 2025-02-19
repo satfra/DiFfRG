@@ -3,7 +3,7 @@
 
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/common/polynomials.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 #include <DiFfRG/physics/integration_finiteT/integrator_angle_finiteTq0_cpu.hh>
 
 using namespace DiFfRG;
@@ -39,16 +39,12 @@ TEMPLATE_TEST_CASE_SIG("Test cpu momentum integrals with angle finite T (q0)", "
                        ((int dim), dim), (3), (4))
 {
   const double x_extent = GENERATE(take(2, random(1., 2.)));
-  const uint q0_summands = 32;
-  const uint q0_int_order = 64;
   const double T = GENERATE(take(5, random(0.01, 1.)));
   const double k = GENERATE(take(2, random(0., 1.)));
-  const double q0_extent = 10000 * 2. * M_PI;
   const double val = GENERATE(take(4, random(0.8, 1.2)));
 
   QuadratureProvider quadrature_provider;
-  IntegratorAngleFiniteTq0TBB<dim, double, PolyIntegrand> integrator(quadrature_provider, {{64, 16, q0_int_order}},
-                                                                     x_extent, q0_extent, q0_summands, T);
+  IntegratorAngleFiniteTq0TBB<dim, double, PolyIntegrand> integrator(quadrature_provider, {{64, 16}}, x_extent, T);
   SECTION("Volume integral")
   {
     const double q_extent = std::sqrt(x_extent * powr<2>(k));

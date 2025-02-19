@@ -8,8 +8,8 @@
 
 // DiFfRG
 #include <DiFfRG/common/cuda_prefix.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 #include <DiFfRG/common/types.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
 
 namespace DiFfRG
 {
@@ -31,7 +31,7 @@ namespace DiFfRG
       __host__ __device__ NT operator()(ctype *x) const
       {
         const ctype q = k * sqrt(x[0] * x_extent);
-        const ctype S_d = 2 * pow(M_PI, d / 2.) / tgamma(d / 2.);
+        constexpr ctype S_d = S_d_prec<ctype>(d);
         const ctype int_element = S_d                                 // solid nd angle
                                   * (powr<d - 2>(q) / 2 * powr<2>(k)) // x = p^2 / k^2 integral
                                   / powr<d>(2 * (ctype)M_PI);         // fourier factor

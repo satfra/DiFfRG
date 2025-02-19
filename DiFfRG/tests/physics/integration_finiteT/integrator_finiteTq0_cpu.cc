@@ -3,7 +3,7 @@
 
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/common/polynomials.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 #include <DiFfRG/physics/integration_finiteT/integrator_finiteTq0_cpu.hh>
 
 using namespace DiFfRG;
@@ -37,16 +37,12 @@ TEMPLATE_TEST_CASE_SIG("Test cpu momentum integrals at finite T (q0)", "[integra
                        ((int dim), dim), (2), (3), (4))
 {
   const double x_extent = GENERATE(take(2, random(1., 2.)));
-  const uint q0_summands = 32;
-  const uint q0_int_order = 64;
   const double T = GENERATE(take(5, random(0.01, 1.)));
   const double k = GENERATE(take(2, random(0., 1.)));
-  const double q0_extent = 10000 * 2. * M_PI;
   const double val = GENERATE(take(4, random(0.8, 1.2)));
 
   QuadratureProvider quadrature_provider;
-  IntegratorFiniteTq0TBB<dim, double, PolyIntegrand> integrator(quadrature_provider, {{64, q0_int_order}}, x_extent,
-                                                                q0_extent, q0_summands, T);
+  IntegratorFiniteTq0TBB<dim, double, PolyIntegrand> integrator(quadrature_provider, {{64}}, x_extent, T);
 
   SECTION("Volume integral")
   {
@@ -56,12 +52,12 @@ TEMPLATE_TEST_CASE_SIG("Test cpu momentum integrals at finite T (q0)", "[integra
 
     const double integral = integrator.request(k, 0., 1., 0., 0., 0., 0., 0., powr<2>(T), 0., powr<2>(val), 0.).get();
 
-    if (!is_close(reference_integral, integral, dim == 2 ? 1e-2 : 5e-5)) {
+    if (!is_close(reference_integral, integral, dim == 2 ? 1e-2 : 1e-6)) {
       std::cerr << "dim: " << dim << "| reference: " << reference_integral << "| integral: " << integral
                 << "| relative error: " << std::abs(reference_integral - integral) / std::abs(reference_integral)
                 << std::endl;
     }
     CHECK(isfinite(integral));
-    CHECK(is_close(reference_integral, integral, dim == 2 ? 1e-2 : 5e-5));
+    CHECK(is_close(reference_integral, integral, dim == 2 ? 1e-2 : 1e-6));
   }
 }

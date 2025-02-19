@@ -3,8 +3,8 @@
 
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/common/polynomials.hh>
+#include <DiFfRG/common/quadrature/quadrature_provider.hh>
 #include <DiFfRG/physics/integration/integrator_qmc.hh>
-#include <DiFfRG/physics/integration/quadrature_provider.hh>
 #include <DiFfRG/physics/loop_integrals.hh>
 
 using namespace DiFfRG;
