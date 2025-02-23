@@ -36,5 +36,8 @@ cmake -DCMAKE_BUILD_TYPE=DebugRelease \
     exit 1
 }
 
-make -j $THREADS &> $MAKE_LOG_FILE
+make -j $THREADS &> $MAKE_LOG_FILE || {
+                                      cat $MAKE_LOG_FILE
+                                      exit 1
+                                  }
 $SuperUser make -j $THREADS install >> $MAKE_LOG_FILE 2>&1
