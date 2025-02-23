@@ -15,16 +15,6 @@ source $SCRIPT_PATH/../config
 cd $BUILD_PATH
 
 COMPILER_CXX=$(cmake -E environment | grep "CXX" | awk -F'=' '{print $3}')
-if [ -z "$COMPILER_CXX" ]; then
-  COMPILER_CXX=$(which g++)
-  echo "No compiler for boost build specified, choosing ${COMPILER_CXX}"
-fi
-
-COMPILER=$(cmake -E environment | grep "CC" | awk -F'=' '{print $2}')
-if [ -z "$COMPILER" ]; then
-  COMPILER=$(which gcc)
-  echo "No compiler for boost build specified, choosing ${COMPILER}"
-fi
 
 cd $SOURCE_PATH
 

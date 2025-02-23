@@ -2,7 +2,7 @@ ARG base="rockylinux:9"
 
 FROM $base
 
-ARG threads="1"
+ARG threads="8"
 ARG cuda=""
 
 # set a directory for the app
@@ -15,7 +15,7 @@ COPY ./.git ./.git
 RUN dnf --enablerepo=devel install -y gcc-toolset-12 cmake git openblas-devel doxygen doxygen-latex python3 python3-pip gsl-devel
 RUN git reset --hard
 SHELL [ "/usr/bin/scl", "enable", "gcc-toolset-12"]
-RUN bash -i build.sh -j $threads -d -f $cuda -i DiFfRG_install &>build.log
+RUN bash -i build.sh -j $threads -d -f $cuda -i DiFfRG_install
 RUN ln -s /DiFfRG/DiFfRG_install /opt/DiFfRG
 
 # run the command
