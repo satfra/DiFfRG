@@ -9,6 +9,9 @@ profile/
 .cache/
 .venv/
 
+## remove editor configurat
+.idea
+
 ## remove builds from Applications
 Applications/*/build
 ## remove tutorials
