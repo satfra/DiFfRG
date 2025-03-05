@@ -304,7 +304,6 @@ namespace DiFfRG
     using CellIterator = typename dealii::DoFHandler<dim>::cell_iterator;
     using EoMType = std::array<double, dim>;
 
-    auto EoM = Point<dim>();
     Vector<typename VectorType::value_type> values(dof_handler.get_fe().n_components());
     Functions::FEFieldFunction<dim, VectorType> fe_function(dof_handler, sol, mapping);
 
@@ -329,10 +328,18 @@ namespace DiFfRG
     const bool all_axis_restricted =
         std::all_of(std::begin(axis_restrictions), std::end(axis_restrictions), [](bool i) { return i; });
 
+    auto EoM = origin;
+    EoM_cell = GridTools::find_active_cell_around_point(dof_handler, EoM);
     if (all_axis_restricted) {
       EoM = origin;
+      // std::cout << "All axis restricted" << std::endl;
       return EoM;
     }
+
+    // std::cout << "Restrictions: ";
+    // for (uint d = 0; d < dim; ++d)
+    //   std::cout << axis_restrictions[d] << " ";
+    // std::cout << std::endl;
 
     auto check_cell = [&](const CellIterator &cell) -> bool {
       if (any_axis_restricted && !cell->has_boundary_lines()) return false;
@@ -359,7 +366,17 @@ namespace DiFfRG
                 has_zero_boundary = true;
                 break;
               }
-            if (!has_zero_boundary) return false;
+            if (!has_zero_boundary) {
+              // std::cout << "No zero boundary for cell with vertices: ";
+              // for (uint i = 0; i < GeometryInfo<dim>::vertices_per_cell; ++i) {
+              // std::cout << "vertex " << i << ": ";
+              // for (uint d = 0; d < dim; ++d)
+              // std::cout << vertices[i][d] << " ";
+              // std::cout << std::endl;
+              // }
+
+              return false;
+            }
           }
 
       std::array<bool, dim> cell_has_EoM{{}};
@@ -408,6 +425,10 @@ namespace DiFfRG
 
       // find the cell boundaries
       std::array<std::array<double, 2>, dim> cell_boundaries{{}};
+      for (uint d = 0; d < dim; ++d) {
+        cell_boundaries[d][0] = cell->center()[d];
+        cell_boundaries[d][1] = cell->center()[d];
+      }
       for (uint d = 0; d < dim; ++d) {
         for (uint i = 0; i < GeometryInfo<dim>::vertices_per_cell; ++i) {
           cell_boundaries[d][0] = std::min(cell_boundaries[d][0], cell->vertex(i)[d]);
@@ -476,9 +497,13 @@ namespace DiFfRG
           if (p_proj[d] < cell_boundaries[d][0]) {
             out_distance[d] = std::abs(p_proj[d] - cell_boundaries[d][0]);
             p_proj[d] = cell_boundaries[d][0];
+            // std::cout << "Point outside cell" << std::endl;
+            // std::cout << "Point: " << p << std::endl;
           } else if (p_proj[d] > cell_boundaries[d][1]) {
             out_distance[d] = std::abs(p_proj[d] - cell_boundaries[d][1]);
             p_proj[d] = cell_boundaries[d][1];
+            // std::cout << "Point outside cell" << std::endl;
+            // std::cout << "Point: " << p << std::endl;
           }
         }
 
@@ -495,7 +520,11 @@ namespace DiFfRG
 
         // if (out_distance[d] > 0), linearly extrapolate the value
         for (uint d = 0; d < dim; ++d)
-          if (out_distance[d] > 0) EoM[d] = EoM[d] * (1 + out_distance[d]);
+          if (out_distance[d] > 0) {
+            // std::cout << "Extrapolating value from " << EoM[d];
+            EoM[d] = is_close(EoM[d], 0.) ? out_distance[d] : EoM[d] * (1 + out_distance[d]);
+            // std::cout << " to " << EoM[d] << std::endl;
+          }
 
         // reshuflle the values to the correct order
         std::array<double, dim> EoM_out{{}};
@@ -535,6 +564,7 @@ namespace DiFfRG
         if (status) break;
 
         status = gsl_multiroot_test_residual(s->f, EoM_abs_tol);
+
       } while (status == GSL_CONTINUE && iter < max_iter);
 
       EoM_val = 0.;
@@ -560,7 +590,7 @@ namespace DiFfRG
     std::vector<Point<dim>> EoM_candidates;
 
     // mutex for the EoM cell
-    std::mutex EoM_cell_mutex;
+    // std::mutex EoM_cell_mutex;
 
     const uint n_active_cells = dof_handler.get_triangulation().n_active_cells();
 
@@ -575,11 +605,13 @@ namespace DiFfRG
         double t_EoM_value = 0.;
 
         // lock the mutex
-        std::lock_guard<std::mutex> lock(EoM_cell_mutex);
+        // std::lock_guard<std::mutex> lock(EoM_cell_mutex);
 
         if (find_EoM(cell, t_EoM_cell, t_EoM, t_EoM_value)) {
-          EoM_cell = t_EoM_cell;
+          // std::cout << "Found EoM point in cell " << index << std::endl;
+          // std::cout << "EoM: " << t_EoM << std::endl;
           EoM = t_EoM;
+          EoM_cell = dealii::GridTools::find_active_cell_around_point(dof_handler, EoM);
           return EoM;
         }
 
@@ -588,6 +620,8 @@ namespace DiFfRG
         value_candidates.push_back(std::abs(t_EoM_value));
       }
     }
+
+    // std::cout << "Found " << cell_candidates.size() << " candidates." << std::endl;
 
     double EoM_value = 0.;
 

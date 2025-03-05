@@ -107,7 +107,7 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
     -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
     -DDiFfRG_BUILD_TESTS=OFF \
-    -DDiFfRG_BUILD_DOCUMENTATION=ON \
+    -DDiFfRG_BUILD_DOCUMENTATION=OFF \
     -S ${SOURCEPATH} &>${LOGPATH}/DiFfRG_cmake.log || {
     echo "    Failed to configure DiFfRG, aborting."
     exit 1
@@ -149,10 +149,24 @@ if [[ -z ${option_setup_mathematica+x} ]]; then
 fi
 if [[ ${option_setup_mathematica} != "n" ]] && [[ ${option_setup_mathematica} != "N" ]]; then
   echo "Checking for mathematica installation..."
-  if command -v math &>/dev/null; then
+  wolfram=wolfram
+  has_mathematica="n"
+  if command -v ${wolfram} &>/dev/null; then
+    has_mathematica="y"
+  else
+    echo "    Mathematica: '${wolfram}' command could not be found"
+    read -p "    Provide the path to a valid Mathematica or WolframScript executable: " wolfram
+    if command -v ${wolfram} &>/dev/null; then
+      has_mathematica="y"
+    fi
+  fi
 
+  if [[ ${has_mathematica} != "y" ]]; then
+    echo "    Mathematica: '${wolfram}' command could not be found"
+    exit 1
+  else
     # We use the math command to determine the mathematica applications folder
-    math_app_folder=$(math -run 'FileNameJoin[{$UserBaseDirectory,"Applications"}]//Print;Exit[]' | tail -n1)
+    math_app_folder=$(wolfram -run 'FileNameJoin[{$UserBaseDirectory,"Applications"}]//Print;Exit[]' | tail -n1)
     mkdir -p ${math_app_folder}
 
     echo "  DiFfRG mathematica package will be installed to ${math_app_folder}"
@@ -175,9 +189,6 @@ if [[ ${option_setup_mathematica} != "n" ]] && [[ ${option_setup_mathematica} !=
       echo "    Failed to install DiFfRG mathematica package, aborting."
       exit 1
     }
-  else
-    echo "    Mathematica: 'math' command could not be found"
-    exit 1
   fi
 
   echo

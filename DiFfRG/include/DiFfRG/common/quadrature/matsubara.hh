@@ -99,9 +99,9 @@ namespace DiFfRG
      * @param f The function to be summed. Must have signature NT f(NT x).
      * @return NT The Matsubara sum of the function.
      */
-    template <typename F> NT sum(const F &f) const
+    template <typename F> auto sum(const F &f) const
     {
-      NT sum = T * f(static_cast<NT>(0));
+      auto sum = T * f(static_cast<NT>(0));
       for (int i = 0; i < m_size; ++i)
         sum += w[i] * (f(x[i]) + f(-x[i]));
       return sum;

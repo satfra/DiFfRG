@@ -71,8 +71,6 @@ namespace DiFfRG
     std::list<std::string> args;
     std::list<std::pair<std::string, std::string>> cli_parameters;
 
-    std::ofstream log_filestream;
-
     uint depth_console = 0;
     uint depth_file = 3;
 
