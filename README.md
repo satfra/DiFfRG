@@ -149,12 +149,11 @@ As soon as the build has finished, you can find a full install of the library in
 
 If you have changes to the library code, you can update the library by running
 ```bash
-$ bash -i update_DiFfRG.sh -clm -j8 -i /opt/DiFfRG
+$ bash -i update_DiFfRG.sh -cm -j8 -i /opt/DiFfRG
 ```
 where once again the `-j` parameter should be adjusted to your amount of CPU cores.
 The `update_DiFfRG.sh` script takes the following optional arguments:
 - `-c`               Use CUDA when building the DiFfRG library.
-- `-l`               Build the DiFfRG library.
 - `-i <directory>`   Set the installation directory for the library.
 - `-j <threads>`     Set the number of threads passed to make and git fetch.
 - `-m`               Install the Mathematica package locally.
