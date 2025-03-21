@@ -445,10 +445,13 @@ If[MemberQ[knownTypes,type],Return[True],Print["Unkown kernel Type: ",type, "\nK
 AngleTest[number_]:=Module[{},
 If[0<=number<=3,Return[True],Print["Invalid number of Angles: ",number,"\nMust be between 0 and 3."];Return[False]]
 ];
-knownctypes={"double","float"};
+knownctypes={"double","float","complex<double>"};
 ctypeTest[type_]:=Module[{},
 If[MemberQ[knownctypes,type],Return[True],Print["Unkown kernel ctype: ",type, "\nKnown ctypes: ",knownctypes];Return[False]]
 ];
+projcetComplexToCtype[type_]:=Module[{},
+StringReplace[type,{"complex<double>"->"double","complex<float>"->"float"}]
+]
 knownDevices={"CPU","TBB","GPU"};
 deviceTest[type_]:=Module[{},
 If[MemberQ[knownDevices,type],Return[True],Print["Unkown kernel Device: ",type, "\nKnown Devices (where TBB=CPU): ",knownDevices];Return[False]]
@@ -754,6 +757,9 @@ SetKernelDefinitions[]:=Module[{},
 Set[$KernelDefinitions,$StandardKernelDefinitions];
 ]
 ShowKernelDefinitions[]:=Print[$KernelDefinitions]
+GetKernelDefinitions[]:=Module[{},
+$KernelDefinitions
+]
 
 
 (* ::Input::Initialization:: *)
@@ -948,7 +954,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
 head="  static __forceinline__ __host__ __device__ auto
-  kernel(const "<>computeType<>" k, ";
+  kernel(const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=
 head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
 body="";
@@ -967,7 +973,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
 head="  static __forceinline__ __host__ __device__ auto
-  kernel(const "<>computeType<>" q, const "<>computeType<>" k, ";
+  kernel(const "<>computeType<>" q, const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=
 head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
 body="";
@@ -986,7 +992,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
 head="  static __forceinline__ __host__ __device__ auto
-  kernel(const "<>computeType<>" qx, const "<>computeType<>" qy, const "<>computeType<>" k, ";
+  kernel(const "<>computeType<>" qx, const "<>computeType<>" qy, const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=
 head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
 body="";
@@ -1005,7 +1011,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
 head="  static __forceinline__ __host__ __device__ auto
-  kernel(const "<>computeType<>" qx, const "<>computeType<>" qy, const "<>computeType<>" qz, const "<>computeType<>" k, ";
+  kernel(const "<>computeType<>" qx, const "<>computeType<>" qy, const "<>computeType<>" qz, const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=
 head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
 body="";
@@ -1025,7 +1031,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
 head="  static __forceinline__ __host__ __device__ auto
-  kernel(const "<>computeType<>" q, const "<>computeType<>" k, ";
+  kernel(const "<>computeType<>" q, const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=
 head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
 body="";
@@ -1043,7 +1049,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
-head="  static __forceinline__ __host__ __device__ auto kernel(const "<>computeType<>" q, const "<>computeType<>" cos1, const "<>computeType<>" k, ";
+head="  static __forceinline__ __host__ __device__ auto kernel(const "<>computeType<>" q, const "<>computeType<>" cos1, const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
 body="";
 If[definitions=!="",
@@ -1060,7 +1066,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
-head="  static __forceinline__ __host__ __device__ auto kernel(const "<>computeType<>" q, const "<>computeType<>" cos1, const "<>computeType<>" phi, const "<>computeType<>" k, ";
+head="  static __forceinline__ __host__ __device__ auto kernel(const "<>computeType<>" q, const "<>computeType<>" cos1, const "<>computeType<>" phi, const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",
 {i,1,Length[parameterList]}]],-2]<>")";
 body="";
@@ -1078,7 +1084,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
-head="  static __forceinline__ __host__ __device__ auto kernel(const "<>computeType<>" q, const "<>computeType<>" cos1, const "<>computeType<>" cos2, const "<>computeType<>" k, ";
+head="  static __forceinline__ __host__ __device__ auto kernel(const "<>computeType<>" q, const "<>computeType<>" cos1, const "<>computeType<>" cos2, const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",
 {i,1,Length[parameterList]}]],-2]<>")";
 body="";
@@ -1096,7 +1102,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
-head="  static __forceinline__ __host__ __device__ auto kernel(const "<>computeType<>" q, const "<>computeType<>" cos1, const "<>computeType<>" cos2, const "<>computeType<>" phi, const "<>computeType<>" k, ";
+head="  static __forceinline__ __host__ __device__ auto kernel(const "<>computeType<>" q, const "<>computeType<>" cos1, const "<>computeType<>" cos2, const "<>computeType<>" phi, const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
 body="";
 If[definitions=!="",
@@ -1113,7 +1119,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
-head="  static __forceinline__ __host__ __device__ auto constant(const "<>computeType<>" k, ";
+head="  static __forceinline__ __host__ __device__ auto constant(const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
 body="";
 If[definitions=!="",
@@ -1261,7 +1267,7 @@ namespace DiFfRG
     class "<>className<>"
     {
     public:
-      "<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[gridSizes]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json);
+      "<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[gridSizes]<>"> grid_sizes, const "<>projcetComplexToCtype[computeType]<>" x_extent, const JSONValue& json);
       "<>className<>"(const "<>className<>"& other);
       ~"<>className<>"();
 
@@ -1296,18 +1302,18 @@ If[kernel["AD"],"
       }
 
     private:
-      std::future<"<>computeType<>"> request_CT(const "<>computeType<>" k, "<>paramList<>");
-      "<>computeType<>" get_CT(const "<>computeType<>" k, "<>paramList<>");"<>
+      std::future<"<>computeType<>"> request_CT(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramList<>");
+      "<>computeType<>" get_CT(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramList<>");"<>
 If[kernel["AD"],"
-      std::future<autodiff::real> request_AD(const "<>computeType<>" k, "<>paramListAD<>");
-      autodiff::real get_AD(const "<>computeType<>" k, "<>paramListAD<>");",
+      std::future<autodiff::real> request_AD(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramListAD<>");
+      autodiff::real get_AD(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramListAD<>");",
 ""
 ]<>"
 
       QuadratureProvider& quadrature_provider;
       const std::array<uint, "<>ToString[gridSizes]<>"> grid_sizes;
       std::array<uint, "<>ToString[gridSizes]<>"> jac_grid_sizes;
-      const "<>computeType<>" x_extent;
+      const "<>projcetComplexToCtype[computeType]<>" x_extent;
       const "<>computeType<>" jacobian_quadrature_factor;
 	  const JSONValue json;
 
@@ -1330,7 +1336,7 @@ namespace DiFfRG
 {
   namespace Flows
   {
-    "<>className<>"::"<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[gridSizes]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json)
+    "<>className<>"::"<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[gridSizes]<>"> grid_sizes, const "<>projcetComplexToCtype[computeType]<>" x_extent, const JSONValue& json)
         : quadrature_provider(quadrature_provider), grid_sizes(grid_sizes), x_extent(x_extent), jacobian_quadrature_factor(json.get_double(\"/integration/jacobian_quadrature_factor\")), json(json)
     {
       integrator = std::make_unique<"<>integrator<>">(quadrature_provider, grid_sizes, x_extent, json);"<>
@@ -1355,23 +1361,23 @@ If[kernel["AD"],",
 
     "<>className<>"::~"<>className<>"() = default;
 
-    std::future<"<>computeType<>"> "<>className<>"::request_CT(const "<>computeType<>" k, "<>paramList<>")
+    std::future<"<>computeType<>"> "<>className<>"::request_CT(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramList<>")
     {
       return integrator->request(k, "<>argList<>");
     }
 
-    "<>computeType<>" "<>className<>"::get_CT(const "<>computeType<>" k, "<>paramList<>")
+    "<>computeType<>" "<>className<>"::get_CT(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramList<>")
     {
       return integrator->get(k, "<>argList<>");
     }
 "<>
 If[kernel["AD"],"
-    std::future<autodiff::real> "<>className<>"::request_AD(const "<>computeType<>" k, "<>paramListAD<>")
+    std::future<autodiff::real> "<>className<>"::request_AD(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramListAD<>")
     {
       return integrator_AD->request(k, "<>argList<>");
     }
 
-    autodiff::real "<>className<>"::get_AD(const "<>computeType<>" k, "<>paramListAD<>")
+    autodiff::real "<>className<>"::get_AD(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramListAD<>")
     {
       return integrator_AD->get(k, "<>argList<>");
     }",
@@ -1391,7 +1397,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
-head="  static __forceinline__ __host__ __device__ auto constant(const "<>computeType<>" k, ";
+head="  static __forceinline__ __host__ __device__ auto constant(const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
 body="";
 If[definitions=!="",
@@ -1410,7 +1416,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
 head="  static __forceinline__ __host__ __device__ auto
-  kernel(const "<>computeType<>" q, const "<>computeType<>" q0, const "<>computeType<>" k, ";
+  kernel(const "<>computeType<>" q, const "<>computeType<>" q0, const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=
 head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
 body="";
@@ -1428,7 +1434,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
-head="  static __forceinline__ __host__ __device__ auto kernel(const "<>computeType<>" q, const "<>computeType<>" cos1, const "<>computeType<>" q0, const "<>computeType<>" k, ";
+head="  static __forceinline__ __host__ __device__ auto kernel(const "<>computeType<>" q, const "<>computeType<>" cos1, const "<>computeType<>" q0, const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",{i,1,Length[parameterList]}]],-2]<>")";
 body="";
 If[definitions=!="",
@@ -1445,7 +1451,7 @@ If[Not@IsValidParameterList[parameterList],Print["Invalid parameter List!"];Abor
 
 templateList=StringDrop[StringJoin[Table["typename T"<>ToString[i]<>", ",{i,1,Length[parameterList]}]],-2];
 templateList="  template <"<>templateList<>">";
-head="  static __forceinline__ __host__ __device__ auto kernel(const "<>computeType<>" q, const "<>computeType<>" cos1, const "<>computeType<>" phi, const "<>computeType<>" q0, const "<>computeType<>" k, ";
+head="  static __forceinline__ __host__ __device__ auto kernel(const "<>computeType<>" q, const "<>computeType<>" cos1, const "<>computeType<>" phi, const "<>computeType<>" q0, const "<>projcetComplexToCtype[computeType]<>" k, ";
 head=head<>StringDrop[StringJoin[Table["const T"<>ToString[i]<>ArgType[parameterList[[i]]["Type"]]<>" "<>ToString[parameterList[[i]]["Name"]]<>", ",
 {i,1,Length[parameterList]}]],-2]<>")";
 body="";
@@ -1538,7 +1544,7 @@ namespace DiFfRG
     class "<>className<>"
     {
     public:
-      "<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes, const "<>computeType<>" x_extent, const "<>computeType<>" x0_extent, const uint x0_summands, const JSONValue& json, const uint max_block_size = 256);
+      "<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes, const "<>projcetComplexToCtype[computeType]<>" x_extent, const "<>projcetComplexToCtype[computeType]<>" x0_extent, const uint x0_summands, const JSONValue& json, const uint max_block_size = 256);
       "<>className<>"(const "<>className<>"& other);
       ~"<>className<>"();
 
@@ -1576,18 +1582,18 @@ If[kernel["AD"],"
       void set_x0_extent(const "<>computeType<>" value);
 
     private:
-      std::future<"<>computeType<>"> request_CT(const "<>computeType<>" k, "<>paramList<>");
-      "<>computeType<>" get_CT(const "<>computeType<>" k, "<>paramList<>");"<>
+      std::future<"<>computeType<>"> request_CT(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramList<>");
+      "<>computeType<>" get_CT(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramList<>");"<>
 If[kernel["AD"],"
-      std::future<autodiff::real> request_AD(const "<>computeType<>" k, "<>paramListAD<>");
-      autodiff::real get_AD(const "<>computeType<>" k, "<>paramListAD<>");",
+      std::future<autodiff::real> request_AD(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramListAD<>");
+      autodiff::real get_AD(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramListAD<>");",
 ""]<>"
 
       QuadratureProvider& quadrature_provider;
       const std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes;
       std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> jac_grid_sizes;
-      const "<>computeType<>" x_extent;
-      const "<>computeType<>" x0_extent;
+      const "<>projcetComplexToCtype[computeType]<>" x_extent;
+      const "<>projcetComplexToCtype[computeType]<>" x0_extent;
       const uint x0_summands;
       const "<>computeType<>" m_T;
       const "<>computeType<>" jacobian_quadrature_factor;
@@ -1611,7 +1617,7 @@ namespace DiFfRG
 {
   namespace Flows
   {
-    "<>className<>"::"<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes, const "<>computeType<>" x_extent, const "<>computeType<>" x0_extent, const uint x0_summands, const JSONValue& json)
+    "<>className<>"::"<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+2]<>"> grid_sizes, const "<>projcetComplexToCtype[computeType]<>" x_extent, const "<>projcetComplexToCtype[computeType]<>" x0_extent, const uint x0_summands, const JSONValue& json)
         : quadrature_provider(quadrature_provider), grid_sizes(grid_sizes), x_extent(x_extent), 
           x0_extent(x0_extent), x0_summands(x0_summands), jacobian_quadrature_factor(json.get_double(\"/integration/jacobian_quadrature_factor\")), json(json)"<>"
     {
@@ -1650,23 +1656,23 @@ If[kernel["AD"],",
 
     "<>className<>"::~"<>className<>"() = default;
 
-    std::future<"<>computeType<>"> "<>className<>"::request_CT(const "<>computeType<>" k, "<>paramList<>")
+    std::future<"<>computeType<>"> "<>className<>"::request_CT(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramList<>")
     {
       return integrator->request(k, "<>argList<>");
     }
 
-    "<>computeType<>" "<>className<>"::get_CT(const "<>computeType<>" k, "<>paramList<>")
+    "<>computeType<>" "<>className<>"::get_CT(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramList<>")
     {
       return integrator->get(k, "<>argList<>");
     }"<>
 If[kernel["AD"],"
 
-    std::future<autodiff::real> "<>className<>"::request_AD(const "<>computeType<>" k, const "<>paramListAD<>")
+    std::future<autodiff::real> "<>className<>"::request_AD(const "<>projcetComplexToCtype[computeType]<>" k, const "<>paramListAD<>")
     {
       return integrator_AD->request(k, "<>argList<>");
     }
 
-    autodiff::real "<>className<>"::get_AD(const "<>computeType<>" k, "<>paramListAD<>")
+    autodiff::real "<>className<>"::get_AD(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramListAD<>")
     {
       return integrator_AD->get(k, "<>argList<>");
     }",
@@ -1735,7 +1741,7 @@ namespace DiFfRG
     class "<>className<>"
     {
     public:
-      "<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json);
+      "<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> grid_sizes, const "<>projcetComplexToCtype[computeType]<>" x_extent, const JSONValue& json);
       "<>className<>"(const "<>className<>"& other);
       ~"<>className<>"();
 
@@ -1772,17 +1778,17 @@ If[kernel["AD"],"
       void set_T(const "<>computeType<>" T, const "<>computeType<>" E = 0);
 
     private:
-      std::future<"<>computeType<>"> request_CT(const "<>computeType<>" k, "<>paramList<>");
-      "<>computeType<>" get_CT(const "<>computeType<>" k, "<>paramList<>");"<>
+      std::future<"<>computeType<>"> request_CT(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramList<>");
+      "<>computeType<>" get_CT(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramList<>");"<>
 If[kernel["AD"],"
-      std::future<autodiff::real> request_AD(const "<>computeType<>" k, "<>paramListAD<>");
-      autodiff::real get_AD(const "<>computeType<>" k, "<>paramListAD<>");",
+      std::future<autodiff::real> request_AD(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramListAD<>");
+      autodiff::real get_AD(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramListAD<>");",
 ""]<>"
 
       QuadratureProvider& quadrature_provider;
       const std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> grid_sizes;
       std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> jac_grid_sizes;
-      const "<>computeType<>" x_extent;
+      const "<>projcetComplexToCtype[computeType]<>" x_extent;
       const "<>computeType<>" jacobian_quadrature_factor;
       const JSONValue json;
 
@@ -1804,7 +1810,7 @@ namespace DiFfRG
 {
   namespace Flows
   {
-    "<>className<>"::"<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> grid_sizes, const "<>computeType<>" x_extent, const JSONValue& json)
+    "<>className<>"::"<>className<>"(QuadratureProvider &quadrature_provider, std::array<uint, "<>ToString[kernel["Angles"]+1]<>"> grid_sizes, const "<>projcetComplexToCtype[computeType]<>" x_extent, const JSONValue& json)
         : quadrature_provider(quadrature_provider), grid_sizes(grid_sizes), x_extent(x_extent), 
           jacobian_quadrature_factor(json.get_double(\"/integration/jacobian_quadrature_factor\")), json(json)"<>"
     {
@@ -1835,22 +1841,22 @@ If[kernel["AD"],",
       integrator_AD->set_T(T, E);",""]<>"
     }
 
-    std::future<"<>computeType<>"> "<>className<>"::request_CT(const "<>computeType<>" k, "<>paramList<>")
+    std::future<"<>computeType<>"> "<>className<>"::request_CT(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramList<>")
     {
       return integrator->request(k, "<>argList<>");
     }
 
-    "<>computeType<>" "<>className<>"::get_CT(const "<>computeType<>" k, "<>paramList<>")
+    "<>computeType<>" "<>className<>"::get_CT(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramList<>")
     {
       return integrator->get(k, "<>argList<>");
     }
 "<>If[kernel["AD"],"
-    std::future<autodiff::real> "<>className<>"::request_AD(const "<>computeType<>" k, "<>paramListAD<>")
+    std::future<autodiff::real> "<>className<>"::request_AD(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramListAD<>")
     {
       return integrator_AD->request(k, "<>argList<>");
     }
 
-    autodiff::real "<>className<>"::get_AD(const "<>computeType<>" k, "<>paramListAD<>")
+    autodiff::real "<>className<>"::get_AD(const "<>projcetComplexToCtype[computeType]<>" k, "<>paramListAD<>")
     {
       return integrator_AD->get(k, "<>argList<>");
     }",""]<>"
