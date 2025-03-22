@@ -8,6 +8,11 @@ profile/
 *.log
 .cache/
 .venv/
+build_debug
+build_release
+build_test
+build_test_coverage
+build
 
 ## remove editor configurat
 .idea
