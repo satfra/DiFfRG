@@ -21,13 +21,6 @@ cd $SOURCE_PATH
 $SuperUser ./bootstrap.sh --prefix=${INSTALL_PATH} &>/dev/null
 $SuperUser ./b2 --build-dir=${BUILD_PATH} \
   --prefix=${INSTALL_PATH} \
-  --with-headers \
-  --with-iostreams \
-  --with-json \
-  --with-math \
-  --with-serialization \
-  --with-system \
-  --with-thread \
   -j ${THREADS} \
   cxxflags="${CXX_FLAGS} -std=c++20" \
   install &> $MAKE_LOG_FILE || {
