@@ -23,6 +23,8 @@ We also include a set of tools for the evaluation of integrals and discretizatio
 
 For an overview, please see the [accompanying paper](https://arxiv.org/abs/2412.13043), the ***[tutorial page](https://satfra.github.io/DiFfRG/cpp/TutorialTOC.html)*** in the [documentation](https://satfra.github.io/DiFfRG/cpp/index.html) and the examples in `Examples/`. 
 
+This library has been developed within the [fQCD Collaboration](https://fQCD-Collaboration.github.io).
+
 ## Citation
 
 If you use DiFfRG in your scientific work, please cite the corresponding paper:
@@ -37,7 +39,6 @@ If you use DiFfRG in your scientific work, please cite the corresponding paper:
     year = "2024"
 }
 ```
-
 
 ## Requirements
 
