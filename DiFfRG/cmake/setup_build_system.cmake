@@ -106,6 +106,8 @@ endif()
 
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 enable_language(CXX)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 # ##############################################################################
 # Find packages
@@ -117,7 +119,7 @@ if(NOT DEFINED USE_CCACHE)
 endif()
 # Add CCache.cmake for faster builds
 cpmaddpackage(NAME Ccache.cmake GITHUB_REPOSITORY TheLartians/Ccache.cmake
-              VERSION 1.2)
+              VERSION 1.2.5)
 
 # Find deal.II
 find_package(deal.II 9.5.0 REQUIRED HINTS ${DEAL_II_DIR}
