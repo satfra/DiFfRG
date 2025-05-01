@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.26.4)
 
 project(YangMills)
 
-find_package(DiFfRG REQUIRED HINTS /opt/DiFfRG_install)
+find_package(DiFfRG REQUIRED HINTS /opt/DiFfRG/)
 
 add_executable(Yang-Mills Yang-Mills.cc)
 setup_application(Yang-Mills)

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.26.4)
 
 project(QuarkMesonLPAprime)
 
-find_package(DiFfRG REQUIRED HINTS /opt/DiFfRG)
+find_package(DiFfRG REQUIRED HINTS /opt/DiFfRG/)
 
 add_executable(QuarkMeson QM.cc)
 setup_application(QuarkMeson)
