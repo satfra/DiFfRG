@@ -54,9 +54,8 @@ endif()
 # Setup build system : Libraries
 # ##############################################################################
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/cmake)
-include(${CMAKE_SOURCE_DIR}/cmake/setup_build_system.cmake)
-include(${CMAKE_SOURCE_DIR}/cmake/setup_targets.cmake)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/setup_build_system.cmake)
 
 # ##############################################################################
 # DiFfRG library and models

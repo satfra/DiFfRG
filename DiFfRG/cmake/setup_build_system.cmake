@@ -8,16 +8,12 @@ if(${CMAKE_PROJECT_NAME} STREQUAL "DiFfRG")
   # If we are building DiFfRG as a standalone project, we need to set the base
   # directory
   set(BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-  if(NOT DEFINED BUNDLED_DIR)
-    set(BUNDLED_DIR ${BASE_DIR}/../external)
-  endif()
 else()
   # If we are building a DiFfRG-based project, we need to set the bundle
   # directory relative to the DiFfRG base directory
   set(BASE_DIR ${DiFfRG_BASE_DIR})
-  set(BUNDLED_DIR ${BASE_DIR}/bundled)
+  set(BUNDLED_DIR ${DiFfRG_BUNDLED_DIR})
 endif()
-message(STATUS "DiFfRG include directory: ${BASE_DIR}/include")
 
 # No matter what we are building, we need to set the include directory
 # include_directories(${BASE_DIR}/include)
@@ -109,6 +105,17 @@ enable_language(CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
+include(CheckLanguage)
+if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  set(OpenMP_ROOT "/opt/homebrew/opt/libomp")
+endif()
+check_language(OpenMP)
+find_package( OpenMP )
+if ( OpenMP_CXX_FOUND )
+  message(STATUS "OpenMP found at ${OpenMP_CXX_INCLUDE_DIRS}")
+  include_directories(SYSTEM ${OpenMP_CXX_INCLUDE_DIRS})
+endif()
+
 # ##############################################################################
 # Find packages
 # ##############################################################################
@@ -122,21 +129,21 @@ cpmaddpackage(NAME Ccache.cmake GITHUB_REPOSITORY TheLartians/Ccache.cmake
               VERSION 1.2.5)
 
 # Find deal.II
-find_package(deal.II 9.5.0 REQUIRED HINTS ${DEAL_II_DIR}
-             ${BUNDLED_DIR}/dealii_install)
+find_package(deal.II 9.5.0 REQUIRED HINTS ${BUNDLED_DIR})
 deal_ii_initialize_cached_variables()
 
 # Find TBB
-find_package(TBB 2022.0.0 REQUIRED HINTS ${BUNDLED_DIR}/oneTBB_install)
+find_package(TBB 2022.0.0 REQUIRED HINTS ${BUNDLED_DIR})
 message(STATUS "TBB dir: ${TBB_DIR}")
 
 # Find Boost
-find_package(Boost 1.80 REQUIRED HINTS ${BUNDLED_DIR}/boost_install
-             COMPONENTS thread random iostreams math serialization system)
+find_package(Boost 1.80 REQUIRED HINTS ${BUNDLED_DIR}
+             COMPONENTS thread random iostreams serialization system)
 message(STATUS "Boost version: ${Boost_VERSION}")
 message(STATUS "Boost include dir: ${Boost_INCLUDE_DIRS}")
 message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 include_directories(SYSTEM ${Boost_INCLUDE_DIRS})
+add_compile_definitions(_HAS_AUTO_PTR_ETC=0)
 
 # Find Eigen3
 cpmaddpackage(
@@ -255,10 +262,12 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER)
 
     # Check if the target is DiFfRG
     if(${TARGET} STREQUAL "DiFfRG")
-      target_include_directories(${TARGET} PUBLIC ${autodiff_SOURCE_DIR})
+      target_include_directories(${TARGET} SYSTEM PUBLIC ${autodiff_SOURCE_DIR})
     else()
       target_link_libraries(${TARGET} autodiff::autodiff)
     endif()
+
+    target_compile_definitions(${TARGET} PUBLIC BOOST_NO_CXX98_FUNCTION_BASE)
 
     target_link_libraries(${TARGET} GSL::gsl)
     target_link_libraries(${TARGET} Eigen3)
@@ -281,7 +290,7 @@ else()
 
     # Check if the target is DiFfRG
     if(${TARGET} STREQUAL "DiFfRG")
-      target_include_directories(${TARGET} PUBLIC ${autodiff_SOURCE_DIR})
+      target_include_directories(${TARGET} SYSTEM PUBLIC ${autodiff_SOURCE_DIR})
     else()
       target_link_libraries(${TARGET} autodiff::autodiff)
     endif()
