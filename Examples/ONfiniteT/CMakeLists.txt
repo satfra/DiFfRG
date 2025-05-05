@@ -9,8 +9,7 @@ project(ONfiniteT LANGUAGES CXX)
 if(NOT DEFINED DiFfRG_DIR)
   set(DiFfRG_DIR /opt/DiFfRG)
 endif()
-# find_package(DiFfRG REQUIRED HINTS ${DiFfRG_DIR})
-find_package(DiFfRG REQUIRED HINTS ../../DiFfRG_install)
+find_package(DiFfRG REQUIRED HINTS ${DiFfRG_DIR})
 
 add_subdirectory(flows)
 

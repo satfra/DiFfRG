@@ -57,12 +57,17 @@ git submodule update --init --recursive --jobs ${threads}
 
 if [[ -z ${INSTALLPATH} ]]; then
   echo
-  read -p "Install DiFfRG library globally to /opt/DiFfRG? [y/N/path] " INSTALLPATH
+  read -p "Install DiFfRG library globally to /opt/DiFfRG/? [y/N/path] " INSTALLPATH
   INSTALLPATH=${INSTALLPATH:-N}
 fi
 
-if [[ ${INSTALLPATH} == "y" ]]; then
-  INSTALLPATH="/opt/DiFfRG"
+if [[ ${INSTALLPATH} == "y" ]] || [[ ${INSTALLPATH} == "Y" ]]; then
+  INSTALLPATH="/opt/DiFfRG/"
+fi
+
+if [[ ${INSTALLPATH} == "n" ]] || [[ ${INSTALLPATH} == "N" ]]; then
+  echo "Aborting."
+  exit 1
 fi
 
 if [[ ${INSTALLPATH} == "N" ]] || [[ ${INSTALLPATH} == "N" ]]; then

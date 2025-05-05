@@ -79,8 +79,12 @@ echo
 
 if [[ -z ${option_install_library} ]]; then
   echo
-  read -p "Install DiFfRG library globally to /opt/DiFfRG? [y/N/path] " option_install_library
+  read -p "Install DiFfRG library globally to /opt/DiFfRG/? [y/N/path] " option_install_library
   option_install_library=${option_install_library:-N}
+fi
+
+if [[ ${option_install_library} == "y" ]] || [[ ${option_install_library} == "Y" ]]; then
+  option_install_library="/opt/DiFfRG/"
 fi
 
 if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N" ]]; then
