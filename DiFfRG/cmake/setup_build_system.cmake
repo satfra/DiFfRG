@@ -22,14 +22,6 @@ message(STATUS "DiFfRG include directory: ${BASE_DIR}/include")
 # No matter what we are building, we need to set the include directory
 # include_directories(${BASE_DIR}/include)
 
-# By default, we build in Release mode, i.e. if the user does not make any other
-# choice. After all, even if the user is unaware of cmake build types, we want
-# to provide optimal performance.
-if(NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
-  set(CMAKE_BUILD_TYPE Release)
-  message(STATUS "Build type not set, defaulting to Release")
-endif()
-
 # Set some C++ compiler flags if they are not specified by the user. We simply
 # propagate the base library flags to the user's project in that case.
 if(NOT DEFINED CMAKE_CXX_FLAGS OR CMAKE_CXX_FLAGS STREQUAL "")
@@ -43,42 +35,10 @@ endif()
 # with the ones used in the base library. Here, we always fix some flags that
 # could lead to incompatibilities, and then add the user's flags. Also, by
 # default, we use the highest instruction set available on the current machine.
-if(NOT DEFINED CMAKE_CUDA_FLAGS OR CMAKE_CUDA_FLAGS STREQUAL "")
-  set(CMAKE_CUDA_FLAGS
-      "-arch=native --use_fast_math --split-compile=0 --threads=0 --gen-opt-lto"
-  )
-
-  message(STATUS "CUDA flags not set, defaulting to ${CMAKE_CUDA_FLAGS}")
-else()
-  set(CMAKE_CUDA_FLAGS
-      "--split-compile=0 --threads=0 --gen-opt-lto --use_fast_math")
-
-  # check if CMAKE_CUDA_FLAGS contains the arch keyword (i.e. the user has set
-  # what architecture to use). If it does not, set it to the native.
-  if(NOT CMAKE_CUDA_FLAGS MATCHES "-arch")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=native")
-  endif()
-
-  message(STATUS "CUDA flags have been set to ${CMAKE_CUDA_FLAGS}")
-endif()
-
-if(${CMAKE_PROJECT_NAME} STREQUAL "DiFfRG")
-  # By default, enable interprocedural optimization if it is supported.
-  if(NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
-    include(CheckIPOSupported)
-    check_ipo_supported(RESULT ipo_supported OUTPUT error)
-
-    if(ipo_supported)
-      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
-      message(
-        STATUS
-          "Interprocedural optimization enabled. To disable, set CMAKE_INTERPROCEDURAL_OPTIMIZATION to FALSE."
-      )
-    else()
-      set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
-    endif()
-  endif()
-endif()
+set(CMAKE_CUDA_FLAGS
+    "-arch=native --use_fast_math --split-compile=0 --threads=0"
+)
+message(STATUS "CUDA flags have been set to ${CMAKE_CUDA_FLAGS}")
 
 message(STATUS "Bundle directory: ${BUNDLED_DIR}")
 
@@ -96,30 +56,32 @@ include(${BASE_DIR}/cmake/CPM.cmake)
 # Set standard and language
 # ##############################################################################
 
+set(CMAKE_CXX_STANDARD_REQUIRED On)
 if(NOT DEFINED CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 20)
+  set(CMAKE_CUDA_STANDARD 20)
 else()
   if(CMAKE_CXX_STANDARD LESS 20)
     message(FATAL_ERROR "C++ standard must be at least 20")
   endif()
 endif()
 
-set(CMAKE_CXX_STANDARD_REQUIRED On)
-enable_language(CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+set(CMAKE_CXX_EXTENSIONS OFF)
+enable_language(CXX)
+
+# By default, we build in Release mode, i.e. if the user does not make any other
+# choice. After all, even if the user is unaware of cmake build types, we want
+# to provide optimal performance.
+if(NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
+  set(CMAKE_BUILD_TYPE Release)
+  message(STATUS "Build type not set, defaulting to Release")
+endif()
 
 # ##############################################################################
 # Find packages
 # ##############################################################################
-
-# Use CCACHE if not set
-if(NOT DEFINED USE_CCACHE)
-  set(USE_CCACHE ON)
-endif()
-# Add CCache.cmake for faster builds
-cpmaddpackage(NAME Ccache.cmake GITHUB_REPOSITORY TheLartians/Ccache.cmake
-              VERSION 1.2.5)
 
 # Find deal.II
 find_package(deal.II 9.5.0 REQUIRED HINTS ${DEAL_II_DIR}

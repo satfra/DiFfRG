@@ -156,17 +156,17 @@ if [[ ${option_setup_mathematica} != "n" ]] && [[ ${option_setup_mathematica} !=
   else
     echo "    Mathematica: '${wolfram}' command could not be found"
     read -p "    Provide the path to a valid Mathematica or WolframScript executable: " wolfram
-    if command -v ${wolfram} &>/dev/null; then
+    if ! [[ -x "$(command -v ${wolfram} &>/dev/null)" ]] && [[ ${wolfram} != "" ]]; then
+      echo "    Mathematica: '${wolfram}' command found"
       has_mathematica="y"
     fi
   fi
 
   if [[ ${has_mathematica} != "y" ]]; then
     echo "    Mathematica: '${wolfram}' command could not be found"
-    exit 1
   else
     # We use the math command to determine the mathematica applications folder
-    math_app_folder=$(wolfram -run 'FileNameJoin[{$UserBaseDirectory,"Applications"}]//Print;Exit[]' | tail -n1)
+    math_app_folder=$(${wolfram} -run 'FileNameJoin[{$UserBaseDirectory,"Applications"}]//Print;Exit[]' | tail -n1)
     mkdir -p ${math_app_folder}
 
     echo "  DiFfRG mathematica package will be installed to ${math_app_folder}"

@@ -134,11 +134,10 @@ $ git clone https://github.com/satfra/DiFfRG.git
 and start the build after switching to the git directory.
 ```bash
 $ cd DiFfRG
-$ bash -i  build.sh -j8 -cf -i /opt/DiFfRG
+$ bash -i  build.sh -j8 -i /opt/DiFfRG
 ```
 The `build_DiFfRG.sh` bash script will build and setup the DiFfRG project and all its requirements. This can take up to half an hour as the deal.ii library is quite large.
 This script has the following options:
--  `-f`              Perform a full build and install of everything without confirmations.
 -  `-c`              Use CUDA when building the DiFfRG library.
 -  `-i <directory>`  Set the installation directory for the library.
 -  `-j <threads>`    Set the number of threads passed to make and git fetch.
@@ -150,7 +149,7 @@ As soon as the build has finished, you can find a full install of the library in
 
 If you have changes to the library code, you can update the library by running
 ```bash
-$ bash -i update_DiFfRG.sh -cm -j8 -i /opt/DiFfRG
+$ bash -i update_DiFfRG.sh -c -j8 -i /opt/DiFfRG
 ```
 where once again the `-j` parameter should be adjusted to your amount of CPU cores.
 The `update_DiFfRG.sh` script takes the following optional arguments:
