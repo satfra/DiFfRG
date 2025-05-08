@@ -111,7 +111,7 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
     -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
     -DDiFfRG_BUILD_TESTS=OFF \
-    -DDiFfRG_BUILD_DOCUMENTATION=OFF \
+    -DDiFfRG_BUILD_DOCUMENTATION=ON \
     -S ${SOURCEPATH} &>${LOGPATH}/DiFfRG_cmake.log || {
     echo "    Failed to configure DiFfRG, aborting."
     exit 1
