@@ -151,12 +151,14 @@ if [[ -z ${option_setup_mathematica+x} ]]; then
   read -p "Install DiFfRG mathematica package locally? [Y/n] " option_setup_mathematica
   option_setup_mathematica=${option_setup_mathematica:-Y}
 fi
+
 if [[ ${option_setup_mathematica} != "n" ]] && [[ ${option_setup_mathematica} != "N" ]]; then
   # Under MacOS, we just guess.
   if [ "$(uname)" == "Darwin" ]; then
     math_app_folder=${HOME}/Library/Mathematica
-    if ! [ -d "$DIRECTORY" ]; then
-      echo "$DIRECTORY does not exists, stopping installation"
+    echo "Under MacOS, using default math_app_folder=${math_app_folder}"
+    if ! [ -d "${math_app_folder}" ]; then
+      echo "${math_app_folder} does not exists, stopping installation"
       exit 2
     fi
   else
