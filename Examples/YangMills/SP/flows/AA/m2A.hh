@@ -13,7 +13,8 @@ namespace DiFfRG
     class m2A_integrator
     {
     public:
-      m2A_integrator(QuadratureProvider &quadrature_provider, std::array<uint, 2> grid_sizes, const double x_extent, const JSONValue &json);
+      m2A_integrator(QuadratureProvider &quadrature_provider, std::array<uint, 2> grid_sizes, const double x_extent,
+                     const JSONValue &json);
       m2A_integrator(const m2A_integrator &other);
       ~m2A_integrator();
 
@@ -30,18 +31,23 @@ namespace DiFfRG
       }
 
     private:
-      std::future<double> request_CT(const double k, const double p, const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZA3,
+      std::future<double> request_CT(const double k, const double p,
+                                     const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZA3,
                                      const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZAcbc,
                                      const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZA4,
                                      const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &dtZc,
                                      const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &Zc,
                                      const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &dtZA,
-                                     const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZA, const double m2A);
-      double get_CT(const double k, const double p, const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZA3,
-                    const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZAcbc, const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZA4,
-                    const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &dtZc, const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &Zc,
-                    const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &dtZA, const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZA,
-                    const double m2A);
+                                     const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZA,
+                                     const double m2A);
+      double get_CT(const double k, const double p,
+                    const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZA3,
+                    const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZAcbc,
+                    const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZA4,
+                    const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &dtZc,
+                    const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &Zc,
+                    const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &dtZA,
+                    const TexLinearInterpolator1D<double, LogarithmicCoordinates1D<float>> &ZA, const double m2A);
 
       QuadratureProvider &quadrature_provider;
       const std::array<uint, 2> grid_sizes;
