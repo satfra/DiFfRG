@@ -91,6 +91,7 @@ if [[ ${INSTALLPATH} != "n" ]] && [[ ${INSTALLPATH} != "N" ]]; then
   runtime=$((end - start))
   elapsed="Elapsed: $(($runtime / 3600))hrs $((($runtime / 60) % 60))min $(($runtime % 60))sec"
   echo "    Done. (${elapsed})"
+  cd ${SCRIPTPATH}
   echo
 fi
 
