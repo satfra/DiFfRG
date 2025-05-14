@@ -64,11 +64,10 @@ The framework has been tested with the following systems:
 ```bash
 $ pacman -S git cmake gcc blas-openblas blas64-openblas paraview python doxygen graphviz gsl
 ```
-For a CUDA-enabled build, additionally 
+For a CUDA-enabled build, additionally install
 ```bash
 $ pacman -S cuda
 ```
-
 
 #### Rocky Linux
 ```bash
