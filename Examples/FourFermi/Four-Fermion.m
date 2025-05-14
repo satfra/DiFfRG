@@ -267,9 +267,6 @@ Clear[ididx];
 
 For[i=1,i<=10,i++,Print["Working on Fierz Basis Element number "<> ToString[i]];
 \[Lambda]iLoops[[i]]=Import["TraceBuffer/lambda"<>ToString[i]<>"/sum.m"];
-MakeKernelFiniteTq0[Symbol["kernelLambda"<>ToString[i]],kernelParameterList,Re[\[Lambda]iLoops[[i]]],2*etaQ*Symbol["lambda"<>ToString[i]]];
+MakeKernel[Symbol["kernelLambda"<>ToString[i]],kernelParameterList,Re[\[Lambda]iLoops[[i]]],2*etaQ*Symbol["lambda"<>ToString[i]]];
 ];
 Clear[i];
-
-
-

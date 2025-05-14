@@ -13,8 +13,8 @@ namespace DiFfRG
     class lambda9_integrator
     {
     public:
-      lambda9_integrator(QuadratureProvider &quadrature_provider, std::array<uint, 2> grid_sizes, const double x_extent,
-                         const double q0_extent, const uint q0_summands, const JSONValue &json);
+      lambda9_integrator(QuadratureProvider &quadrature_provider, std::array<uint, 1> grid_sizes, const double x_extent,
+                         const JSONValue &json);
       lambda9_integrator(const lambda9_integrator &other);
       ~lambda9_integrator();
 
@@ -30,8 +30,7 @@ namespace DiFfRG
         if constexpr (std::is_same_v<NT, double>) return get_CT(std::forward<T>(t)...);
       }
 
-      void set_T(const double value);
-      void set_q0_extent(const double value);
+      void set_T(const double T, const double E = 0);
 
     private:
       std::future<double> request_CT(const double k, const double p0f, const double T, const double muq,
@@ -49,11 +48,9 @@ namespace DiFfRG
                     const double lambda10);
 
       QuadratureProvider &quadrature_provider;
-      const std::array<uint, 2> grid_sizes;
-      std::array<uint, 2> jac_grid_sizes;
+      const std::array<uint, 1> grid_sizes;
+      std::array<uint, 1> jac_grid_sizes;
       const double x_extent;
-      const double q0_extent;
-      const uint q0_summands;
       const double jacobian_quadrature_factor;
       const JSONValue json;
 
