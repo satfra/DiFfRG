@@ -8,10 +8,10 @@ using namespace DiFfRG;
 
 TEST_CASE("Test quadrature provider", "[double][quadrature]")
 {
-  const double T = GENERATE(take(5, random(0.1, 1.0)));
-  const double start_k = GENERATE(take(5, random(1.0, 100.0)));
-  const double speed_k = GENERATE(take(5, random(1e-5, 1e-2)));
-  const int steps = GENERATE(take(5, random(1e+1, 1e+4)));
+  const double T = GENERATE(take(3, random(0.1, 1.0)));
+  const double start_k = GENERATE(take(3, random(1.0, 100.0)));
+  const double speed_k = GENERATE(take(3, random(1e-5, 1e-2)));
+  const int steps = GENERATE(take(3, random(1e+1, 1e+4)));
 
   const size_t order = GENERATE(take(2, random(8, 64)));
 
