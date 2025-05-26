@@ -438,7 +438,7 @@ Return[True];
 ];
 
 
-knownTypes={"Quadrature","QMC","Quadrature","Quadratureq0","Quadraturex0","CartesianQuadrature","CartesianQuadratureq0"};
+knownTypes={"Constant","Quadrature","QMC","Quadrature","Quadratureq0","Quadraturex0","CartesianQuadrature","CartesianQuadratureq0"};
 TypeTest[type_]:=Module[{},
 If[MemberQ[knownTypes,type],Return[True],Print["Unkown kernel Type: ",type, "\nKnown types: ",knownTypes];Return[False]]
 ];
