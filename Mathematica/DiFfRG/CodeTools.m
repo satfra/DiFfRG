@@ -852,7 +852,7 @@ If[Not@StringQ[regulatorOpts[[1]]]||Not@StringQ[regulatorOpts[[2]]],Print["DiFfR
 
 If[name=="",Print["DiFfRG::CodeTools::MakeFlowClassFiniteT: Please provide a valid name to MakeFlowClass."];Abort[]];
 
-integratorList=Select[kernels,#["Type"]=="Quadrature"&];
+integratorList=Select[kernels,#["Type"]=="Quadrature"||#["Type"]=="Constant"&];
 integratorq0List=Select[kernels,#["Type"]=="Quadratureq0"&];
 integratorx0List=Select[kernels,#["Type"]=="Quadraturex0"&];
 
