@@ -8,15 +8,20 @@ namespace DiFfRG
 {
   std::shared_ptr<spdlog::logger> build_logger(const std::string &name, const std::string &filename)
   {
-    try {
-      auto log = spdlog::basic_logger_mt(name, filename);
-      log->set_pattern("[%Y/%m/%d] [%H:%M:%S] [%v]");
-      log->flush_on(spdlog::level::info);
-      return log;
-    } catch (const spdlog::spdlog_ex &e) {
-      throw std::runtime_error("Could not create logger: " + std::string(e.what()));
-      return nullptr;
+    std::shared_ptr<spdlog::logger> logger = spdlog::get(name);
+    if (!logger) {
+      try {
+        logger = spdlog::basic_logger_mt(name, filename);
+        logger->set_pattern("[%Y/%m/%d] [%H:%M:%S] [%v]");
+        logger->flush_on(spdlog::level::info);
+      } catch (const spdlog::spdlog_ex &ex) {
+        throw std::runtime_error("Could not create logger: " + std::string(ex.what()));
+        return nullptr;
+      }
+    } else {
+      spdlog::info("Logger '{}' retrieved from existing loggers.", name);
     }
+    return logger;
   }
 
   std::vector<double> string_to_double_array(const std::string &str)
