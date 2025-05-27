@@ -24,7 +24,7 @@ TBAutoDefine["AA"]=True;
 
 TBRequiredGroups["AA"]={{color,SUNfund,Nc}};
 
-TBVertex["AA"]="AA";
+TBVertex["AA"]={A,A};
 
 TBVertexStructure["AA"]=2Tensor[1,2];
 

@@ -28,7 +28,7 @@ TBAutoDefine["FierzCompleteNf2Nc34D"]=True;
 
 TBRequiredGroups["FierzCompleteNf2Nc34D"]={{color,SUNfund,Nc},{flavor,SUNfund,Nf}};
 
-TBVertex["FierzCompleteNf2Nc34D"]="\!\(\*OverscriptBox[\(q\), \(_\)]\)q\!\(\*OverscriptBox[\(q\), \(_\)]\)q";
+TBVertex["FierzCompleteNf2Nc34D"]={qb,q,qb,q};
 
 TBVertexStructure["FierzCompleteNf2Nc34D"]=2Tensor[1,2,3,4]-2Tensor[3,2,1,4];
 

@@ -19,14 +19,10 @@
 
 
 
-Exit[]
-
-
 (* ::Input::Initialization:: *)
 Get["DiFfRG`"]
 SetDirectory[GetDirectory[]];
 $Assumptions=q>0&&k>0&&p>0&&r>0&&Sqrt[p^2]>0&&Nc>0&&p1>0&&p2>0&&-1<cos1<1&&-1<cos2<1;
-DefineFormExecutable["/usr/bin/form"]
 
 DefineFormAutoDeclareFunctions[gA,ZA,eta,m2];
 AddExtraVars[
@@ -42,18 +38,17 @@ Zc,ZA,dtZA];
 
 TBUnregister["AAA"]//Quiet
 TBUnregister["AAA2"]//Quiet
-TBImportBasis["../../bases/AAA.m"]
-TBImportBasis["../../bases/AAA2.m"]
-
 TBUnregister["AAAA"]//Quiet
 TBUnregister["AAAA2"]//Quiet
+TBUnregister["AA"]//Quiet
+TBUnregister["Acbc"]//Quiet
+
+
+TBImportBasis["../../bases/AAA.m"]
+TBImportBasis["../../bases/AAA2.m"]
 TBImportBasis["../../bases/AAAA.m"]
 TBImportBasis["../../bases/AAAA2.m"]
-
-TBUnregister["Acbc"]//Quiet
 TBImportBasis["../../bases/Acbc.m"]
-
-TBUnregister["AA"]//Quiet
 TBImportBasis["../../bases/AA.m"]
 
 

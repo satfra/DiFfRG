@@ -28,7 +28,7 @@ TBAutoDefine["AAAA2"]=True;
 
 TBRequiredGroups["AAAA2"]={{color,SUNfund,Nc}};
 
-TBVertex["AAAA2"]="AAAA2";
+TBVertex["AAAA2"]={A,A,A,A};
 
 TBVertexBasis["AAAA2"]=True;
 

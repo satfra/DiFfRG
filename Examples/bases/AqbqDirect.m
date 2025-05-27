@@ -24,7 +24,7 @@ TBAutoDefine["AqbqDirect"]=True;
 
 TBRequiredGroups["AqbqDirect"]={{color,SUNfund,Nc},{flavor,SUNfund,Nf}};
 
-TBVertex["AqbqDirect"]="A\!\(\*OverscriptBox[\(q\), \(_\)]\)q";
+TBVertex["AqbqDirect"]={A,qb,q};
 
 TBVertexStructure["AqbqDirect"]=Tensor[1,2,3];
 

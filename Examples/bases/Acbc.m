@@ -24,7 +24,7 @@ TBAutoDefine["Acbc"]=True;
 
 TBRequiredGroups["Acbc"]={{color,SUNfund,Nc},{flavor,SUNfund,Nf}};
 
-TBVertex["Acbc"]="A\!\(\*OverscriptBox[\(c\), \(_\)]\)c";
+TBVertex["Acbc"]={A,cb,c};
 
 TBVertexStructure["Acbc"]=Tensor[1,2,3];
 
