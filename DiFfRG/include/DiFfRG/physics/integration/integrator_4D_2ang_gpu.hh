@@ -236,7 +236,7 @@ namespace DiFfRG
 
 namespace DiFfRG
 {
-  template <typename NT, typename KERNEL> class Integrator4D2AngGPU : public Integrator4DTBB<NT, KERNEL>
+  template <typename NT, typename KERNEL> class Integrator4D2AngGPU : public Integrator4D2AngTBB<NT, KERNEL>
   {
   public:
     using ctype = typename get_type::ctype<NT>;
@@ -249,7 +249,7 @@ namespace DiFfRG
 
     Integrator4D2AngGPU(QuadratureProvider &quadrature_provider, const std::array<uint, 3> grid_sizes,
                         const ctype x_extent, const JSONValue &)
-        : Integrator4DTBB<NT, KERNEL>(quadrature_provider, grid_sizes, x_extent)
+        : Integrator4D2AngTBB<NT, KERNEL>(quadrature_provider, grid_sizes, x_extent)
     {
     }
   };

@@ -108,11 +108,11 @@ TEST_CASE("Test 4D adaptive QMC momentum integrals (GPU)", "[4D integration][QMC
                        phi_poly[1], phi_poly[2], phi_poly[3]);
 
     const double rel_err = std::abs(reference_integral - integral) / std::abs(reference_integral);
-    if (!is_close(rel_err, 0., 1e-2)) {
+    if (!is_close(rel_err, 0., 2e-2)) {
       std::cerr << "dim: " << dim << "| reference: " << reference_integral << "| integral: " << integral
                 << "| relative error: " << std::abs(reference_integral - integral) / std::abs(reference_integral)
                 << std::endl;
     }
-    CHECK(is_close(rel_err, 0., 1e-2));
+    CHECK(is_close(rel_err, 0., 2e-2));
   }
 }

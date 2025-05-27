@@ -79,8 +79,12 @@ echo
 
 if [[ -z ${option_install_library} ]]; then
   echo
-  read -p "Install DiFfRG library globally to /opt/DiFfRG? [y/N/path] " option_install_library
+  read -p "Install DiFfRG library globally to /opt/DiFfRG/? [y/N/path] " option_install_library
   option_install_library=${option_install_library:-N}
+fi
+
+if [[ ${option_install_library} == "y" ]] || [[ ${option_install_library} == "Y" ]]; then
+  option_install_library="/opt/DiFfRG/"
 fi
 
 if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N" ]]; then
@@ -107,7 +111,7 @@ if [[ ${option_install_library} != "n" ]] && [[ ${option_install_library} != "N"
     -DCMAKE_CXX_FLAGS="${CXX_FLAGS}" \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
     -DDiFfRG_BUILD_TESTS=OFF \
-    -DDiFfRG_BUILD_DOCUMENTATION=OFF \
+    -DDiFfRG_BUILD_DOCUMENTATION=ON \
     -S ${SOURCEPATH} &>${LOGPATH}/DiFfRG_cmake.log || {
     echo "    Failed to configure DiFfRG, aborting."
     exit 1
@@ -147,49 +151,60 @@ if [[ -z ${option_setup_mathematica+x} ]]; then
   read -p "Install DiFfRG mathematica package locally? [Y/n] " option_setup_mathematica
   option_setup_mathematica=${option_setup_mathematica:-Y}
 fi
+
 if [[ ${option_setup_mathematica} != "n" ]] && [[ ${option_setup_mathematica} != "N" ]]; then
-  echo "Checking for mathematica installation..."
-  wolfram=wolfram
-  has_mathematica="n"
-  if command -v ${wolfram} &>/dev/null; then
-    has_mathematica="y"
+  # Under MacOS, we just guess.
+  if [ "$(uname)" == "Darwin" ]; then
+    math_app_folder="${HOME}/Library/Mathematica/"
+    echo "Under MacOS, using default math_app_folder=${math_app_folder}"
+    if ! [ -d "${math_app_folder}" ]; then
+      echo "${math_app_folder} does not exists, stopping installation"
+      exit 2
+    fi
   else
-    echo "    Mathematica: '${wolfram}' command could not be found"
-    read -p "    Provide the path to a valid Mathematica or WolframScript executable: " wolfram
+    echo "Checking for mathematica installation..."
+    wolfram=wolfram
+    has_mathematica="n"
     if command -v ${wolfram} &>/dev/null; then
       has_mathematica="y"
-    fi
-  fi
-
-  if [[ ${has_mathematica} != "y" ]]; then
-    echo "    Mathematica: '${wolfram}' command could not be found"
-    exit 1
-  else
-    # We use the math command to determine the mathematica applications folder
-    math_app_folder=$(wolfram -run 'FileNameJoin[{$UserBaseDirectory,"Applications"}]//Print;Exit[]' | tail -n1)
-    mkdir -p ${math_app_folder}
-
-    echo "  DiFfRG mathematica package will be installed to ${math_app_folder}"
-
-    # Check if a DiFfRG mathematica package is already installed
-    if [[ -d ${math_app_folder}/DiFfRG ]]; then
-      echo "    DiFfRG mathematica package already installed in ${math_app_folder}"
-      read -p "    Do you want to overwrite it? [y/N] " option_overwrite_mathematica
-      option_overwrite_mathematica=${option_overwrite_mathematica:-N}
-      if [[ ${option_overwrite_mathematica} == "n" ]] || [[ ${option_overwrite_mathematica} == "N" ]]; then
-        echo "    Aborting."
-        exit 0
+    else
+      echo "    Mathematica: '${wolfram}' command could not be found"
+      read -p "    Provide the path to a valid Mathematica or WolframScript executable: " wolfram
+      if ! [[ -x "$(command -v ${wolfram} &>/dev/null)" ]] && [[ ${wolfram} != "" ]]; then
+        echo "    Mathematica: '${wolfram}' command found"
+        has_mathematica="y"
       fi
-      rm -rf ${math_app_folder}/DiFfRG
     fi
 
-    # Copy the DiFfRG mathematica package to the mathematica applications folder
-    echo "  Installing DiFfRG mathematica package to ${math_app_folder}"
-    cp -r ${SCRIPTPATH}/Mathematica/DiFfRG ${math_app_folder} || {
-      echo "    Failed to install DiFfRG mathematica package, aborting."
-      exit 1
-    }
+    if [[ ${has_mathematica} != "y" ]]; then
+      echo "    Mathematica: '${wolfram}' command could not be found"
+    else
+      # We use the math command to determine the mathematica applications folder
+      math_app_folder=$(${wolfram} -run 'FileNameJoin[{$UserBaseDirectory,"Applications"}]//Print;Exit[]' | tail -n1)
+      mkdir -p ${math_app_folder}
+    fi
   fi
+
+  echo "  DiFfRG mathematica package will be installed to ${math_app_folder}"
+
+  # Check if a DiFfRG mathematica package is already installed
+  if [[ -d ${math_app_folder}/DiFfRG ]]; then
+    echo "    DiFfRG mathematica package already installed in ${math_app_folder}"
+    read -p "    Do you want to overwrite it? [y/N] " option_overwrite_mathematica
+    option_overwrite_mathematica=${option_overwrite_mathematica:-N}
+    if [[ ${option_overwrite_mathematica} == "n" ]] || [[ ${option_overwrite_mathematica} == "N" ]]; then
+      echo "    Aborting."
+      exit 0
+    fi
+    rm -rf ${math_app_folder}/DiFfRG
+  fi
+
+  # Copy the DiFfRG mathematica package to the mathematica applications folder
+  echo "  Installing DiFfRG mathematica package to ${math_app_folder}"
+  cp -r ${SCRIPTPATH}/Mathematica/DiFfRG ${math_app_folder} || {
+    echo "    Failed to install DiFfRG mathematica package, aborting."
+    exit 1
+  }
 
   echo
 fi

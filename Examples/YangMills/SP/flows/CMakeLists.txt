@@ -1,21 +1,21 @@
 if(USE_CUDA)
   set(flow_sources
-      flows/AA/ZA.cu
-      flows/AA/m2A.cu
-      flows/cbc/Zc.cu
-      flows/AAA/ZA3.cu
-      flows/Acbc/ZAcbc.cu
-      flows/AAAA/ZA4.cu
-      flows/flows.cc
-      PARENT_SCOPE)
+    flows/AA/ZA.cu
+    flows/AA/m2A.cu
+    flows/cbc/Zc.cu
+    flows/AAA/ZA3.cu
+    flows/Acbc/ZAcbc.cu
+    flows/AAAA/ZA4.cu
+	flows/flows.cc
+    PARENT_SCOPE)
 else()
   set(flow_sources
-      flows/AA/ZA.cc
-      flows/AA/m2A.cc
-      flows/cbc/Zc.cc
-      flows/AAA/ZA3.cc
-      flows/Acbc/ZAcbc.cc
-      flows/AAAA/ZA4.cc
-      flows/flows.cc
-      PARENT_SCOPE)
+    flows/AA/ZA.cc
+    flows/AA/m2A.cc
+    flows/cbc/Zc.cc
+    flows/AAA/ZA3.cc
+    flows/Acbc/ZAcbc.cc
+    flows/AAAA/ZA4.cc
+	flows/flows.cc
+    PARENT_SCOPE)
 endif()

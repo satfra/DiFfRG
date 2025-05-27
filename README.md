@@ -23,6 +23,8 @@ We also include a set of tools for the evaluation of integrals and discretizatio
 
 For an overview, please see the [accompanying paper](https://arxiv.org/abs/2412.13043), the ***[tutorial page](https://satfra.github.io/DiFfRG/cpp/TutorialTOC.html)*** in the [documentation](https://satfra.github.io/DiFfRG/cpp/index.html) and the examples in `Examples/`. 
 
+This library has been developed within the [fQCD Collaboration](https://fQCD-Collaboration.github.io).
+
 ## Citation
 
 If you use DiFfRG in your scientific work, please cite the corresponding paper:
@@ -37,7 +39,6 @@ If you use DiFfRG in your scientific work, please cite the corresponding paper:
     year = "2024"
 }
 ```
-
 
 ## Requirements
 
@@ -63,11 +64,10 @@ The framework has been tested with the following systems:
 ```bash
 $ pacman -S git cmake gcc blas-openblas blas64-openblas paraview python doxygen graphviz gsl
 ```
-For a CUDA-enabled build, additionally 
+For a CUDA-enabled build, additionally install
 ```bash
 $ pacman -S cuda
 ```
-
 
 #### Rocky Linux
 ```bash
@@ -133,11 +133,10 @@ $ git clone https://github.com/satfra/DiFfRG.git
 and start the build after switching to the git directory.
 ```bash
 $ cd DiFfRG
-$ bash -i  build.sh -j8 -cf -i /opt/DiFfRG
+$ bash -i  build.sh -j8 -i /opt/DiFfRG
 ```
 The `build_DiFfRG.sh` bash script will build and setup the DiFfRG project and all its requirements. This can take up to half an hour as the deal.ii library is quite large.
 This script has the following options:
--  `-f`              Perform a full build and install of everything without confirmations.
 -  `-c`              Use CUDA when building the DiFfRG library.
 -  `-i <directory>`  Set the installation directory for the library.
 -  `-j <threads>`    Set the number of threads passed to make and git fetch.
@@ -149,12 +148,11 @@ As soon as the build has finished, you can find a full install of the library in
 
 If you have changes to the library code, you can update the library by running
 ```bash
-$ bash -i update_DiFfRG.sh -clm -j8 -i /opt/DiFfRG
+$ bash -i update_DiFfRG.sh -c -j8 -i /opt/DiFfRG
 ```
 where once again the `-j` parameter should be adjusted to your amount of CPU cores.
 The `update_DiFfRG.sh` script takes the following optional arguments:
 - `-c`               Use CUDA when building the DiFfRG library.
-- `-l`               Build the DiFfRG library.
 - `-i <directory>`   Set the installation directory for the library.
 - `-j <threads>`     Set the number of threads passed to make and git fetch.
 - `-m`               Install the Mathematica package locally.

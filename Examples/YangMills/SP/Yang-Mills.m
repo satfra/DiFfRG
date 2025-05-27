@@ -42,6 +42,7 @@ TBUnregister["AAA2"]//Quiet
 TBImportBasis["../../bases/AAA.m"]
 TBImportBasis["../../bases/AAA2.m"]
 
+
 TBUnregister["AAAA"]//Quiet
 TBUnregister["AAAA2"]//Quiet
 TBImportBasis["../../bases/AAAA.m"]
@@ -242,7 +243,7 @@ Print["Projection check is ", sanity, ", should be ZA[p]"]
 
 (*Sanity Check*)
 sanity=SimplifyAllMomenta[q,FormTrace[ProjectorZA \[CapitalGamma]AA[{-p,v2,a2,p,v1,a1}]//.PreTraceRules]//.PostTraceRules//ExpandScalarProducts//Simplify]//.p->0;
-Print["Projection check is ", sanity, ", should be m2A"]
+Print["Projection check is ", sanity, ", should be 0"]
 
 
 ProjectionZA=(ProjectorZA DiagramsAA)//.PreTraceRules;

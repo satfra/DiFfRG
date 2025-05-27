@@ -7,32 +7,27 @@ namespace DiFfRG
 {
   namespace Flows
   {
-    lambda3_integrator::lambda3_integrator(QuadratureProvider &quadrature_provider, std::array<uint, 2> grid_sizes,
-                                           const double x_extent, const double q0_extent, const uint q0_summands,
-                                           const JSONValue &json)
-        : quadrature_provider(quadrature_provider), grid_sizes(grid_sizes), x_extent(x_extent), q0_extent(q0_extent),
-          q0_summands(q0_summands),
+    lambda3_integrator::lambda3_integrator(QuadratureProvider &quadrature_provider, std::array<uint, 1> grid_sizes,
+                                           const double x_extent, const JSONValue &json)
+        : quadrature_provider(quadrature_provider), grid_sizes(grid_sizes), x_extent(x_extent),
           jacobian_quadrature_factor(json.get_double("/integration/jacobian_quadrature_factor")), json(json)
     {
       integrator = std::make_unique<DiFfRG::IntegratorFiniteTq0TBB<4, double, lambda3_kernel<__REGULATOR__>>>(
-          quadrature_provider, grid_sizes, x_extent, q0_extent, q0_summands, json);
+          quadrature_provider, grid_sizes, x_extent, json);
     }
 
     lambda3_integrator::lambda3_integrator(const lambda3_integrator &other)
         : quadrature_provider(other.quadrature_provider), grid_sizes(other.grid_sizes),
-          jac_grid_sizes(other.jac_grid_sizes), x_extent(other.x_extent), q0_extent(other.q0_extent),
-          q0_summands(other.q0_summands), jacobian_quadrature_factor(other.jacobian_quadrature_factor),
-          json(other.json),
+          jac_grid_sizes(other.jac_grid_sizes), x_extent(other.x_extent),
+          jacobian_quadrature_factor(other.jacobian_quadrature_factor), json(other.json),
           integrator(std::make_unique<DiFfRG::IntegratorFiniteTq0TBB<4, double, lambda3_kernel<__REGULATOR__>>>(
-              other.quadrature_provider, other.grid_sizes, other.x_extent, other.q0_extent, other.q0_summands,
-              other.json))
+              other.quadrature_provider, other.grid_sizes, other.x_extent, other.json))
     {
     }
 
     lambda3_integrator::~lambda3_integrator() = default;
 
-    void lambda3_integrator::set_T(const double value) { integrator->set_T(value); }
-    void lambda3_integrator::set_q0_extent(const double value) { integrator->set_q0_extent(value); }
+    void lambda3_integrator::set_T(const double T, const double E) { integrator->set_T(T, E); }
 
     std::future<double> lambda3_integrator::request_CT(
         const double k, const double p0f, const double T, const double muq, const double gAqbq1, const double etaA,
