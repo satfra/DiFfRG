@@ -155,11 +155,15 @@ fi
 if [[ ${option_setup_mathematica} != "n" ]] && [[ ${option_setup_mathematica} != "N" ]]; then
   # Under MacOS, we just guess.
   if [ "$(uname)" == "Darwin" ]; then
-    math_app_folder="${HOME}/Library/Wolfram/"
+    math_app_folder="${HOME}/Library/Wolfram/Applications/"
     echo "Under MacOS, using default math_app_folder=${math_app_folder}"
     if ! [ -d "${math_app_folder}" ]; then
-      echo "${math_app_folder} does not exists, stopping installation"
-      exit 2
+      math_app_folder="${HOME}/Library/Mathematica/Applications/"
+      echo "Trying again with math_app_folder=${math_app_folder}"
+      if ! [ -d "${math_app_folder}" ]; then
+        echo "${math_app_folder} does not exists, stopping installation"
+        exit 2
+      fi
     fi
   else
     echo "Checking for mathematica installation..."
