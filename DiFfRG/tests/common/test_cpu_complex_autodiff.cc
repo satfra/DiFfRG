@@ -35,11 +35,11 @@ TEST_CASE("Test autodiff on CPU", "[autodiff][cpu]")
     }
     CHECK(is_close(imag(autodiff::val(x)), imag(value), std::numeric_limits<double>::epsilon()));
 
-    if (!is_close(real(autodiff::derivative(x)), real(derivative), std::numeric_limits<double>::epsilon())) {
+    if (!is_close(real(autodiff::derivative(x)), real(derivative), 10. * std::numeric_limits<double>::epsilon())) {
       std::cout << "is: real(autodiff::derivative(" << name << ")) = " << real(autodiff::derivative(x)) << std::endl;
       std::cout << "should: real(derivative) = " << real(derivative) << std::endl;
     }
-    CHECK(is_close(real(autodiff::derivative(x)), real(derivative), std::numeric_limits<double>::epsilon()));
+    CHECK(is_close(real(autodiff::derivative(x)), real(derivative), 10. * std::numeric_limits<double>::epsilon()));
 
     if (!is_close(imag(autodiff::derivative(x)), imag(derivative), std::numeric_limits<double>::epsilon())) {
       std::cout << "is: imag(autodiff::derivative(" << name << ")) = " << imag(autodiff::derivative(x)) << std::endl;

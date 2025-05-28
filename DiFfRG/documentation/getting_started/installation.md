@@ -22,16 +22,14 @@ The framework has been tested with the following systems:
 ```bash
 $ pacman -S git cmake gcc blas-openblas blas64-openblas paraview python doxygen cuda graphviz gsl
 ```
-In case you want to run with CUDA, as of January 2025 you have to have very specific versions of CUDA and gcc installed. Currently, the gcc13 compiler in the Arch package repository is incompatible with CUDA. To configure a system with a compatible CUDA+gcc configuration, them install directly from the Arch package archive
+For a CUDA-enabled build, additionally install
 ```bash
-$ pacman -U https://archive.archlinux.org/packages/g/gcc12/gcc12-12.3.0-6-x86_64.pkg.tar.zst \
-            https://archive.archlinux.org/packages/g/gcc12-libs/gcc12-libs-12.3.0-6-x86_64.pkg.tar.zst \
-            https://archive.archlinux.org/packages/c/cuda/cuda-12.3.2-1-x86_64.pkg.tar.zst
+$ pacman -S cuda
 ```
 
 #### Rocky Linux
 ```bash
-$ dnf --enablerepo=devel install -y gcc-toolset-12 cmake git openblas-devel doxygen doxygen-latex python3 python3-pip gsl-devel
+$ dnf --enablerepo=devel install -y gcc-toolset-12 cmake git openblas-devel doxygen doxygen-latex python3 python3-pip gsl-devel patch
 $ scl enable gcc-toolkit-12 bash
 ```
 
@@ -40,7 +38,7 @@ The second line is necessary to switch into a shell where `g++-12` is available
 #### Ubuntu
 ```bash
 $ apt-get update
-$ apt-get install git cmake libopenblas-dev paraview build-essential python3 doxygen libeigen3-dev cuda graphviz libgsl-dev
+$ apt-get install git cmake libopenblas-dev paraview build-essential python3 doxygen libeigen3-dev graphviz libgsl-dev
 ```
 
 #### MacOS
@@ -72,20 +70,27 @@ $ bash setup_docker.sh -j8
 
 If using other environments, e.g. [ENROOT](https://github.com/NVIDIA/enroot), the preferred approach is simply to build an image on top of the [CUDA images by NVIDIA](https://hub.docker.com/r/nvidia/cuda/tags). Optimal compatibility is given using `nvidia/cuda:12.5.1-devel-rockylinux`. Proceed with the installation setup for  Rocky Linux above.
 
+For example, with ENROOT a DiFfRG image can be built by following these steps:
+```bash
+$ enroot import docker://nvidia/cuda:12.5.1-devel-rockylinux9
+$ enroot create --name DiFfRG nvidia+cuda+12.5.1-devel-rockylinux9.sqsh
+$ enroot start --root --rw -m ./:/DiFfRG_source DiFfRG bash
+```
+Afterwards, one proceeds with the above Rocky Linux setup.
+
 ## Setup
 
 If all requirements are met, you can clone the git to a directory of your choice,
 ```bash
-$ git clone https://lin0.thphys.uni-heidelberg.de:4443/frg-codes/DiFfRG.git
+$ git clone https://github.com/satfra/DiFfRG.git
 ```
 and start the build after switching to the git directory.
 ```bash
 $ cd DiFfRG
-$ bash -i  build.sh -j8 -cf -i /opt/DiFfRG
+$ bash -i  build.sh -j8 -i /opt/DiFfRG
 ```
 The `build_DiFfRG.sh` bash script will build and setup the DiFfRG project and all its requirements. This can take up to half an hour as the deal.ii library is quite large.
 This script has the following options:
--  `-f`              Perform a full build and install of everything without confirmations.
 -  `-c`              Use CUDA when building the DiFfRG library.
 -  `-i <directory>`  Set the installation directory for the library.
 -  `-j <threads>`    Set the number of threads passed to make and git fetch.
@@ -102,7 +107,6 @@ $ bash -i update_DiFfRG.sh -clm -j8 -i /opt/DiFfRG
 where once again the `-j` parameter should be adjusted to your amount of CPU cores.
 The `update_DiFfRG.sh` script takes the following optional arguments:
 - `-c`               Use CUDA when building the DiFfRG library.
-- `-l`               Build the DiFfRG library.
 - `-i <directory>`   Set the installation directory for the library.
 - `-j <threads>`     Set the number of threads passed to make and git fetch.
 - `-m`               Install the Mathematica package locally.

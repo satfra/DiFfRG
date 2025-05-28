@@ -8,6 +8,7 @@ profile/
 *.log
 .cache/
 .venv/
+.vscode/
 build_debug
 build_release
 build_test

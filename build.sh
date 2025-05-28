@@ -5,7 +5,6 @@ For configuration of build flags, please edit the config file.
 
 Usage: build.sh [options]
 Options:
-  -f               Perform a full build and install of everything without confirmations.
   -c               Use CUDA when building the DiFfRG library.
   -i <directory>   Set the installation directory for the library.
   -j <threads>     Set the number of threads passed to make and git fetch.
@@ -17,7 +16,6 @@ Options:
 # ##############################################################################
 
 threads='1'
-full_inst='n'
 INSTALLPATH=''
 cuda_flag=''
 config_file='config'
@@ -30,7 +28,6 @@ while getopts :i:j:fcd flag; do
     ;;
   i) INSTALLPATH=${OPTARG} ;;
   j) threads=${OPTARG} ;;
-  f) full_inst='y' ;;
   c) cuda_flag="-c" ;;
   ?)
     printf "${usage_msg}"
@@ -60,12 +57,22 @@ git submodule update --init --recursive --jobs ${threads}
 
 if [[ -z ${INSTALLPATH} ]]; then
   echo
-  read -p "Install DiFfRG library globally to /opt/DiFfRG? [y/N/path] " INSTALLPATH
+  read -p "Install DiFfRG library globally to /opt/DiFfRG/? [y/N/path] " INSTALLPATH
   INSTALLPATH=${INSTALLPATH:-N}
 fi
 
-if [[ ${INSTALLPATH} == "y" ]]; then
-  INSTALLPATH="/opt/DiFfRG"
+if [[ ${INSTALLPATH} == "y" ]] || [[ ${INSTALLPATH} == "Y" ]]; then
+  INSTALLPATH="/opt/DiFfRG/"
+fi
+
+if [[ ${INSTALLPATH} == "n" ]] || [[ ${INSTALLPATH} == "N" ]]; then
+  echo "Aborting."
+  exit 1
+fi
+
+if [[ ${INSTALLPATH} == "N" ]] || [[ ${INSTALLPATH} == "N" ]]; then
+  echo "Aborting"
+  exit 1
 fi
 
 if [[ ${INSTALLPATH} != "n" ]] && [[ ${INSTALLPATH} != "N" ]]; then
@@ -84,6 +91,7 @@ if [[ ${INSTALLPATH} != "n" ]] && [[ ${INSTALLPATH} != "N" ]]; then
   runtime=$((end - start))
   elapsed="Elapsed: $(($runtime / 3600))hrs $((($runtime / 60) % 60))min $(($runtime % 60))sec"
   echo "    Done. (${elapsed})"
+  cd ${SCRIPTPATH}
   echo
 fi
 
@@ -91,15 +99,7 @@ fi
 # Setup and build library
 # ##############################################################################
 
-if [[ "$full_inst" == "y" ]] && [[ "$INSTALLPATH" != "" ]]; then
-  bash ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag} ${config_flag} -i ${INSTALLPATH}
-else
-  if [[ "$full_inst" == "y" ]]; then
-    bash ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag} ${config_flag}
-  else
-    bash ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} ${config_flag}
-  fi
-fi
+bash ${SCRIPTPATH}/update_DiFfRG.sh -j ${threads} -m ${cuda_flag} ${config_flag} -i ${INSTALLPATH}
 
 # ##############################################################################
 # Finish

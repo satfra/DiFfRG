@@ -78,7 +78,8 @@ public:
   /**
    * @brief The flux function is integrated against derivatives of test functions and also gives a boundary contribution
    */
-  template <typename NT, typename Solution> void flux(std::array<Tensor<1, dim, NT>, Components::count_fe_functions(0)> &flux, const Point<dim> &x, const Solution &sol) const
+  template <typename NT> 
+  void flux(std::array<Tensor<1, dim, NT>, Components::count_fe_functions(0)> &flux, const auto &x, const auto &sol) const
   {
     const auto rho = x[0];
     const auto &fe_functions = get<"fe_functions">(sol);

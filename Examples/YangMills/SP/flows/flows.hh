@@ -21,6 +21,9 @@ private:
   const std::array<uint, 3> grid_sizes_3D_int;
   const std::array<uint, 4> grid_sizes_4D_int;
 
+  const std::array<uint, 2> grid_sizes_2D_cartesian_int;
+  const std::array<uint, 3> grid_sizes_3D_cartesian_int;
+
 public:
   ::DiFfRG::QuadratureProvider quadrature_provider;
   ::DiFfRG::Flows::ZA_integrator ZA_integrator;

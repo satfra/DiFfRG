@@ -1,9 +1,11 @@
 template <typename REG> class ZA_kernel
 {
 public:
-  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9>
-  static __forceinline__ __host__ __device__ auto kernel(const double q, const double cos1, const double k, const T1 p, const T2 &ZA3, const T3 &ZAcbc, const T4 &ZA4,
-                                                         const T5 &dtZc, const T6 &Zc, const T7 &dtZA, const T8 &ZA, const T9 m2A)
+  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8,
+            typename T9>
+  static __forceinline__ __host__ __device__ auto kernel(const double q, const double cos1, const double k, const T1 p,
+                                                         const T2 &ZA3, const T3 &ZAcbc, const T4 &ZA4, const T5 &dtZc,
+                                                         const T6 &Zc, const T7 &dtZA, const T8 &ZA, const T9 m2A)
   {
     // optimization definitions
     const double DiFfRGREPL1 = dtZA(pow(1. + powr<6>(k), 0.16666666666666666));
@@ -21,24 +23,37 @@ public:
     // flow
     return powr<-2>(p) *
            (-4. * (-1. + powr<2>(cos1)) *
-                (-6. * cos1 * q * powr<3>(p) + 3. * powr<4>(p) + (8. + powr<2>(cos1)) * powr<2>(p) * powr<2>(q) - 6. * cos1 * p * powr<3>(q) + 3. * powr<4>(q)) *
-                (DiFfRGREPL5 * DiFfRGREPL6 + DiFfRGREPL3 * (DiFfRGREPL1 + 50. * (-1. * DiFfRGREPL6 + DiFfRGREPL7) * powr<6>(k) * powr<-1>(1. + powr<6>(k)))) *
-                powr<-1>(-2. * cos1 * p * q + powr<2>(p) + powr<2>(q)) * powr<-2>(DiFfRGREPL3 * DiFfRGREPL6 + DiFfRGREPL8 * powr<2>(q)) *
-                powr<-1>(DiFfRGREPL4 * DiFfRGREPL6 + (-2. * cos1 * p * q + powr<2>(p) + powr<2>(q)) * ZA((sqrt(-2. * cos1 * p * q + powr<2>(p) + powr<2>(q))))) *
+                (-6. * cos1 * q * powr<3>(p) + 3. * powr<4>(p) + (8. + powr<2>(cos1)) * powr<2>(p) * powr<2>(q) -
+                 6. * cos1 * p * powr<3>(q) + 3. * powr<4>(q)) *
+                (DiFfRGREPL5 * DiFfRGREPL6 + DiFfRGREPL3 * (DiFfRGREPL1 + 50. * (-1. * DiFfRGREPL6 + DiFfRGREPL7) *
+                                                                              powr<6>(k) * powr<-1>(1. + powr<6>(k)))) *
+                powr<-1>(-2. * cos1 * p * q + powr<2>(p) + powr<2>(q)) *
+                powr<-2>(DiFfRGREPL3 * DiFfRGREPL6 + DiFfRGREPL8 * powr<2>(q)) *
+                powr<-1>(DiFfRGREPL4 * DiFfRGREPL6 + (-2. * cos1 * p * q + powr<2>(p) + powr<2>(q)) *
+                                                         ZA((sqrt(-2. * cos1 * p * q + powr<2>(p) + powr<2>(q))))) *
                 powr<2>(ZA3(0.816496580927726 * (sqrt(-1. * cos1 * p * q + powr<2>(p) + powr<2>(q))))) +
-            (DiFfRGREPL3 * (50. * DiFfRGREPL10 + DiFfRGREPL2 - 50. * DiFfRGREPL9) + DiFfRGREPL5 * DiFfRGREPL9) * (-1. + powr<2>(cos1)) * powr<2>(q) *
-                powr<-2>(DiFfRGREPL3 * DiFfRGREPL9 + DiFfRGREPL11 * powr<2>(q)) * powr<2>(ZAcbc(0.816496580927726 * (sqrt(-1. * cos1 * p * q + powr<2>(p) + powr<2>(q))))) *
-                powr<-1>(DiFfRGREPL4 * DiFfRGREPL9 + (-2. * cos1 * p * q + powr<2>(p) + powr<2>(q)) * Zc((sqrt(-2. * cos1 * p * q + powr<2>(p) + powr<2>(q))))) +
-            (DiFfRGREPL3 * (50. * DiFfRGREPL10 + DiFfRGREPL2 - 50. * DiFfRGREPL9) + DiFfRGREPL5 * DiFfRGREPL9) * (-1. + powr<2>(cos1)) * powr<2>(q) *
-                powr<-2>(DiFfRGREPL3 * DiFfRGREPL9 + DiFfRGREPL11 * powr<2>(q)) * powr<2>(ZAcbc(0.816496580927726 * (sqrt(cos1 * p * q + powr<2>(p) + powr<2>(q))))) *
+            (DiFfRGREPL3 * (50. * DiFfRGREPL10 + DiFfRGREPL2 - 50. * DiFfRGREPL9) + DiFfRGREPL5 * DiFfRGREPL9) *
+                (-1. + powr<2>(cos1)) * powr<2>(q) * powr<-2>(DiFfRGREPL3 * DiFfRGREPL9 + DiFfRGREPL11 * powr<2>(q)) *
+                powr<2>(ZAcbc(0.816496580927726 * (sqrt(-1. * cos1 * p * q + powr<2>(p) + powr<2>(q))))) *
+                powr<-1>(DiFfRGREPL4 * DiFfRGREPL9 + (-2. * cos1 * p * q + powr<2>(p) + powr<2>(q)) *
+                                                         Zc((sqrt(-2. * cos1 * p * q + powr<2>(p) + powr<2>(q))))) +
+            (DiFfRGREPL3 * (50. * DiFfRGREPL10 + DiFfRGREPL2 - 50. * DiFfRGREPL9) + DiFfRGREPL5 * DiFfRGREPL9) *
+                (-1. + powr<2>(cos1)) * powr<2>(q) * powr<-2>(DiFfRGREPL3 * DiFfRGREPL9 + DiFfRGREPL11 * powr<2>(q)) *
+                powr<2>(ZAcbc(0.816496580927726 * (sqrt(cos1 * p * q + powr<2>(p) + powr<2>(q))))) *
                 powr<-1>(DiFfRGREPL9 * RB(powr<2>(k), 2. * cos1 * p * q + powr<2>(p) + powr<2>(q)) +
-                         (2. * cos1 * p * q + powr<2>(p) + powr<2>(q)) * Zc((sqrt(2. * cos1 * p * q + powr<2>(p) + powr<2>(q))))) +
-            (-7. + powr<2>(cos1)) * (DiFfRGREPL5 * DiFfRGREPL6 + DiFfRGREPL3 * (DiFfRGREPL1 + 50. * (-1. * DiFfRGREPL6 + DiFfRGREPL7) * powr<6>(k) * powr<-1>(1. + powr<6>(k)))) *
-                powr<-2>(DiFfRGREPL3 * DiFfRGREPL6 + DiFfRGREPL8 * powr<2>(q)) * ZA4(0.7071067811865475 * (sqrt(powr<2>(p) + powr<2>(q)))));
+                         (2. * cos1 * p * q + powr<2>(p) + powr<2>(q)) *
+                             Zc((sqrt(2. * cos1 * p * q + powr<2>(p) + powr<2>(q))))) +
+            (-7. + powr<2>(cos1)) *
+                (DiFfRGREPL5 * DiFfRGREPL6 + DiFfRGREPL3 * (DiFfRGREPL1 + 50. * (-1. * DiFfRGREPL6 + DiFfRGREPL7) *
+                                                                              powr<6>(k) * powr<-1>(1. + powr<6>(k)))) *
+                powr<-2>(DiFfRGREPL3 * DiFfRGREPL6 + DiFfRGREPL8 * powr<2>(q)) *
+                ZA4(0.7071067811865475 * (sqrt(powr<2>(p) + powr<2>(q)))));
   }
 
-  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8, typename T9>
-  static __forceinline__ __host__ __device__ auto constant(const double k, const T1 p, const T2 &ZA3, const T3 &ZAcbc, const T4 &ZA4, const T5 &dtZc, const T6 &Zc, const T7 &dtZA,
+  template <typename T1, typename T2, typename T3, typename T4, typename T5, typename T6, typename T7, typename T8,
+            typename T9>
+  static __forceinline__ __host__ __device__ auto constant(const double k, const T1 p, const T2 &ZA3, const T3 &ZAcbc,
+                                                           const T4 &ZA4, const T5 &dtZc, const T6 &Zc, const T7 &dtZA,
                                                            const T8 &ZA, const T9 m2A)
   {
     // flow

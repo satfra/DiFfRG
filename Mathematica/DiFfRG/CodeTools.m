@@ -438,7 +438,7 @@ Return[True];
 ];
 
 
-knownTypes={"Quadrature","QMC","Quadrature","Quadratureq0","Quadraturex0","CartesianQuadrature","CartesianQuadratureq0"};
+knownTypes={"Constant","Quadrature","QMC","Quadrature","Quadratureq0","Quadraturex0","CartesianQuadrature","CartesianQuadratureq0"};
 TypeTest[type_]:=Module[{},
 If[MemberQ[knownTypes,type],Return[True],Print["Unkown kernel Type: ",type, "\nKnown types: ",knownTypes];Return[False]]
 ];
@@ -858,7 +858,7 @@ If[Not@StringQ[regulatorOpts[[1]]]||Not@StringQ[regulatorOpts[[2]]],Print["DiFfR
 
 If[name=="",Print["DiFfRG::CodeTools::MakeFlowClassFiniteT: Please provide a valid name to MakeFlowClass."];Abort[]];
 
-integratorList=Select[kernels,#["Type"]=="Quadrature"&];
+integratorList=Select[kernels,#["Type"]=="Quadrature"||#["Type"]=="Constant"&];
 integratorq0List=Select[kernels,#["Type"]=="Quadratureq0"&];
 integratorx0List=Select[kernels,#["Type"]=="Quadraturex0"&];
 

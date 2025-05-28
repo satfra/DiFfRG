@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.26.4)
 
 project(FourFermi)
 
-find_package(DiFfRG REQUIRED HINTS /opt/DiFfRG_install)
+find_package(DiFfRG REQUIRED HINTS /opt/DiFfRG/)
 
 add_executable(FourFermi FourFermi.cc)
 setup_application(FourFermi flows)
