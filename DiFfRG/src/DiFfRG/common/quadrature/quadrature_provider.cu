@@ -12,17 +12,20 @@ namespace DiFfRG
     MatsubaraStorage::TemperatureIterator<double> MatsubaraStorage::find_T_d(const double T)
     {
       // search for T
-      auto it = quadratures_d.lower_bound(T);
+      auto iterator = quadratures_d.lower_bound(T);
+      bool iterator_next_found_T = false;
+      bool iterator_previous_found_T = false;
 
-      if (it != quadratures_d.end()) {
-        bool it_found_T = (is_close(it->first, T, 1e-6 * T));
-        bool itp_found_T = (std::prev(it) != quadratures_d.end()) && (is_close(std::prev(it)->first, T, 1e-6 * T));
+      if (iterator != quadratures_d.end()) iterator_next_found_T = (is_close(iterator->first, T, 1e-6 * T));
 
-        if (it_found_T)
-          return it;
-        else if (itp_found_T)
-          return std::prev(it);
-      }
+      if (iterator != quadratures_d.begin())
+        iterator_previous_found_T =
+            (std::prev(iterator) != quadratures_d.end()) && (is_close(std::prev(iterator)->first, T, 1e-6 * T));
+
+      if (iterator_next_found_T)
+        return iterator;
+      else if (iterator_previous_found_T)
+        return std::prev(iterator);
 
       // create new entry in quadratures_d
       return quadratures_d.insert(std::make_pair(T, SubStorageType<double>())).first;
@@ -33,20 +36,21 @@ namespace DiFfRG
     {
       auto &map = T_it->second;
 
-      // search for E
-      auto it = map.lower_bound(E);
+      auto iterator = map.lower_bound(E);
+      bool iterator_next_found_T = false;
+      bool iterator_previous_found_T = false;
 
-      if (it != map.end()) {
-        bool it_found_T = (is_close(it->first, E, 1e-6 * E));
-        bool itp_found_T = (std::prev(it) != map.end()) && (is_close(std::prev(it)->first, E, 1e-6 * E));
+      if (iterator != map.end()) iterator_next_found_T = (is_close(iterator->first, E, 1e-6 * E));
 
-        if (it_found_T)
-          return it;
-        else if (itp_found_T)
-          return std::prev(it);
-      }
+      if (iterator != map.begin())
+        iterator_previous_found_T =
+            (std::prev(iterator) != map.end()) && (is_close(std::prev(iterator)->first, E, 1e-6 * E));
 
-      // create new entry in quadratures_d
+      if (iterator_next_found_T)
+        return iterator;
+      else if (iterator_previous_found_T)
+        return std::prev(iterator);
+
       auto new_it = map.insert(std::make_pair(E, MatsubaraQuadrature<double>())).first;
       // Initialize the quadrature
       new_it->second.reinit(T_it->first, E, 2, min_matsubara_size, 128, vacuum_quad_size, add_matsubara_size);
@@ -62,17 +66,20 @@ namespace DiFfRG
     MatsubaraStorage::TemperatureIterator<float> MatsubaraStorage::find_T_f(const float T)
     {
       // search for T
-      auto it = quadratures_f.lower_bound(T);
+      auto iterator = quadratures_f.lower_bound(T);
+      bool iterator_next_found_T = false;
+      bool iterator_previous_found_T = false;
 
-      if (it != quadratures_f.end()) {
-        bool it_found_T = (is_close(it->first, T, 1e-6 * T));
-        bool itp_found_T = (std::prev(it) != quadratures_f.end()) && (is_close(std::prev(it)->first, T, 1e-6 * T));
+      if (iterator != quadratures_f.end()) iterator_next_found_T = (is_close(iterator->first, T, 1e-6 * T));
 
-        if (it_found_T)
-          return it;
-        else if (itp_found_T)
-          return std::prev(it);
-      }
+      if (iterator != quadratures_f.begin())
+        iterator_previous_found_T =
+            (std::prev(iterator) != quadratures_f.end()) && (is_close(std::prev(iterator)->first, T, 1e-6 * T));
+
+      if (iterator_next_found_T)
+        return iterator;
+      else if (iterator_previous_found_T)
+        return std::prev(iterator);
 
       // create new entry in quadratures_f
       return quadratures_f.insert(std::make_pair(T, SubStorageType<float>())).first;
@@ -82,20 +89,21 @@ namespace DiFfRG
     {
       auto &map = T_it->second;
 
-      // search for E
-      auto it = map.lower_bound(E);
+      auto iterator = map.lower_bound(E);
+      bool iterator_next_found_T = false;
+      bool iterator_previous_found_T = false;
 
-      if (it != map.end()) {
-        bool it_found_T = (is_close(it->first, E, 1e-6 * E));
-        bool itp_found_T = (std::prev(it) != map.end()) && (is_close(std::prev(it)->first, E, 1e-6 * E));
+      if (iterator != map.end()) iterator_next_found_T = (is_close(iterator->first, E, 1e-6 * E));
 
-        if (it_found_T)
-          return it;
-        else if (itp_found_T)
-          return std::prev(it);
-      }
+      if (iterator != map.begin())
+        iterator_previous_found_T =
+            (std::prev(iterator) != map.end()) && (is_close(std::prev(iterator)->first, E, 1e-6 * E));
 
-      // create new entry in quadratures_f
+      if (iterator_next_found_T)
+        return iterator;
+      else if (iterator_previous_found_T)
+        return std::prev(iterator);
+
       auto new_it = map.insert(std::make_pair(E, MatsubaraQuadrature<float>())).first;
       // Initialize the quadrature
       new_it->second.reinit(T_it->first, E, 2, min_matsubara_size, 128, vacuum_quad_size, add_matsubara_size);
