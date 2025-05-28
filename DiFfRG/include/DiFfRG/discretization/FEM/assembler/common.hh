@@ -189,7 +189,7 @@ namespace DiFfRG
 
         outputter(data_out, EoM, e_tie(solution[0], solution_grad[0], solution_hess[0], extracted_data, variables));
       };
-      model.template readouts_multiple(helper, data_out);
+      model.template readouts_multiple<decltype(helper), DataOutput<dim, VectorType>>(helper, data_out);
     }
 
     void extract(std::array<NumberType, Components::count_extractors()> &data, const VectorType &solution_global,
@@ -226,7 +226,9 @@ namespace DiFfRG
       fe_v.get_function_gradients(solution_global, solution_grad);
       fe_v.get_function_hessians(solution_global, solution_hess);
 
-      model.template extract(data, EoM, e_tie(solution[0], solution_grad[0], solution_hess[0], nothing, variables));
+      auto tied_solutions_for_extract = e_tie(solution[0], solution_grad[0], solution_hess[0], nothing, variables);
+      model.template extract<dim, std::array<NumberType, Components::count_extractors()>,
+                             decltype(tied_solutions_for_extract)>(data, EoM, tied_solutions_for_extract);
     }
 
     bool jacobian_extractors(FullMatrix<NumberType> &extractor_jacobian, const VectorType &solution_global,
