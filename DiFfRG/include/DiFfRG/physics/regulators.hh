@@ -17,9 +17,9 @@ namespace DiFfRG
    *
    * Provides the following functions:
    * - RB(k2, q2) = \f$ p^2 r_B(k^2,p^2) \f$
-   * - RBdot(k2, q2) = \f$ \partial_t R_B(k^2,p^2) \f$
+   * - RBdot(k2, q2) = \f$ k \partial_k R_B(k^2,p^2) \f$
    * - RF(k2, q2) = \f$ p r_F(k^2,p^2) \f$
-   * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
+   * - RFdot(k2, q2) = \f$ p \partial_k R_F(k^2,p^2) \f$
    */
   template <class Dummy = void> struct LitimRegulator {
     template <typename NT1, typename NT2> static __forceinline__ __device__ __host__ auto RB(const NT1 k2, const NT2 q2)
@@ -62,10 +62,10 @@ namespace DiFfRG
    * Provides the following functions:
    * - RB(k2, q2) = \f$ p^2 r_B(k^2,p^2) \f$
    * - dq2RB(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_B(k^2,p^2) \f$
-   * - RBdot(k2, q2) = \f$ \partial_t R_B(k^2,p^2) \f$
+   * - RBdot(k2, q2) = \f$ k \partial_k R_B(k^2,p^2) \f$
    * - RF(k2, q2) = \f$ p r_F(k^2,p^2) \f$
    * - dq2RF(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_F(k^2,p^2) \f$
-   * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
+   * - RFdot(k2, q2) = \f$ p \partial_k R_F(k^2,p^2) \f$
    *
    * @tparam b The exponent in the regulator.
    */
@@ -134,10 +134,10 @@ namespace DiFfRG
    * Provides the following functions:
    * - RB(k2, q2) = \f$ p^2 r_B(k^2,p^2) \f$
    * - dq2RB(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_B(k^2,p^2) \f$
-   * - RBdot(k2, q2) = \f$ \partial_t R_B(k^2,p^2) \f$
+   * - RBdot(k2, q2) = \f$ k \partial_k R_B(k^2,p^2) \f$
    * - RF(k2, q2) = \f$ p r_F(k^2,p^2) \f$
    * - dq2RF(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_F(k^2,p^2) \f$
-   * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
+   * - RFdot(k2, q2) = \f$ p \partial_k R_F(k^2,p^2) \f$
    *
    * @tparam b The exponent in the regulator.
    */
@@ -202,10 +202,10 @@ namespace DiFfRG
    * Provides the following functions:
    * - RB(k2, q2) = \f$ p^2 r_B(k^2,p^2) \f$
    * - dq2RB(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_B(k^2,p^2) \f$
-   * - RBdot(k2, q2) = \f$ \partial_t R_B(k^2,p^2) \f$
+   * - RBdot(k2, q2) = \f$ k \partial_k R_B(k^2,p^2) \f$
    * - RF(k2, q2) = \f$ p r_F(k^2,p^2) \f$
    * - dq2RF(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_F(k^2,p^2) \f$
-   * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
+   * - RFdot(k2, q2) = \f$ p \partial_k R_F(k^2,p^2) \f$
    *
    * @tparam b The exponent in the regulator.
    */
@@ -253,10 +253,10 @@ namespace DiFfRG
    *
    * Provides the following functions:
    * - RB(k2, q2) = \f$ k^2 e^{-f(x)} \f$
-   * - RBdot(k2, q2) = \f$ \partial_t R_B(k^2,p^2) \f$
+   * - RBdot(k2, q2) = \f$ k \partial_k R_B(k^2,p^2) \f$
    * - dq2RB(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_B(k^2,p^2) \f$
    * - RF(k2, q2) = \f$ \sqrt{R_B(k^2,p^2) + p^2} - p \f$
-   * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
+   * - RFdot(k2, q2) = \f$ p \partial_k R_F(k^2,p^2) \f$
    * - dq2RF(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_F(k^2,p^2) \f$
    *
    * @tparam order order of the pole.
@@ -614,10 +614,10 @@ namespace DiFfRG
    *
    * Provides the following functions:
    * - RB(k2, q2) = \f$ k^2 e^{-f(x)} \f$
-   * - RBdot(k2, q2) = \f$ \partial_t R_B(k^2,p^2) \f$
+   * - RBdot(k2, q2) = \f$ k \partial_k R_B(k^2,p^2) \f$
    * - dq2RB(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_B(k^2,p^2) \f$
    * - RF(k2, q2) = \f$ \sqrt{R_B(k^2,p^2) + p^2} - p \f$
-   * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
+   * - RFdot(k2, q2) = \f$ p \partial_k R_F(k^2,p^2) \f$
    * - dq2RF(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_F(k^2,p^2) \f$
    *
    * @tparam order order of the pole.

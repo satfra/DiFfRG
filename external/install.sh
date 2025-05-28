@@ -47,7 +47,7 @@ bash ./build_sundials.sh -j ${threads} -i ${install_dir} || {
 }
 
 echo "    Building deal.II..."
-bash ./build_dealii.sh -j ${threads} -i ${install_dir} &>/dev/null || {
+bash ./build_dealii.sh -j ${threads} -i ${install_dir} || {
   echo "    Failed to build deal.ii, aborting."
   exit 1
 }

@@ -8,6 +8,16 @@ profile/
 *.log
 .cache/
 .venv/
+.vscode/
+build_debug
+build_release
+build_test
+build_test_coverage
+build
+.vscode
+
+## remove editor configurat
+.idea
 
 ## remove builds from Applications
 Applications/*/build

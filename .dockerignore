@@ -1,0 +1,6 @@
+external/sundials_build
+external/oneTBB_build
+external/logs
+external/kokkos_build
+external/dealii_build
+external/boost_build

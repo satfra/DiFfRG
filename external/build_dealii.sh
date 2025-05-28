@@ -31,7 +31,13 @@ cmake -DCMAKE_BUILD_TYPE=DebugRelease \
   ${DEAL_II_CMAKE} \
   -DCMAKE_INSTALL_PREFIX=${INSTALL_PATH} \
   -S ${SOURCE_PATH} \
-  &> $CMAKE_LOG_FILE
+  &> $CMAKE_LOG_FILE || {
+    cat $CMAKE_LOG_FILE
+    exit 1
+}
 
-make -j $THREADS &> $MAKE_LOG_FILE
+make -j $THREADS &> $MAKE_LOG_FILE || {
+                                      cat $MAKE_LOG_FILE
+                                      exit 1
+                                  }
 $SuperUser make -j $THREADS install >> $MAKE_LOG_FILE 2>&1
