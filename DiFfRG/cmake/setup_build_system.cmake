@@ -217,7 +217,7 @@ if(USE_CUDA AND CMAKE_CUDA_COMPILER)
 
     # Check if the target is DiFfRG
     if(${TARGET} STREQUAL "DiFfRG")
-      target_include_directories(${TARGET} PUBLIC ${autodiff_SOURCE_DIR})
+      target_include_directories(${TARGET} PRIVATE ${autodiff_SOURCE_DIR})
     else()
       target_link_libraries(${TARGET} autodiff::autodiff)
     endif()
@@ -243,7 +243,7 @@ else()
 
     # Check if the target is DiFfRG
     if(${TARGET} STREQUAL "DiFfRG")
-      target_include_directories(${TARGET} PUBLIC ${autodiff_SOURCE_DIR})
+      target_include_directories(${TARGET} PRIVATE ${autodiff_SOURCE_DIR})
     else()
       target_link_libraries(${TARGET} autodiff::autodiff)
     endif()
@@ -303,7 +303,7 @@ cpmaddpackage(
   VERSION
   1.14.1
   OPTIONS
-  "CMAKE_BUILD_TYPE Release"
+  "CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE}"
   "SPDLOG_INSTALL ON")
 
 # ##############################################################################
