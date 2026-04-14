@@ -1,4 +1,4 @@
-[This is the current stable version of DiFfRG. For the most up-to date version, please visit [the main repository](https://github.com/satfra/DiFfRG)
+[This is the current stable version of DiFfRG. For the most up-to date version, please visit [this repository](https://github.com/satfra/DiFfRG_current).
 
 [![arXiv](https://img.shields.io/badge/arXiv-2412.13043-b31b1b.svg?style=for-the-badge)](https://arxiv.org/abs/2412.13043)
 [![Doxygen](https://img.shields.io/badge/doxygen-2C4AA8?style=for-the-badge&logo=c%2B%2B&logoColor=white)](https://satfra.github.io/DiFfRG/cpp/index.html)
