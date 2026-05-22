@@ -140,12 +140,12 @@ and start the build after switching to the git directory.
 $ cd DiFfRG
 $ bash -i  build.sh -j8 -i /opt/DiFfRG
 ```
-The `build_DiFfRG.sh` bash script will build and setup the DiFfRG project and all its requirements. This can take up to half an hour as the deal.ii library is quite large.
+The `build.sh` bash script will build and setup the DiFfRG project and all its requirements. This can take up to half an hour as the deal.ii library is quite large.
 This script has the following options:
 -  `-f`              Perform a full build and install of everything without confirmations.
 -  `-c`              Use CUDA when building the DiFfRG library.
 -  `-i <directory>`  Set the installation directory for the library.
--  `-j <threads>`    Set the number of threads passed to make and git fetch.
+-  `-j <threads>`    Set the number of threads passed to the build.
 -  `-b <directory>`  Use the Boost installation at this prefix instead of building one.
 -  `-t <directory>`  Use the TBB installation at this prefix instead of building one.
 -  `-s <directory>`  Use the SUNDIALS installation at this prefix instead of building one.
@@ -153,7 +153,7 @@ This script has the following options:
 
 Depending on your amount of CPU cores, you should adjust the `-j` parameter which indicates the number of threads used in the build process. Note that choosing this too large may lead to extreme RAM usage, so tread carefully - DiFfRG will try to auto-detect an appropriate value if `-j` is not set.
 
-As soon as the build has finished, you can find a full install of the library in the `DiFfRG_install` subdirectory.
+As soon as the build has finished, you can find a full install of the library in the directory passed to `-i` (here `/opt/DiFfRG`); the default is `~/.local/share/DiFfRG`.
 
 If you have changes to the library code, you can update the library by running
 ```bash
@@ -163,7 +163,7 @@ where once again the `-j` parameter should be adjusted to your amount of CPU cor
 The `update_DiFfRG.sh` script takes the following optional arguments:
 - `-c`               Use CUDA when building the DiFfRG library.
 - `-i <directory>`   Set the installation directory for the library.
-- `-j <threads>`     Set the number of threads passed to make and git fetch.
+- `-j <threads>`     Set the number of threads passed to the build.
 - `-m`               Install the Mathematica package locally.
 - `--help`           Display this information.
 

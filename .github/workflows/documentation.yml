@@ -12,7 +12,7 @@ jobs:
       - name: Install doxygen
         run: | 
           sudo apt-get update
-          sudo apt-get install cmake build-essential python3 graphviz
+          sudo apt-get install -y cmake build-essential python3 python3-venv python3-pip graphviz
           wget https://www.doxygen.nl/files/doxygen-1.12.0.linux.bin.tar.gz
           tar xfv doxygen-1.12.0.linux.bin.tar.gz
           cd doxygen-1.12.0/
@@ -20,11 +20,6 @@ jobs:
           cd ..
       - name: Create temporary working-directory
         run: mkdir build
-      - name: Pull doxygen-awesome
-        run: |
-          cd external
-          git submodule update --init doxygen-awesome-css
-          cd ..
       - name: Build doxygen documentation
         run: |
           cd build
@@ -34,7 +29,7 @@ jobs:
           cd ..
       - name: Build python documentation
         run: |
-          python -m venv .venv
+          python3 -m venv .venv
           source .venv/bin/activate
           pip install pdoc python/dist/DiFfRG-1.0.0-py3-none-any.whl
           cd python
