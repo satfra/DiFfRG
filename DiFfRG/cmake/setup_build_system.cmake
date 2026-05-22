@@ -87,7 +87,7 @@ endif()
 # ##############################################################################
 
 # Pre-flight: the DiFfRG library build needs its heavy dependencies (deal.II,
-# TBB, Boost, Kokkos, SUNDIALS) to be already built and installed under
+# TBB, Boost, SUNDIALS) to be already built and installed under
 # BUNDLED_DIR. Configuring DiFfRG/ on its own does NOT build them - that is done
 # by the top-level build (build.sh / cmake on the repository root). Emit a clear,
 # actionable error instead of deal.II's generic "could not find" message.
@@ -103,7 +103,7 @@ if(NOT DEFINED DEAL_II_DIR AND NOT EXISTS "${BUNDLED_DIR}/dealii_install")
       "  (e.g. ${BUNDLED_DIR}/dealii_install/).\n"
       "\n"
       "  Configuring DiFfRG/ on its own only builds the DiFfRG library; it does\n"
-      "  not build deal.II, TBB, Boost, Kokkos or SUNDIALS. Build those first:\n"
+      "  not build deal.II, TBB, Boost or SUNDIALS. Build those first:\n"
       "\n"
       "    # full build (dependencies + library) into a prefix:\n"
       "    bash build.sh -j<N> -i <prefix>\n"
@@ -122,7 +122,9 @@ find_package(deal.II 9.5.0 REQUIRED HINTS ${DEAL_II_DIR}
 deal_ii_initialize_cached_variables()
 
 # Find TBB
-find_package(TBB 2022.0.0 REQUIRED HINTS ${BUNDLED_DIR}/oneTBB_install)
+# DiFfRG only uses the long-stable TBB API (parallel_for, blocked_range[2d/3d]),
+# available since oneTBB 2021.1 - so 2021 is a sufficient floor.
+find_package(TBB 2021 REQUIRED HINTS ${BUNDLED_DIR}/oneTBB_install)
 message(STATUS "TBB dir: ${TBB_DIR}")
 
 # Find Boost

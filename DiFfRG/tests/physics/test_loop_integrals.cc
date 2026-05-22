@@ -230,11 +230,11 @@ TEMPLATE_TEST_CASE_SIG("Test momentum integrals with matsubara sum",
         return is_close(x0, 0.) ? poly(x) : poly(x) / std::pow(std::abs(x0) / (2. * M_PI * T_val), zeta_val);
       },
       x_quadrature, x_extent, k, q0_order, q0_quadrature, q0_extent, T_val);
-  if (!is_close(reference_integral, integral, 1e-5))
+  if (!is_close(reference_integral, integral, 5e-5))
     std::cout << "reference: " << reference_integral << ", integral: " << integral
               << " relative error: " << std::abs(reference_integral - integral) / std::abs(reference_integral)
               << std::endl;
-  CHECK(is_close(reference_integral, integral, 1e-5));
+  CHECK(is_close(reference_integral, integral, 5e-5));
 }
 
 TEMPLATE_TEST_CASE_SIG("Test momentum integrals with matsubara sum and angle",

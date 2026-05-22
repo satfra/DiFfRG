@@ -10,9 +10,12 @@ Options:
   -i <directory>   Set the installation directory for the library.
   -j <threads>     Set the number of threads passed to the build.
   -b <directory>   Use the Boost installation at this prefix instead of building one.
-                   By default a system Boost (>= 1.80) is used if found, otherwise
-                   Boost is built from source. Set the environment variable
-                   BUILD_BOOST=1 to always build the bundled Boost.
+  -t <directory>   Use the TBB installation at this prefix instead of building one.
+  -s <directory>   Use the SUNDIALS installation at this prefix instead of building one.
+                   By default a compatible system Boost (>= 1.80), TBB (>= 2021) and
+                   SUNDIALS (>= 5.4.0) are used if found, otherwise they are built from
+                   source. Set BUILD_BOOST=1 / BUILD_TBB=1 / BUILD_SUNDIALS=1 to always
+                   build the bundled one.
   --help           Display this information.
 "
 
@@ -28,14 +31,16 @@ for arg in "$@"; do
   fi
 done
 
-threads='1'
+threads=''
 INSTALLPATH=''
 USE_CUDA_OPT='OFF'
 config_file='config'
 config_flag=''
 full_build='false'
 boost_dir=''
-while getopts :i:j:b:fcd flag; do
+tbb_dir=''
+sundials_dir=''
+while getopts :i:j:b:t:s:fcd flag; do
   case "${flag}" in
   d)
     config_file="config_docker"
@@ -44,6 +49,8 @@ while getopts :i:j:b:fcd flag; do
   i) INSTALLPATH=${OPTARG} ;;
   j) threads=${OPTARG} ;;
   b) boost_dir=${OPTARG} ;;
+  t) tbb_dir=${OPTARG} ;;
+  s) sundials_dir=${OPTARG} ;;
   c) USE_CUDA_OPT='ON' ;;
   f) full_build='true' ;;
   ?)
@@ -52,6 +59,21 @@ while getopts :i:j:b:fcd flag; do
     ;;
   esac
 done
+
+# Auto-detect the number of build threads if -j was not given: use half the
+# available cores (rounded down, at least 1) to limit peak RAM usage.
+if [[ -z ${threads} ]]; then
+  ncores=''
+  if command -v nproc >/dev/null 2>&1; then
+    ncores=$(nproc)
+  elif command -v sysctl >/dev/null 2>&1; then
+    ncores=$(sysctl -n hw.ncpu 2>/dev/null)
+  fi
+  ncores=${ncores:-2}
+  threads=$((ncores / 2))
+  [[ ${threads} -lt 1 ]] && threads=1
+  echo "No -j given; using ${threads} build threads (half of ${ncores} cores)."
+fi
 
 # Get the path where this script is located
 SCRIPTPATH="$(
@@ -93,19 +115,30 @@ fi
 idir=$(expandPath "${INSTALLPATH}")
 echo "DiFfRG library will be installed in ${idir}"
 
-# Boost source selection forwarded to CMake:
-#   -b <dir>      -> use that Boost prefix
-#   BUILD_BOOST=1 -> always build the bundled Boost
-# (default: use a system Boost >= 1.80 if present, otherwise build it).
-boost_cmake_args=()
+# Dependency source selection forwarded to CMake. For each of Boost/TBB/SUNDIALS:
+#   -b/-t/-s <dir>            -> use that prefix
+#   BUILD_BOOST/TBB/SUNDIALS=1 -> always build the bundled one
+# Default: use a compatible system copy if present, otherwise build it.
+dep_cmake_args=()
 if [[ -n ${boost_dir} ]]; then
-  boost_cmake_args+=("-DBOOST_DIR=$(expandPath "${boost_dir}")")
+  dep_cmake_args+=("-DBOOST_DIR=$(expandPath "${boost_dir}")")
   echo "  Using Boost from ${boost_dir}"
 fi
-if [[ -n ${BUILD_BOOST} ]] && [[ ${BUILD_BOOST} != "0" ]]; then
-  boost_cmake_args+=("-DBUILD_BOOST=ON")
-  echo "  Forcing a bundled Boost build (BUILD_BOOST=${BUILD_BOOST})."
+if [[ -n ${tbb_dir} ]]; then
+  dep_cmake_args+=("-DTBB_DIR=$(expandPath "${tbb_dir}")")
+  echo "  Using TBB from ${tbb_dir}"
 fi
+if [[ -n ${sundials_dir} ]]; then
+  dep_cmake_args+=("-DSUNDIALS_DIR=$(expandPath "${sundials_dir}")")
+  echo "  Using SUNDIALS from ${sundials_dir}"
+fi
+for _dep in BOOST TBB SUNDIALS; do
+  _v="BUILD_${_dep}"
+  if [[ -n ${!_v} ]] && [[ ${!_v} != "0" ]]; then
+    dep_cmake_args+=("-DBUILD_${_dep}=ON")
+    echo "  Forcing a bundled ${_dep} build (BUILD_${_dep}=${!_v})."
+  fi
+done
 
 if [[ ${USE_CUDA_OPT} == "ON" ]]; then
   echo "  Using CUDA to build the DiFfRG library."
@@ -145,7 +178,7 @@ cmake -S "${SCRIPTPATH}" -B "${BUILDPATH}" \
   -DCMAKE_CUDA_FLAGS="${CUDA_FLAGS}" \
   -DDIFFRG_EXE_LINKER_FLAGS="${EXE_LINKER_FLAGS}" \
   -DDEAL_II_CMAKE="${DEAL_II_CMAKE}" \
-  "${boost_cmake_args[@]}" \
+  "${dep_cmake_args[@]}" \
   2>&1 | tee ${LOGPATH}/DiFfRG_cmake.log
 if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
   echo "    Failed to configure DiFfRG, see ${LOGPATH}/DiFfRG_cmake.log."

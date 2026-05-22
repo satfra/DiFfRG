@@ -1,9 +1,9 @@
 # ##############################################################################
 # Top-level build for DiFfRG (superbuild)
 #
-# This file builds all bundled dependencies (boost, oneTBB, kokkos, SUNDIALS,
-# deal.II) into ${CMAKE_INSTALL_PREFIX}/bundled/<lib>_install and then builds
-# and installs the DiFfRG library itself.
+# This file builds all bundled dependencies (boost, oneTBB, SUNDIALS, deal.II)
+# into ${CMAKE_INSTALL_PREFIX}/bundled/ and then builds and installs the 
+# DiFfRG library itself.
 # ##############################################################################
 
 cmake_minimum_required(VERSION 3.26.4)
@@ -51,7 +51,6 @@ endif()
 set(DEPEND_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX}/bundled)
 set(BOOST_INSTALL ${DEPEND_INSTALL_PREFIX}/boost_install)
 set(TBB_INSTALL ${DEPEND_INSTALL_PREFIX}/oneTBB_install)
-set(KOKKOS_INSTALL ${DEPEND_INSTALL_PREFIX}/kokkos_install)
 set(SUNDIALS_INSTALL ${DEPEND_INSTALL_PREFIX}/sundials_install)
 set(DEALII_INSTALL ${DEPEND_INSTALL_PREFIX}/dealii_install)
 
@@ -94,6 +93,18 @@ set(BOOST_DIR
           "Use the Boost installation at this prefix instead of building one")
 option(BUILD_BOOST
        "Always build the bundled, pinned Boost (ignore any system Boost)" OFF)
+
+# Same selection scheme for TBB (>= 2021) and SUNDIALS (>= 5.4.0).
+set(TBB_DIR
+    ""
+    CACHE PATH "Use the TBB installation at this prefix instead of building one")
+option(BUILD_TBB "Always build the bundled oneTBB (ignore any system TBB)" OFF)
+set(SUNDIALS_DIR
+    ""
+    CACHE PATH
+          "Use the SUNDIALS installation at this prefix instead of building one")
+option(BUILD_SUNDIALS
+       "Always build the bundled SUNDIALS (ignore any system SUNDIALS)" OFF)
 
 set(DEALII_MAX_JOBS
     16
@@ -155,9 +166,8 @@ if(NOT LAPACK_FOUND)
   )
 endif()
 
-# CUDA is detected here only to warn early; kokkos is always built CPU-only (as
-# in DiFfRG 1.0) and the DiFfRG library obtains its CUDA toolchain (CCCL/RMM)
-# during its own build.
+# CUDA is detected here only to warn early; the DiFfRG library obtains its CUDA
+# toolchain (CCCL/RMM) during its own build.
 if(USE_CUDA)
   check_language(CUDA)
   if(NOT CMAKE_CUDA_COMPILER)
@@ -197,15 +207,13 @@ set(BOOST_SHA256
     3621533e820dcab1e8012afd583c0c73cf0f77694952b81352bf38c1488f9cb4)
 set(TBB_REPO https://github.com/uxlfoundation/oneTBB.git)
 set(TBB_TAG 8659619fbd73361a129e02df19d24aa5054649cb)
-set(KOKKOS_REPO https://github.com/kokkos/kokkos.git)
-set(KOKKOS_TAG b6a16bc9d88a9252d76e64fd2be20c58eb5d7f2e)
 set(SUNDIALS_REPO https://github.com/LLNL/sundials.git)
 set(SUNDIALS_TAG v7.2.1)
 set(DEALII_REPO https://github.com/dealii/dealii.git)
 set(DEALII_TAG 88cb8ba3cb5c4ffd287785e4af3fd8c634613fb2)
 
 # ##############################################################################
-# [1/6] Boost
+# [1/5] Boost
 #
 # Boost is needed by BOTH deal.II and the DiFfRG library, and deal.II asserts at
 # compile time that an application links the exact Boost version it was
@@ -253,11 +261,11 @@ if(NOT "${BOOST_DIR}" STREQUAL "")
   endif()
   set(BOOST_PREFIX "${BOOST_DIR}")
   message(
-    STATUS "[1/6] Using Boost ${Boost_VERSION} from BOOST_DIR=${BOOST_DIR}")
+    STATUS "[1/5] Using Boost ${Boost_VERSION} from BOOST_DIR=${BOOST_DIR}")
 elseif(BUILD_BOOST)
   set(_build_boost ON)
   message(
-    STATUS "[1/6] BUILD_BOOST=ON: building the bundled Boost from source.")
+    STATUS "[1/5] BUILD_BOOST=ON: building the bundled Boost from source.")
 else()
   # Default: use a deal.II-consumable system Boost if present, else build it.
   find_package(Boost 1.80 QUIET COMPONENTS ${_boost_required_components})
@@ -265,13 +273,13 @@ else()
     # Derive the install prefix from the discovered include dir.
     get_filename_component(BOOST_PREFIX "${Boost_INCLUDE_DIRS}" DIRECTORY)
     message(
-      STATUS "[1/6] Using system Boost ${Boost_VERSION} (${BOOST_PREFIX}). "
+      STATUS "[1/5] Using system Boost ${Boost_VERSION} (${BOOST_PREFIX}). "
              "Set -DBUILD_BOOST=ON to build the bundled Boost instead.")
   else()
     set(_build_boost ON)
     message(
       STATUS
-        "[1/6] No deal.II-consumable system Boost >= 1.80 found; building the bundled Boost from source."
+        "[1/5] No deal.II-consumable system Boost >= 1.80 found; building the bundled Boost from source."
     )
     message(STATUS "      (${_boost_incompat_hint})")
   endif()
@@ -284,7 +292,7 @@ if(_build_boost)
 
   message(
     STATUS
-      "[1/6] Configuring Boost (bundled, replicating external/build_boost.sh)..."
+      "[1/5] Configuring Boost (bundled, replicating external/build_boost.sh)..."
   )
   ExternalProject_Add(
     boost_dep
@@ -311,93 +319,202 @@ if(_build_boost)
 endif()
 
 # ##############################################################################
-# [2/6] oneTBB (replicating external/build_oneTBB.sh)
+# [2/5] oneTBB
+#
+# Needed by BOTH DiFfRG (find_package(TBB 2021 CONFIG)) and deal.II (path-based,
+# floor 4.2); a single TBB is shared by both. There is no version-match
+# assertion, and modern TBB ships TBBConfig.cmake, so a system TBB is usable.
+# Selection mirrors Boost:
+#   TBB_DIR set       -> use that prefix (FATAL if it lacks TBB >= 2021)
+#   BUILD_TBB=ON      -> build the bundled oneTBB
+#   otherwise default -> use a system TBB >= 2021 if found, else build it
+# A system TBB in standard paths is found by both consumers without a hint, so
+# TBB_PREFIX is left empty in that case (routed only for bundled / user prefix).
 # ##############################################################################
 
-message(STATUS "[2/6] Configuring oneTBB...")
-ExternalProject_Add(
-  oneTBB_dep
-  DOWNLOAD_COMMAND
-    ${CMAKE_COMMAND} -DGIT_EXECUTABLE=${GIT_EXECUTABLE} -DREPO=${TBB_REPO}
-    -DTAG=${TBB_TAG} -DDEST=<SOURCE_DIR> -P
-    ${CMAKE_SOURCE_DIR}/cmake/fetch_commit.cmake
-  PREFIX ${CMAKE_BINARY_DIR}/oneTBB
-  INSTALL_DIR ${TBB_INSTALL}
-  LOG_DOWNLOAD ON
-  LOG_CONFIGURE ON
-  LOG_BUILD ON
-  LOG_INSTALL ON
-  LOG_OUTPUT_ON_FAILURE ON
-  CMAKE_CACHE_ARGS
-    -DCMAKE_BUILD_TYPE:STRING=Release
-    -DTBB_TEST:BOOL=OFF
-    -DCMAKE_CXX_STANDARD:STRING=20
-    -DCMAKE_CXX_COMPILER:STRING=${CMAKE_CXX_COMPILER}
-    -DCMAKE_C_COMPILER:STRING=${CMAKE_C_COMPILER}
-    "-DCMAKE_CXX_FLAGS:STRING=${CMAKE_CXX_FLAGS}"
-    "-DCMAKE_EXE_LINKER_FLAGS:STRING=${DIFFRG_EXE_LINKER_FLAGS}"
-    -DCMAKE_INSTALL_PREFIX:PATH=${TBB_INSTALL}
-    ${CCACHE_CMAKE_ARGS})
+set(_build_tbb OFF)
+set(TBB_PREFIX "")
+set(_tbb_dep_target "")
+
+# Capture the user-given prefix BEFORE find_package(TBB), which overwrites the
+# TBB_DIR variable with the location of the discovered TBBConfig.cmake.
+set(_tbb_user_dir "${TBB_DIR}")
+
+if(NOT "${_tbb_user_dir}" STREQUAL "")
+  # Restrict the search to the given prefix (NO_DEFAULT_PATH) so a wrong prefix
+  # fails instead of silently picking up a system TBB.
+  find_package(
+    TBB 2021 QUIET CONFIG
+    PATHS "${_tbb_user_dir}"
+    PATH_SUFFIXES lib/cmake/TBB lib64/cmake/TBB cmake/TBB
+    NO_DEFAULT_PATH)
+  if(NOT TBB_FOUND)
+    message(
+      FATAL_ERROR
+        "TBB_DIR=${_tbb_user_dir} does not provide TBB >= 2021. Point it at a prefix "
+        "containing TBBConfig.cmake, or use -DBUILD_TBB=ON to build the bundled oneTBB."
+    )
+  endif()
+  set(TBB_PREFIX "${_tbb_user_dir}")
+  message(
+    STATUS "[2/5] Using TBB ${TBB_VERSION} from TBB_DIR=${_tbb_user_dir}")
+elseif(BUILD_TBB)
+  set(_build_tbb ON)
+  message(STATUS "[2/5] BUILD_TBB=ON: building the bundled oneTBB from source.")
+else()
+  find_package(TBB 2021 QUIET CONFIG)
+  if(TBB_FOUND)
+    message(
+      STATUS
+        "[2/5] Using system TBB ${TBB_VERSION} (${TBB_DIR}). "
+        "Set -DBUILD_TBB=ON to build the bundled oneTBB instead.")
+  else()
+    set(_build_tbb ON)
+    message(
+      STATUS "[2/5] No system TBB >= 2021 found; building the bundled oneTBB.")
+  endif()
+endif()
+
+if(_build_tbb)
+  set(TBB_PREFIX ${TBB_INSTALL})
+  set(_tbb_dep_target oneTBB_dep)
+  message(STATUS "[2/5] Configuring oneTBB (bundled, replicating external/build_oneTBB.sh)...")
+  ExternalProject_Add(
+    oneTBB_dep
+    DOWNLOAD_COMMAND
+      ${CMAKE_COMMAND} -DGIT_EXECUTABLE=${GIT_EXECUTABLE} -DREPO=${TBB_REPO}
+      -DTAG=${TBB_TAG} -DDEST=<SOURCE_DIR> -P
+      ${CMAKE_SOURCE_DIR}/cmake/fetch_commit.cmake
+    PREFIX ${CMAKE_BINARY_DIR}/oneTBB
+    INSTALL_DIR ${TBB_INSTALL}
+    LOG_DOWNLOAD ON
+    LOG_CONFIGURE ON
+    LOG_BUILD ON
+    LOG_INSTALL ON
+    LOG_OUTPUT_ON_FAILURE ON
+    CMAKE_CACHE_ARGS
+      -DCMAKE_BUILD_TYPE:STRING=Release
+      -DTBB_TEST:BOOL=OFF
+      -DCMAKE_CXX_STANDARD:STRING=20
+      -DCMAKE_CXX_COMPILER:STRING=${CMAKE_CXX_COMPILER}
+      -DCMAKE_C_COMPILER:STRING=${CMAKE_C_COMPILER}
+      "-DCMAKE_CXX_FLAGS:STRING=${CMAKE_CXX_FLAGS}"
+      "-DCMAKE_EXE_LINKER_FLAGS:STRING=${DIFFRG_EXE_LINKER_FLAGS}"
+      -DCMAKE_INSTALL_PREFIX:PATH=${TBB_INSTALL}
+      ${CCACHE_CMAKE_ARGS})
+endif()
 
 # ##############################################################################
-# [3/6] Kokkos (CPU-only, replicating external/build_kokkos.sh)
+# [3/5] SUNDIALS
+#
+# SUNDIALS is needed ONLY by deal.II (DiFfRG never references it). deal.II finds
+# it by library/path search (sundials_arkode/kinsol/nvecserial/ida(s), + core
+# for >= 7) with floor 5.4.0 and no version-match assertion. We adopt a system
+# SUNDIALS that provides those libraries at version >= 5.4.0; otherwise build the
+# bundled one. As with TBB, a system install in standard paths is found by
+# deal.II without a hint, so SUNDIALS_PREFIX is only routed for bundled / an
+# explicit SUNDIALS_DIR prefix.
+# Selection: SUNDIALS_DIR set -> use it (FATAL if unusable); BUILD_SUNDIALS=ON ->
+# build bundled; otherwise -> system if usable, else build bundled.
 # ##############################################################################
 
-message(STATUS "[3/6] Configuring Kokkos...")
-ExternalProject_Add(
-  kokkos_dep
-  DOWNLOAD_COMMAND
-    ${CMAKE_COMMAND} -DGIT_EXECUTABLE=${GIT_EXECUTABLE} -DREPO=${KOKKOS_REPO}
-    -DTAG=${KOKKOS_TAG} -DDEST=<SOURCE_DIR> -P
-    ${CMAKE_SOURCE_DIR}/cmake/fetch_commit.cmake
-  PREFIX ${CMAKE_BINARY_DIR}/kokkos
-  INSTALL_DIR ${KOKKOS_INSTALL}
-  LOG_DOWNLOAD ON
-  LOG_CONFIGURE ON
-  LOG_BUILD ON
-  LOG_INSTALL ON
-  LOG_OUTPUT_ON_FAILURE ON
-  CMAKE_CACHE_ARGS
-    -DKokkos_ENABLE_SERIAL:BOOL=ON
-    -DKokkos_ENABLE_OPENMP:BOOL=OFF
-    -DKokkos_ENABLE_CUDA:BOOL=OFF
-    -DCMAKE_CXX_COMPILER:STRING=${CMAKE_CXX_COMPILER}
-    -DCMAKE_C_COMPILER:STRING=${CMAKE_C_COMPILER}
-    "-DCMAKE_CXX_FLAGS:STRING=${CMAKE_CXX_FLAGS}"
-    "-DCMAKE_EXE_LINKER_FLAGS:STRING=${DIFFRG_EXE_LINKER_FLAGS}"
-    -DCMAKE_INSTALL_PREFIX:PATH=${KOKKOS_INSTALL}
-    ${CCACHE_CMAKE_ARGS})
+set(_build_sundials OFF)
+set(SUNDIALS_PREFIX "")
+set(_sundials_dep_target "")
+set(_sun_hint "")
+set(_sun_explicit OFF)
+
+if(NOT "${SUNDIALS_DIR}" STREQUAL "")
+  set(_sun_hint "${SUNDIALS_DIR}")
+  set(_sun_explicit ON)
+elseif(BUILD_SUNDIALS)
+  set(_build_sundials ON)
+  message(
+    STATUS "[3/5] BUILD_SUNDIALS=ON: building the bundled SUNDIALS from source.")
+endif()
+
+if(NOT _build_sundials)
+  # Replicate deal.II's SUNDIALS discovery: required libs + version >= 5.4.0.
+  find_library(_SUN_ARKODE NAMES sundials_arkode HINTS ${_sun_hint}
+               PATH_SUFFIXES lib lib64)
+  find_library(_SUN_KINSOL NAMES sundials_kinsol HINTS ${_sun_hint}
+               PATH_SUFFIXES lib lib64)
+  find_library(_SUN_NVEC NAMES sundials_nvecserial HINTS ${_sun_hint}
+               PATH_SUFFIXES lib lib64)
+  find_path(_SUN_INC sundials/sundials_version.h HINTS ${_sun_hint}
+            PATH_SUFFIXES include)
+
+  set(_sun_ok FALSE)
+  set(_sun_ver "")
+  if(_SUN_ARKODE
+     AND _SUN_KINSOL
+     AND _SUN_NVEC
+     AND _SUN_INC)
+    file(STRINGS "${_SUN_INC}/sundials/sundials_version.h" _sun_mj
+         REGEX "#define SUNDIALS_VERSION_MAJOR")
+    file(STRINGS "${_SUN_INC}/sundials/sundials_version.h" _sun_mn
+         REGEX "#define SUNDIALS_VERSION_MINOR")
+    file(STRINGS "${_SUN_INC}/sundials/sundials_version.h" _sun_pt
+         REGEX "#define SUNDIALS_VERSION_PATCH")
+    string(REGEX REPLACE "^.*MAJOR[ \t]+([0-9]+).*" "\\1" _sun_mj "${_sun_mj}")
+    string(REGEX REPLACE "^.*MINOR[ \t]+([0-9]+).*" "\\1" _sun_mn "${_sun_mn}")
+    string(REGEX REPLACE "^.*PATCH[ \t]+([0-9]+).*" "\\1" _sun_pt "${_sun_pt}")
+    set(_sun_ver "${_sun_mj}.${_sun_mn}.${_sun_pt}")
+    if(NOT _sun_ver VERSION_LESS 5.4.0)
+      set(_sun_ok TRUE)
+    endif()
+  endif()
+
+  if(_sun_ok)
+    if(_sun_explicit)
+      set(SUNDIALS_PREFIX "${SUNDIALS_DIR}")
+    endif() # system-in-standard-paths: leave empty, deal.II finds it unhinted
+    message(STATUS "[3/5] Using system SUNDIALS ${_sun_ver} (${_SUN_INC}). "
+                   "Set -DBUILD_SUNDIALS=ON to build the bundled one instead.")
+  elseif(_sun_explicit)
+    message(
+      FATAL_ERROR
+        "SUNDIALS_DIR=${SUNDIALS_DIR} does not provide SUNDIALS >= 5.4.0 with the "
+        "required libraries (arkode, kinsol, nvecserial). Use -DBUILD_SUNDIALS=ON "
+        "to build the bundled SUNDIALS.")
+  else()
+    set(_build_sundials ON)
+    message(
+      STATUS "[3/5] No system SUNDIALS >= 5.4.0 found; building the bundled SUNDIALS."
+    )
+  endif()
+endif()
+
+if(_build_sundials)
+  set(SUNDIALS_PREFIX ${SUNDIALS_INSTALL})
+  set(_sundials_dep_target sundials_dep)
+  message(STATUS "[3/5] Configuring SUNDIALS (bundled, replicating external/build_sundials.sh)...")
+  ExternalProject_Add(
+    sundials_dep
+    GIT_REPOSITORY ${SUNDIALS_REPO}
+    GIT_TAG ${SUNDIALS_TAG}
+    GIT_SHALLOW ON
+    PREFIX ${CMAKE_BINARY_DIR}/sundials
+    INSTALL_DIR ${SUNDIALS_INSTALL}
+    LOG_DOWNLOAD ON
+    LOG_CONFIGURE ON
+    LOG_BUILD ON
+    LOG_INSTALL ON
+    LOG_OUTPUT_ON_FAILURE ON
+    CMAKE_CACHE_ARGS
+      -DENABLE_OPENMP:BOOL=OFF
+      -DENABLE_MPI:BOOL=OFF
+      -DCMAKE_BUILD_TYPE:STRING=Release
+      -DCMAKE_C_COMPILER:STRING=${CMAKE_C_COMPILER}
+      -DCMAKE_CXX_COMPILER:STRING=${CMAKE_CXX_COMPILER}
+      "-DCMAKE_C_FLAGS_RELEASE:STRING=${CMAKE_C_FLAGS} -O3 -DNDEBUG"
+      "-DCMAKE_EXE_LINKER_FLAGS:STRING=${DIFFRG_EXE_LINKER_FLAGS}"
+      -DCMAKE_INSTALL_PREFIX:PATH=${SUNDIALS_INSTALL}
+      ${CCACHE_CMAKE_ARGS})
+endif()
 
 # ##############################################################################
-# [4/6] SUNDIALS (replicating external/build_sundials.sh)
-# ##############################################################################
-
-message(STATUS "[4/6] Configuring SUNDIALS...")
-ExternalProject_Add(
-  sundials_dep
-  GIT_REPOSITORY ${SUNDIALS_REPO}
-  GIT_TAG ${SUNDIALS_TAG}
-  GIT_SHALLOW ON
-  PREFIX ${CMAKE_BINARY_DIR}/sundials
-  INSTALL_DIR ${SUNDIALS_INSTALL}
-  LOG_DOWNLOAD ON
-  LOG_CONFIGURE ON
-  LOG_BUILD ON
-  LOG_INSTALL ON
-  LOG_OUTPUT_ON_FAILURE ON
-  CMAKE_CACHE_ARGS
-    -DENABLE_OPENMP:BOOL=OFF
-    -DENABLE_MPI:BOOL=OFF
-    -DCMAKE_BUILD_TYPE:STRING=Release
-    -DCMAKE_C_COMPILER:STRING=${CMAKE_C_COMPILER}
-    -DCMAKE_CXX_COMPILER:STRING=${CMAKE_CXX_COMPILER}
-    "-DCMAKE_C_FLAGS_RELEASE:STRING=${CMAKE_C_FLAGS} -O3 -DNDEBUG"
-    "-DCMAKE_EXE_LINKER_FLAGS:STRING=${DIFFRG_EXE_LINKER_FLAGS}"
-    -DCMAKE_INSTALL_PREFIX:PATH=${SUNDIALS_INSTALL}
-    ${CCACHE_CMAKE_ARGS})
-
-# ##############################################################################
-# [5/6] deal.II (replicating external/build_dealii.sh)
+# [4/5] deal.II (replicating external/build_dealii.sh)
 # ##############################################################################
 
 # RAM-aware cap on deal.II parallelism (linking can OOM). Use the smallest of:
@@ -442,7 +559,25 @@ else()
 endif()
 message(STATUS "deal.II build type: ${_dealii_build_type}")
 
-message(STATUS "[5/6] Configuring deal.II...")
+# Route TBB/SUNDIALS to deal.II only when a specific prefix is known (bundled
+# build or an explicit *_DIR). For a system install in standard paths the prefix
+# is empty and deal.II finds it by its own path search without a hint.
+set(_dealii_tbb_arg "")
+if(NOT "${TBB_PREFIX}" STREQUAL "")
+  set(_dealii_tbb_arg -DTBB_DIR:PATH=${TBB_PREFIX})
+endif()
+set(_dealii_sundials_arg "")
+if(NOT "${SUNDIALS_PREFIX}" STREQUAL "")
+  set(_dealii_sundials_arg -DSUNDIALS_DIR:PATH=${SUNDIALS_PREFIX})
+endif()
+# DiFfRG's find_package(TBB ... HINTS .../oneTBB_install) is config mode; route a
+# bundled/user TBB via TBB_ROOT (a system TBB in standard paths is found anyway).
+set(_diffrg_tbb_arg "")
+if(NOT "${TBB_PREFIX}" STREQUAL "")
+  set(_diffrg_tbb_arg -DTBB_ROOT:PATH=${TBB_PREFIX})
+endif()
+
+message(STATUS "[4/5] Configuring deal.II...")
 ExternalProject_Add(
   deal.II_dep
   DOWNLOAD_COMMAND
@@ -451,7 +586,7 @@ ExternalProject_Add(
     ${CMAKE_SOURCE_DIR}/cmake/fetch_commit.cmake
   PREFIX ${CMAKE_BINARY_DIR}/deal.II
   INSTALL_DIR ${DEALII_INSTALL}
-  DEPENDS ${_boost_dep_target} oneTBB_dep kokkos_dep sundials_dep
+  DEPENDS ${_boost_dep_target} ${_tbb_dep_target} ${_sundials_dep_target}
   LOG_DOWNLOAD ON
   LOG_CONFIGURE ON
   LOG_BUILD ON
@@ -479,9 +614,8 @@ ExternalProject_Add(
     -DDEAL_II_WITH_UMFPACK:BOOL=ON
     -DDEAL_II_WITH_TASKFLOW:BOOL=OFF
     -DDEAL_II_WITH_VTK:BOOL=OFF
-    -DKOKKOS_DIR:PATH=${KOKKOS_INSTALL}
-    -DTBB_DIR:PATH=${TBB_INSTALL}
-    -DSUNDIALS_DIR:PATH=${SUNDIALS_INSTALL}
+    ${_dealii_tbb_arg}
+    ${_dealii_sundials_arg}
     # deal.II and DiFfRG must use the SAME Boost (deal.II asserts this). Point
     # deal.II at the resolved Boost prefix (bundled build or system/user Boost).
     # CMP0167 OLD (above) makes find_package(Boost) use the module-mode
@@ -494,7 +628,7 @@ ExternalProject_Add(
     ${CCACHE_CMAKE_ARGS})
 
 # ##############################################################################
-# [6/6] DiFfRG library
+# [5/5] DiFfRG library
 # ##############################################################################
 
 # Build the documentation only if Doxygen is available.
@@ -519,13 +653,14 @@ else()
   set(_diffrg_doc_cmd "")
 endif()
 
-message(STATUS "[6/6] Configuring DiFfRG...")
+message(STATUS "[5/5] Configuring DiFfRG...")
 ExternalProject_Add(
   DiFfRG
   SOURCE_DIR ${CMAKE_SOURCE_DIR}/DiFfRG
   PREFIX ${CMAKE_BINARY_DIR}/DiFfRG
   INSTALL_DIR ${CMAKE_INSTALL_PREFIX}
-  DEPENDS ${_boost_dep_target} oneTBB_dep kokkos_dep sundials_dep deal.II_dep
+  DEPENDS ${_boost_dep_target} ${_tbb_dep_target} ${_sundials_dep_target}
+          deal.II_dep
   BUILD_ALWAYS ON
   LOG_CONFIGURE ON
   LOG_OUTPUT_ON_FAILURE ON
@@ -537,6 +672,7 @@ ExternalProject_Add(
     # these hints route it to a system/user Boost otherwise.
     -DBoost_ROOT:PATH=${BOOST_PREFIX}
     -DCMAKE_PREFIX_PATH:STRING=${BOOST_PREFIX}
+    ${_diffrg_tbb_arg}
     -DUSE_CUDA:BOOL=${USE_CUDA}
     -DCMAKE_BUILD_TYPE:STRING=Release
     -DCMAKE_CXX_COMPILER:STRING=${CMAKE_CXX_COMPILER}

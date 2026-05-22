@@ -57,6 +57,7 @@ To compile and run this project, there are very few requirements which you can e
 The following requirements are optional:
 - A Fortran compiler (e.g. `gfortran`). It is *recommended* but not required: it makes deal.II's LAPACK detection robust.
 - [Boost](https://www.boost.org/) (>= 1.80). A compatible system Boost is used automatically if found; otherwise it is built from source (see [Setup](#setup) for how to control this). If the system boost is not compatible, DiFfRG will build the bundled one automatically.
+- [oneTBB](https://github.com/uxlfoundation/oneTBB) (>= 2021) and [SUNDIALS](https://computing.llnl.gov/projects/sundials) (>= 5.4.0). Like Boost, a compatible system copy is used automatically if found, otherwise it is built from source (see [Setup](#setup)).
 - [Python](https://www.python.org/) is used in the library for visualization purposes. Furthermore, adaptive phase diagram calculation is implemented as a python routine.
 - [ParaView](https://www.paraview.org/), a program to visualize and post-process the vtk data saved by DiFfRG when treating FEM discretizations.
 - [CUDA](https://developer.nvidia.com/cuda-toolkit) for integration routines on the GPU, which gives a huge speedup for the calculation of fully momentum dependent flow equations (10 - 100x). In case you wish to use CUDA, make sure you have a compiler available on your system compatible with your version of `nvcc`, e.g. `g++`<=13.2 for CUDA 12.5
@@ -146,6 +147,8 @@ This script has the following options:
 -  `-i <directory>`  Set the installation directory for the library.
 -  `-j <threads>`    Set the number of threads passed to make and git fetch.
 -  `-b <directory>`  Use the Boost installation at this prefix instead of building one.
+-  `-t <directory>`  Use the TBB installation at this prefix instead of building one.
+-  `-s <directory>`  Use the SUNDIALS installation at this prefix instead of building one.
 -  `--help`          Display this information.
 
 Depending on your amount of CPU cores, you should adjust the `-j` parameter which indicates the number of threads used in the build process. Note that choosing this too large may lead to extreme RAM usage, so tread carefully - DiFfRG will try to auto-detect an appropriate value if `-j` is not set.
@@ -173,15 +176,28 @@ $ CXX=clang++ CC=clang bash -i build.sh -j8 -i /opt/DiFfRG
 ```
 You can also set these in the `config` file (see the commented `export CC=…`/`export CXX=…` lines there). Because CMake caches the compiler on the first configure, switching compilers afterwards requires a clean build tree (run `clear_all.sh`).
 
-### Boost
+### Bundled dependencies: Boost, TBB and SUNDIALS
 
-By default a compatible system Boost (version >= 1.80) is used if one is found, otherwise Boost is built from source. To control this:
+By default a compatible system copy of each is used if found, otherwise it is built from source:
+- **Boost** ≥ 1.80 (used by deal.II and DiFfRG; only adopted if deal.II can consume it — see note below),
+- **TBB** ≥ 2021 (used by deal.II and DiFfRG),
+- **SUNDIALS** ≥ 5.4.0 (used by deal.II only).
+
+Each can be controlled independently, e.g.:
 ```bash
-# Use a specific Boost prefix:
-$ bash -i build.sh -j8 -b /usr -i /opt/DiFfRG          # or: cmake -S . -B build -DBOOST_DIR=/usr ...
-# Force building the bundled, pinned Boost (ignore any system Boost):
-$ BUILD_BOOST=1 bash -i build.sh -j8 -i /opt/DiFfRG     # or: cmake ... -DBUILD_BOOST=ON
+# Use a specific prefix for one or more dependencies:
+$ bash -i build.sh -j8 -b /usr -t /usr -s /opt/sundials -i /opt/DiFfRG
+#   (equivalently: cmake ... -DBOOST_DIR=/usr -DTBB_DIR=/usr -DSUNDIALS_DIR=/opt/sundials)
+# Force building a bundled, pinned dependency (ignore any system copy):
+$ BUILD_BOOST=1 BUILD_TBB=1 BUILD_SUNDIALS=1 bash -i build.sh -j8 -i /opt/DiFfRG
+#   (equivalently: cmake ... -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_SUNDIALS=ON)
 ```
+Note on Boost: deal.II uses the legacy module-mode `FindBoost`, which needs *compiled* Boost component
+libraries including `boost_system`. Very recent Boost releases ship `Boost.System` header-only and
+cannot be consumed by deal.II here, so the bundled Boost is built automatically (and an incompatible
+`-b` prefix is a hard error). TBB and SUNDIALS have no such restriction. oneTBB and SUNDIALS each build
+in only ~1–2 minutes, so the savings from a system copy are modest — the main benefit is reusing
+existing/HPC-module installs.
 
 
 ## Getting started with simulating fRG flows
