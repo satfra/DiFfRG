@@ -64,7 +64,8 @@ TEST_CASE("Test CG on Constant model", "[discretization][dg]")
           {{"dt", 1e-4}, {"minimal_dt", 1e-6}, {"maximal_dt", 1e-1}, {"abs_tol", 1e-14}, {"rel_tol", 1e-8}}}}},
        {"output", {{"live_plot", false}, {"verbosity", 0}}}});
 
-  Testing::PhysicalParameters p_prm = {/*x0_initial = */ 0., /*x1_initial = */ GENERATE(take(5, random(1., 10.)))};
+  Testing::PhysicalParameters p_prm = {/*initial_x0 = */ {{0., 0., 0.}},
+                                       /*initial_x1 = */ {{GENERATE(take(5, random(1., 10.))), 0., 0.}}};
 
   try {
     auto log = spdlog::stdout_color_mt("log");

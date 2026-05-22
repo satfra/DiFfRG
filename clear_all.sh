@@ -5,16 +5,15 @@ option_clear=${option_clear:-N}
 
 if [[ ${option_clear} = "y" ]] || [[ ${option_clear} = "Y" ]]; then
   echo "Deleting..."
-  cd external
-  ./build_boost.sh -c
-  ./build_oneTBB.sh -c
-  ./build_kokkos.sh -c
-  ./build_sundials.sh -c
-  ./build_dealii.sh -c
-  cd ..
-  rm -rf ./DiFfRG_build ./DiFfRG_install
-  rm -rf ./logs
-  rm -f ./external/*.log
+  SCRIPTPATH="$(
+    cd -- "$(dirname "$0")" >/dev/null 2>&1
+    pwd -P
+  )"
+  # The build tree holds the ExternalProject sources/builds of all bundled
+  # dependencies as well as the DiFfRG library build. Removing it forces a full
+  # rebuild on the next invocation of build.sh.
+  rm -rf "${SCRIPTPATH}/DiFfRG_build" "${SCRIPTPATH}/DiFfRG_install"
+  rm -rf "${SCRIPTPATH}/logs"
 fi
 
 echo "    Done"

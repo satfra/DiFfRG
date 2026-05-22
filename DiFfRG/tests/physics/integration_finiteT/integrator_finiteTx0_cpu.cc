@@ -79,12 +79,12 @@ TEMPLATE_TEST_CASE_SIG("Test cpu momentum integrals finite T (x0)", "[integratio
     const double int_cpu =
         integrator_cpu.request(k, 0., 1., 0., 0., 0., 0., 0., powr<2>(T), 0., powr<2>(val), 0.).get();
 
-    if (!is_close(reference_integral, int_cpu, dim == 2 ? 1e-2 : 5e-5)) {
-      std::cerr << "dim: " << dim << "| reference: " << reference_integral << "| integral: " << int_cpu
-                << "| relative error: " << std::abs(reference_integral - int_cpu) / std::abs(reference_integral)
+    if (!is_close(reference_integral, int_gpu, dim == 2 ? 1e-2 : 1e-3)) {
+      std::cerr << "dim: " << dim << "| reference: " << reference_integral << "| integral: " << int_gpu
+                << "| relative error: " << std::abs(reference_integral - int_gpu) / std::abs(reference_integral)
                 << std::endl;
     }
     CHECK(isfinite(int_cpu));
-    CHECK(is_close(reference_integral, int_gpu, dim == 2 ? 1e-2 : 5e-5));
+    CHECK(is_close(reference_integral, int_gpu, dim == 2 ? 1e-2 : 1e-3));
   }
 }

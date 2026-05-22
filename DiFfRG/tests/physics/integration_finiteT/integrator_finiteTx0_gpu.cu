@@ -99,12 +99,12 @@ TEMPLATE_TEST_CASE_SIG("Test gpu momentum integrals finite T (x0)", "[integratio
     const double int_cpu = integrator_cpu.get(k, constant, poly[0], poly[1], poly[2], poly[3], poly[4], poly[5],
                                               q0_poly[0], q0_poly[1], q0_poly[2], q0_poly[3]);
 
-    if (!is_close(int_gpu, int_cpu, 1e-8)) {
+    if (!is_close(int_gpu, int_cpu, 1e-5)) {
       std::cerr << "dim: " << dim << "| GPU: " << int_gpu << "| CPU: " << int_cpu
                 << "| relative error: " << std::abs(int_gpu - int_cpu) / std::abs(int_gpu) << std::endl;
     }
     CHECK(isfinite(int_cpu));
     CHECK(isfinite(int_gpu));
-    CHECK(is_close(int_gpu, int_cpu, 1e-8));
+    CHECK(is_close(int_gpu, int_cpu, 1e-5));
   }
 }

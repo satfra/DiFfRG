@@ -9,7 +9,10 @@ if(${CMAKE_PROJECT_NAME} STREQUAL "DiFfRG")
   # directory
   set(BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
   if(NOT DEFINED BUNDLED_DIR)
-    set(BUNDLED_DIR ${BASE_DIR}/../external)
+    # Default to the same location the top-level build installs dependencies to
+    # (CMAKE_INSTALL_PREFIX defaults to ~/.local/share/DiFfRG, deps go to
+    # <prefix>/bundled). Override with -DBUNDLED_DIR=... when they live elsewhere.
+    set(BUNDLED_DIR $ENV{HOME}/.local/share/DiFfRG/bundled)
   endif()
 else()
   # If we are building a DiFfRG-based project, we need to set the bundle
@@ -82,6 +85,36 @@ endif()
 # ##############################################################################
 # Find packages
 # ##############################################################################
+
+# Pre-flight: the DiFfRG library build needs its heavy dependencies (deal.II,
+# TBB, Boost, Kokkos, SUNDIALS) to be already built and installed under
+# BUNDLED_DIR. Configuring DiFfRG/ on its own does NOT build them - that is done
+# by the top-level build (build.sh / cmake on the repository root). Emit a clear,
+# actionable error instead of deal.II's generic "could not find" message.
+if(NOT DEFINED DEAL_II_DIR AND NOT EXISTS "${BUNDLED_DIR}/dealii_install")
+  message(
+    FATAL_ERROR
+      "\n"
+      "======================================================================\n"
+      "  DiFfRG's bundled dependencies were not found.\n"
+      "======================================================================\n"
+      "  Expected them under:\n"
+      "    BUNDLED_DIR = ${BUNDLED_DIR}\n"
+      "  (e.g. ${BUNDLED_DIR}/dealii_install/).\n"
+      "\n"
+      "  Configuring DiFfRG/ on its own only builds the DiFfRG library; it does\n"
+      "  not build deal.II, TBB, Boost, Kokkos or SUNDIALS. Build those first:\n"
+      "\n"
+      "    # full build (dependencies + library) into a prefix:\n"
+      "    bash build.sh -j<N> -i <prefix>\n"
+      "\n"
+      "  then either configure with no extra flags (if installed to the default\n"
+      "  ~/.local/share/DiFfRG) or point DiFfRG at the dependency install:\n"
+      "\n"
+      "    cmake <path-to>/DiFfRG -DBUNDLED_DIR=<prefix>/bundled ...\n"
+      "======================================================================\n"
+  )
+endif()
 
 # Find deal.II
 find_package(deal.II 9.5.0 REQUIRED HINTS ${DEAL_II_DIR}

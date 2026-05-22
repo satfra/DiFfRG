@@ -4,6 +4,16 @@
 # environment variables.
 ################################################################################
 
+# Select the compiler for DiFfRG and all bundled dependencies. By default the
+# compiler CMake finds on your PATH is used. To force a specific one, uncomment
+# and adapt the following (these are exported into the environment that drives
+# the whole build, including deal.II, Boost, etc.):
+#   export CC=gcc-12
+#   export CXX=g++-12
+#   export FC=gfortran     # optional; only needed for deal.II's LAPACK detection
+# Note: the compiler is cached on first configure, so changing it requires a
+# clean build tree (run clear_all.sh) before re-running build.sh.
+
 # Configure compiler flags for the current machine
 # By default, we simply build with the highest instruction set available on the current machine
 # if you want to use a different instruction set, you can set this in the CXX_FLAGS, CUDA_FLAGS, C_FLAGS,
@@ -15,10 +25,10 @@ export C_FLAGS="-march=native -fPIC -O3 -ffast-math -fno-finite-math-only"
 export CXX_FLAGS="${C_FLAGS}"
 export CUDA_FLAGS="-arch=native --use_fast_math"
 
-# Configure linker flags for the current machine. If gcc is present, the gold linker is used
-if [[ "$CC" == *"gcc"* ]] || [[ "$CXX" == *"gcc"* ]]; then
-  export EXE_LINKER_FLAGS="-fuse-ld=gold"
-fi
+# Optional linker flags for all builds. Empty by default (the compiler's default
+# linker is used). To use a faster linker, set e.g.
+#   export EXE_LINKER_FLAGS="-fuse-ld=mold"   # or -fuse-ld=lld
+export EXE_LINKER_FLAGS=""
 
 # Also, the name of the python executable may vary for your system. You can set this here
 export pythoncmd=python3

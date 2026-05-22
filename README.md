@@ -55,6 +55,8 @@ To compile and run this project, there are very few requirements which you can e
 - [Doxygen](https://www.doxygen.org/) and [graphviz](https://www.graphviz.org/download/) to build the documentation.
 
 The following requirements are optional:
+- A Fortran compiler (e.g. `gfortran`). It is *recommended* but not required: it makes deal.II's LAPACK detection robust.
+- [Boost](https://www.boost.org/) (>= 1.80). A compatible system Boost is used automatically if found; otherwise it is built from source (see [Setup](#setup) for how to control this). If the system boost is not compatible, DiFfRG will build the bundled one automatically.
 - [Python](https://www.python.org/) is used in the library for visualization purposes. Furthermore, adaptive phase diagram calculation is implemented as a python routine.
 - [ParaView](https://www.paraview.org/), a program to visualize and post-process the vtk data saved by DiFfRG when treating FEM discretizations.
 - [CUDA](https://developer.nvidia.com/cuda-toolkit) for integration routines on the GPU, which gives a huge speedup for the calculation of fully momentum dependent flow equations (10 - 100x). In case you wish to use CUDA, make sure you have a compiler available on your system compatible with your version of `nvcc`, e.g. `g++`<=13.2 for CUDA 12.5
@@ -139,12 +141,14 @@ $ bash -i  build.sh -j8 -i /opt/DiFfRG
 ```
 The `build_DiFfRG.sh` bash script will build and setup the DiFfRG project and all its requirements. This can take up to half an hour as the deal.ii library is quite large.
 This script has the following options:
+-  `-f`              Perform a full build and install of everything without confirmations.
 -  `-c`              Use CUDA when building the DiFfRG library.
 -  `-i <directory>`  Set the installation directory for the library.
 -  `-j <threads>`    Set the number of threads passed to make and git fetch.
+-  `-b <directory>`  Use the Boost installation at this prefix instead of building one.
 -  `--help`          Display this information.
 
-Depending on your amount of CPU cores, you should adjust the `-j` parameter which indicates the number of threads used in the build process. Note that choosing this too large may lead to extreme RAM usage, so tread carefully.
+Depending on your amount of CPU cores, you should adjust the `-j` parameter which indicates the number of threads used in the build process. Note that choosing this too large may lead to extreme RAM usage, so tread carefully - DiFfRG will try to auto-detect an appropriate value if `-j` is not set.
 
 As soon as the build has finished, you can find a full install of the library in the `DiFfRG_install` subdirectory.
 
@@ -159,6 +163,26 @@ The `update_DiFfRG.sh` script takes the following optional arguments:
 - `-j <threads>`     Set the number of threads passed to make and git fetch.
 - `-m`               Install the Mathematica package locally.
 - `--help`           Display this information.
+
+
+### Choosing the compiler
+
+The compiler is selected through the standard `CC`/`CXX` (and, optionally, `FC`) environment variables, which are propagated to DiFfRG and every bundled dependency:
+```bash
+$ CXX=clang++ CC=clang bash -i build.sh -j8 -i /opt/DiFfRG
+```
+You can also set these in the `config` file (see the commented `export CC=…`/`export CXX=…` lines there). Because CMake caches the compiler on the first configure, switching compilers afterwards requires a clean build tree (run `clear_all.sh`).
+
+### Boost
+
+By default a compatible system Boost (version >= 1.80) is used if one is found, otherwise Boost is built from source. To control this:
+```bash
+# Use a specific Boost prefix:
+$ bash -i build.sh -j8 -b /usr -i /opt/DiFfRG          # or: cmake -S . -B build -DBOOST_DIR=/usr ...
+# Force building the bundled, pinned Boost (ignore any system Boost):
+$ BUILD_BOOST=1 bash -i build.sh -j8 -i /opt/DiFfRG     # or: cmake ... -DBUILD_BOOST=ON
+```
+
 
 ## Getting started with simulating fRG flows
 
@@ -176,7 +200,7 @@ Several simulations are defined in the Applications directory, which can be used
 
 ## Logfiles and install issues
 
-During building and installing DiFfRG, logs are created at every step. You may find the logs for the setup of external dependencies in `external/logs` and the logs for the build of DiFfRG itself in `logs/`.
+During building and installing DiFfRG, logs are created at every step. You may find them in `logs/`; the per-dependency build logs are kept inside the build tree under `DiFfRG_build/<dependency>/src/<dependency>-stamp/`.
 
 If DiFfRG fails to build on your machine, first check the appropriate logfile. If DiFfRG proves to be incompatible with your machine, please open an Issue on GitHub [here](https://github.com/satfra/DiFfRG/issues), or alternatively send an email to the author (see the [publication](https://arxiv.org/abs/2412.13043)).
 

@@ -22,7 +22,7 @@ bool run(std::string test_name, double expected_precision)
   using namespace dealii;
   using namespace DiFfRG;
 
-  Testing::PhysicalParameters p_prm = {/*x0_initial = */ 0., /*x1_initial = */ 1.};
+  Testing::PhysicalParameters p_prm = {/*initial_x0 = */ {{0., 0., 0.}}, /*initial_x1 = */ {{1., 0., 0.}}};
 
   JSONValue json = json::value(
       {{"physical", {{"Lambda", 1.}}},

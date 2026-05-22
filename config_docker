@@ -9,7 +9,7 @@ export C_FLAGS="-fPIC" #-flto=auto"
 
 export CUDA_FLAGS="-arch=all"
 
-export EXE_LINKER_FLAGS="-fuse-ld=gold"
+export EXE_LINKER_FLAGS=""
 
 pythoncmd=python3
 

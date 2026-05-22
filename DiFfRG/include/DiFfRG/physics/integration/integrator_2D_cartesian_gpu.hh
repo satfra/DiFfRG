@@ -128,12 +128,11 @@ namespace DiFfRG
      * @param other The other Integrator2DCartesianGPU object to copy.
      */
     Integrator2DCartesianGPU(const Integrator2DCartesianGPU &other)
-        : grid_sizes(other.grid_sizes), ptr_x_quadrature_p(other.ptr_x_quadrature_p),
-          ptr_x_quadrature_w(other.ptr_x_quadrature_w), ptr_y_quadrature_p(other.ptr_y_quadrature_p),
-          ptr_y_quadrature_w(other.ptr_y_quadrature_w),
+        : grid_sizes(other.grid_sizes), device_data_size(other.device_data_size),
+          ptr_x_quadrature_p(other.ptr_x_quadrature_p), ptr_x_quadrature_w(other.ptr_x_quadrature_w),
+          ptr_y_quadrature_p(other.ptr_y_quadrature_p), ptr_y_quadrature_w(other.ptr_y_quadrature_w),
           pool(rmm::mr::get_current_device_resource(), (device_data_size / 256 + 1) * 256)
     {
-      device_data_size = other.device_data_size;
       block_sizes = other.block_sizes;
       num_blocks = other.num_blocks;
       threads_per_block = other.threads_per_block;

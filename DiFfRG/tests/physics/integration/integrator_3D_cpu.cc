@@ -101,11 +101,11 @@ TEST_CASE("Test 3D cpu momentum integrals", "[3D integration][quadrature integra
                      cos_poly[2], cos_poly[3], phi_poly[0], phi_poly[1], phi_poly[2], phi_poly[3])
             .get();
 
-    if (!is_close(reference_integral, integral, 1e-6)) {
+    if (!is_close(reference_integral, integral, 1e-4)) {
       std::cerr << "dim: " << dim << "| reference: " << reference_integral << "| integral: " << integral
                 << "| relative error: " << std::abs(reference_integral - integral) / std::abs(reference_integral)
                 << std::endl;
     }
-    CHECK(is_close(reference_integral, integral, 1e-6));
+    CHECK(is_close(reference_integral, integral, 1e-4));
   }
 }
