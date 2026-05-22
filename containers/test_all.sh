@@ -3,12 +3,14 @@
 # Build the DiFfRG library in every CPU-only container in containers/Base/ to
 # check that the build system works across distributions.
 #
-# Each image builds the local working tree (build.sh -d -f). Per-image logs are
-# written to containers/logs/<image>.log; images are removed after each build to
-# reclaim disk space. A PASS/FAIL summary is printed at the end.
+# Each image builds the local working tree (build.sh -d -f). After a successful
+# build the library test suite (run_tests.sh) is run inside the container.
+# Per-image logs are written to containers/logs/<image>.log (build) and
+# containers/logs/<image>-tests.log (tests); images are removed after each run
+# to reclaim disk space. A PASS/FAIL summary is printed at the end.
 #
 # Usage: test_all.sh [-j <threads>]
-# Expect roughly ~20 min per image (deal.II dominates), ~1.5 h for four.
+# Expect roughly ~25 min per image (deal.II dominates), ~1.5 h+ for four.
 # ##############################################################################
 
 scriptpath="$(
@@ -59,15 +61,30 @@ for image in ${images}; do
     --no-cache --progress=plain \
     --build-arg threads="${threads}" &>"logs/${image}.log"; then
     status="PASS"
-    echo "   ${image}: PASS"
+    echo "   ${image}: build PASS"
+
+    # Build succeeded: run the library test suite inside the freshly built
+    # image. The repo is copied to /DiFfRG (see Base/<image>), so run_tests.sh
+    # finds the superbuild it just produced.
+    echo "   ${image}: running tests  ($(date '+%H:%M:%S'))"
+    if docker run --rm "diffrg-test-${image}" \
+      bash /DiFfRG/run_tests.sh -j "${threads}" &>"logs/${image}-tests.log"; then
+      teststatus="PASS"
+      echo "   ${image}: tests PASS"
+    else
+      teststatus="FAIL"
+      anyfail=1
+      echo "   ${image}: tests FAIL  (see logs/${image}-tests.log)"
+    fi
   else
     status="FAIL"
+    teststatus="SKIP"
     anyfail=1
-    echo "   ${image}: FAIL  (see logs/${image}.log)"
+    echo "   ${image}: build FAIL  (see logs/${image}.log)"
   fi
-  # Reclaim space: the image is large and we only care about build success.
+  # Reclaim space: the image is large and we only care about build/test success.
   docker rmi -f "diffrg-test-${image}" &>/dev/null
-  summary="${summary}$(printf '  %-16s %s   (containers/logs/%s.log)\n' "${image}" "${status}" "${image}")"$'\n'
+  summary="${summary}$(printf '  %-16s build %-4s  tests %-4s   (containers/logs/%s.log, containers/logs/%s-tests.log)\n' "${image}" "${status}" "${teststatus}" "${image}" "${image}")"$'\n'
 done
 
 end=$(date +%s)
@@ -75,12 +92,12 @@ runtime=$((end - start))
 
 echo
 echo "###############################################################"
-echo "## DiFfRG multi-distro build summary"
+echo "## DiFfRG multi-distro build & test summary"
 echo "###############################################################"
 printf "%b" "${summary}"
 echo "  Elapsed: $((runtime / 3600))h $(((runtime / 60) % 60))m $((runtime % 60))s"
 if [[ ${anyfail} -ne 0 ]]; then
-  echo "  Some builds FAILED."
+  echo "  Some builds or tests FAILED."
   exit 1
 fi
-echo "  All builds passed."
+echo "  All builds and tests passed."

@@ -441,7 +441,11 @@ if(NOT _build_sundials)
                PATH_SUFFIXES lib lib64)
   find_library(_SUN_NVEC NAMES sundials_nvecserial HINTS ${_sun_hint}
                PATH_SUFFIXES lib lib64)
-  find_path(_SUN_INC sundials/sundials_version.h HINTS ${_sun_hint}
+  # The version macros live in sundials_config.h on most installs
+  # (sundials_version.h only declares the runtime accessors and #includes the
+  # config -- e.g. on Fedora it carries no macros), so locate the config header
+  # and read whichever of the two actually defines SUNDIALS_VERSION_MAJOR.
+  find_path(_SUN_INC sundials/sundials_config.h HINTS ${_sun_hint}
             PATH_SUFFIXES include)
 
   set(_sun_ok FALSE)
@@ -450,18 +454,29 @@ if(NOT _build_sundials)
      AND _SUN_KINSOL
      AND _SUN_NVEC
      AND _SUN_INC)
-    file(STRINGS "${_SUN_INC}/sundials/sundials_version.h" _sun_mj
-         REGEX "#define SUNDIALS_VERSION_MAJOR")
-    file(STRINGS "${_SUN_INC}/sundials/sundials_version.h" _sun_mn
-         REGEX "#define SUNDIALS_VERSION_MINOR")
-    file(STRINGS "${_SUN_INC}/sundials/sundials_version.h" _sun_pt
-         REGEX "#define SUNDIALS_VERSION_PATCH")
-    string(REGEX REPLACE "^.*MAJOR[ \t]+([0-9]+).*" "\\1" _sun_mj "${_sun_mj}")
-    string(REGEX REPLACE "^.*MINOR[ \t]+([0-9]+).*" "\\1" _sun_mn "${_sun_mn}")
-    string(REGEX REPLACE "^.*PATCH[ \t]+([0-9]+).*" "\\1" _sun_pt "${_sun_pt}")
-    set(_sun_ver "${_sun_mj}.${_sun_mn}.${_sun_pt}")
-    if(NOT _sun_ver VERSION_LESS 5.4.0)
-      set(_sun_ok TRUE)
+    set(_sun_verhdr "")
+    foreach(_h sundials/sundials_config.h sundials/sundials_version.h)
+      if(EXISTS "${_SUN_INC}/${_h}")
+        file(STRINGS "${_SUN_INC}/${_h}" _sun_probe
+             REGEX "#define[ \t]+SUNDIALS_VERSION_MAJOR")
+        if(_sun_probe)
+          set(_sun_verhdr "${_SUN_INC}/${_h}")
+          break()
+        endif()
+      endif()
+    endforeach()
+    if(_sun_verhdr)
+      file(STRINGS "${_sun_verhdr}" _sun_mj REGEX "#define[ \t]+SUNDIALS_VERSION_MAJOR")
+      file(STRINGS "${_sun_verhdr}" _sun_mn REGEX "#define[ \t]+SUNDIALS_VERSION_MINOR")
+      file(STRINGS "${_sun_verhdr}" _sun_pt REGEX "#define[ \t]+SUNDIALS_VERSION_PATCH")
+      string(REGEX REPLACE "^.*MAJOR[ \t]+([0-9]+).*" "\\1" _sun_mj "${_sun_mj}")
+      string(REGEX REPLACE "^.*MINOR[ \t]+([0-9]+).*" "\\1" _sun_mn "${_sun_mn}")
+      string(REGEX REPLACE "^.*PATCH[ \t]+([0-9]+).*" "\\1" _sun_pt "${_sun_pt}")
+      set(_sun_ver "${_sun_mj}.${_sun_mn}.${_sun_pt}")
+      if(_sun_ver MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+         AND NOT _sun_ver VERSION_LESS 5.4.0)
+        set(_sun_ok TRUE)
+      endif()
     endif()
   endif()
 

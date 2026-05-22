@@ -15,4 +15,4 @@ RUN dnf -y install \
 WORKDIR /DiFfRG
 COPY . /DiFfRG
 
-RUN bash build.sh -d -f -j ${threads} -i /opt/DiFfRG
+RUN bash build.sh -d -f -j ${threads}

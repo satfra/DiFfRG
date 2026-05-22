@@ -3,7 +3,8 @@
 # Interactively build a single DiFfRG build-test container from containers/Base/.
 #
 # Usage: build-container.sh [-j <threads>]
-# The image builds the local working tree (via build.sh -d -f) into /opt/DiFfRG.
+# The image builds the local working tree (via build.sh -d -f) and installs to
+# the default location (~/.local/share/DiFfRG).
 # ##############################################################################
 
 scriptpath="$(

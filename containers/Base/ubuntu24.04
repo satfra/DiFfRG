@@ -18,5 +18,6 @@ RUN apt-get -y update && apt-get -y install --no-install-recommends \
 WORKDIR /DiFfRG
 COPY . /DiFfRG
 
-# Full, non-interactive build with the portable docker config (-d) into /opt/DiFfRG.
-RUN bash build.sh -d -f -j ${threads} -i /opt/DiFfRG
+# Full, non-interactive build with the portable docker config (-d); installs to
+# the default location (~/.local/share/DiFfRG).
+RUN bash build.sh -d -f -j ${threads}
