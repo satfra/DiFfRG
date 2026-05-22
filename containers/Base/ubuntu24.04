@@ -1,0 +1,22 @@
+# DiFfRG build test on Ubuntu 24.04 (CPU-only).
+# Build from the repository root as context, e.g. via containers/test_all.sh:
+#   docker buildx build -t diffrg-test-ubuntu24.04 -f containers/Base/ubuntu24.04 .
+FROM ubuntu:24.04
+LABEL type=diffrg-build-test
+
+ARG threads=4
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Build dependencies (cmake 3.28, gcc 13 -> C++20). gfortran is recommended for
+# deal.II's LAPACK detection; doxygen+graphviz for the documentation.
+RUN apt-get -y update && apt-get -y install --no-install-recommends \
+        git cmake build-essential gfortran \
+        libopenblas-dev libgsl-dev \
+        doxygen graphviz python3 patch ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /DiFfRG
+COPY . /DiFfRG
+
+# Full, non-interactive build with the portable docker config (-d) into /opt/DiFfRG.
+RUN bash build.sh -d -f -j ${threads} -i /opt/DiFfRG

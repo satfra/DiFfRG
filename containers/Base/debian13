@@ -1,0 +1,19 @@
+# DiFfRG build test on Debian 13 (trixie, CPU-only).
+# Build from the repository root as context.
+FROM debian:trixie
+LABEL type=diffrg-build-test
+
+ARG threads=4
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Build dependencies (cmake 3.31, gcc 14 -> C++20).
+RUN apt-get -y update && apt-get -y install --no-install-recommends \
+        git cmake build-essential gfortran \
+        libopenblas-dev libgsl-dev \
+        doxygen graphviz python3 patch ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /DiFfRG
+COPY . /DiFfRG
+
+RUN bash build.sh -d -f -j ${threads} -i /opt/DiFfRG

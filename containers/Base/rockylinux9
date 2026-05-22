@@ -1,0 +1,24 @@
+# DiFfRG build test on Rocky Linux 9 (CPU-only).
+# Build from the repository root as context.
+FROM rockylinux:9
+LABEL type=diffrg-build-test
+
+ARG threads=4
+
+# Rocky 9's default GCC (11) lacks full C++20; use gcc-toolset-12. openblas-devel
+# lives in the (disabled-by-default) devel repo. cmake from AppStream is >= 3.26.
+RUN dnf -y --enablerepo=devel install \
+        gcc-toolset-12 cmake git \
+        openblas-devel gsl-devel \
+        doxygen graphviz python3 patch which \
+    && dnf clean all
+
+# Make gcc-toolset-12 the active toolchain for non-interactive bash (build.sh),
+# so its GCC 12 is on PATH for the whole build.
+RUN echo "source /opt/rh/gcc-toolset-12/enable" > /.bashenv
+ENV BASH_ENV=/.bashenv
+
+WORKDIR /DiFfRG
+COPY . /DiFfRG
+
+RUN bash build.sh -d -f -j ${threads} -i /opt/DiFfRG

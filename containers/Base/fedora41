@@ -1,0 +1,18 @@
+# DiFfRG build test on Fedora 41 (CPU-only).
+# Build from the repository root as context.
+FROM fedora:41
+LABEL type=diffrg-build-test
+
+ARG threads=4
+
+# Build dependencies (cmake 3.30, gcc 14 -> C++20).
+RUN dnf -y install \
+        git cmake gcc gcc-c++ gcc-gfortran make \
+        openblas-devel gsl-devel \
+        doxygen graphviz python3 patch which \
+    && dnf clean all
+
+WORKDIR /DiFfRG
+COPY . /DiFfRG
+
+RUN bash build.sh -d -f -j ${threads} -i /opt/DiFfRG

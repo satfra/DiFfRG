@@ -1,0 +1,22 @@
+# Keep the Docker build context small: the container builds the source tree via
+# build.sh, so exclude build trees, logs, VCS data and other large/irrelevant data.
+DiFfRG_build/
+DiFfRG_install/
+**/build/
+logs/
+containers/logs/
+.git/
+.github/
+*.log
+compile_commands.json
+Documentation.html
+.cache/
+.vscode/
+.idea/
+**/.DS_Store
+
+# Not needed to build+install the DiFfRG library (only the example/tutorial
+# sources live here, and they are large). The container build runs build.sh,
+# which builds the library + deps; examples are out of scope for the build test.
+Examples/
+Tutorials/
