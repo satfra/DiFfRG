@@ -450,10 +450,23 @@ if(NOT _build_sundials)
 
   set(_sun_ok FALSE)
   set(_sun_ver "")
+  set(_sun_mpi OFF)
   if(_SUN_ARKODE
      AND _SUN_KINSOL
      AND _SUN_NVEC
      AND _SUN_INC)
+    # DiFfRG builds deal.II without MPI (DEAL_II_WITH_MPI=OFF below). A SUNDIALS
+    # built with MPI has SUNDIALS_MPI_ENABLED=1 in sundials_config.h, which makes
+    # sundials_types.h #include <mpi.h> and define MPI_Comm as a real pointer type.
+    # That collides with deal.II's mpi_stub.h (MPI_Comm = int), so such a system
+    # SUNDIALS is unusable here -- detect it and fall back to the bundled build.
+    if(EXISTS "${_SUN_INC}/sundials/sundials_config.h")
+      file(STRINGS "${_SUN_INC}/sundials/sundials_config.h" _sun_mpi_probe
+           REGEX "#define[ \t]+SUNDIALS_MPI_ENABLED[ \t]+1")
+      if(_sun_mpi_probe)
+        set(_sun_mpi ON)
+      endif()
+    endif()
     set(_sun_verhdr "")
     foreach(_h sundials/sundials_config.h sundials/sundials_version.h)
       if(EXISTS "${_SUN_INC}/${_h}")
@@ -480,7 +493,25 @@ if(NOT _build_sundials)
     endif()
   endif()
 
-  if(_sun_ok)
+  if(_sun_ok AND _sun_mpi)
+    # Usable version, but built with MPI -> incompatible with our MPI-less deal.II.
+    if(_sun_explicit)
+      message(
+        FATAL_ERROR
+          "SUNDIALS_DIR=${SUNDIALS_DIR} provides SUNDIALS ${_sun_ver} built WITH MPI "
+          "(SUNDIALS_MPI_ENABLED=1), which is incompatible with DiFfRG's MPI-less "
+          "deal.II (DEAL_II_WITH_MPI=OFF): the conflicting MPI_Comm definitions break "
+          "the deal.II build. Use -DBUILD_SUNDIALS=ON to build the bundled MPI-less "
+          "SUNDIALS, or point -DSUNDIALS_DIR at a SUNDIALS built without MPI.")
+    else()
+      set(_build_sundials ON)
+      message(
+        STATUS
+          "[3/5] System SUNDIALS ${_sun_ver} (${_SUN_INC}) was built with MPI "
+          "(SUNDIALS_MPI_ENABLED=1); incompatible with DiFfRG's MPI-less deal.II. "
+          "Building the bundled SUNDIALS instead.")
+    endif()
+  elseif(_sun_ok)
     if(_sun_explicit)
       set(SUNDIALS_PREFIX "${SUNDIALS_DIR}")
     endif() # system-in-standard-paths: leave empty, deal.II finds it unhinted
