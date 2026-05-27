@@ -129,24 +129,4 @@ public:
     out_file.value("m_{pi} [GeV]", mPi);
     out_file.value("m_{sigma} [GeV]", mSigma);
   }
-
-  template <int dim, typename Constraints>
-  void affine_constraints(Constraints &constraints, const std::vector<IndexSet> &component_boundary_dofs,
-                          const std::vector<std::vector<Point<dim>>> &component_boundary_points)
-  {
-    constexpr double value = 0.;
-
-    std::cout << "Adding constraints" << std::endl;
-    std::cout << "Size1 : " << component_boundary_dofs.size() << " Size2: " << component_boundary_points.size() << std::endl;
-    for (uint p = 0; p < component_boundary_points[idxf("u")].size(); ++p) {
-      std::cout << "Constraint size: " << component_boundary_dofs[idxf("u")].n_elements() << std::endl;
-      if (is_close(component_boundary_points[idxf("u")][p][0], 0.)) {
-        std::cout << "Constraint size: " << component_boundary_dofs[idxf("u")].n_elements() << std::endl;
-        std::cout << "Adding constraint at DoF " << component_boundary_dofs[idxf("u")].nth_index_in_set(p)
-                  << " for u" << std::endl;
-        constraints.add_constraint(component_boundary_dofs[idxf("u")].nth_index_in_set(p), {}, value);
-      }
-    }
-  }
-
 };
