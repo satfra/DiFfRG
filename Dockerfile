@@ -16,7 +16,7 @@ RUN dnf --enablerepo=devel install -y gcc-toolset-12 cmake git openblas-devel do
 RUN git reset --hard
 SHELL [ "/usr/bin/scl", "enable", "gcc-toolset-12"]
 RUN bash -i build.sh -j $threads -d -f $cuda -i DiFfRG_install &>build.log
-RUN ln -s /DiFfRG/DiFfRG_install /opt/DiFfRG
+RUN mkdir -p ${HOME}/.local/share && ln -s /DiFfRG/DiFfRG_install ${HOME}/.local/share/DiFfRG
 
 # run the command
 CMD ["scl", "enable", "gcc-toolset-12", "bash"]

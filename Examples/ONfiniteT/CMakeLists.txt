@@ -7,7 +7,7 @@ project(ONfiniteT LANGUAGES CXX)
 # ##############################################################################
 
 if(NOT DEFINED DiFfRG_DIR)
-  set(DiFfRG_DIR /opt/DiFfRG)
+  set(DiFfRG_DIR $ENV{HOME}/.local/share/DiFfRG)
 endif()
 find_package(DiFfRG REQUIRED HINTS ${DiFfRG_DIR})
 

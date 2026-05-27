@@ -35,9 +35,9 @@ project(tut1)
 ```
 In the above, we first request a minimum version of `CMake` and then declare our project.
 ```CMake
-find_package(DiFfRG REQUIRED HINTS /opt/DiFfRG)
+find_package(DiFfRG REQUIRED HINTS $ENV{HOME}/.local/share/DiFfRG)
 ```
-Afterwards, we request `CMake` to find the `DiFfRG` package. We set the default install path here, which is `/opt/DiFfRG`, but depending on where you installed `DiFfRG`, you will have to change this.
+Afterwards, we request `CMake` to find the `DiFfRG` package. We set the default install path here, which is `~/.local/share/DiFfRG`, but depending on where you installed `DiFfRG`, you will have to change this.
 ```
 add_executable(tut1 tut1.cc)
 setup_application(tut1)

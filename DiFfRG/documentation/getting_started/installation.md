@@ -94,7 +94,7 @@ $ git clone https://github.com/satfra/DiFfRG.git
 and start the build after switching to the git directory.
 ```bash
 $ cd DiFfRG
-$ bash -i  build.sh -j8 -i /opt/DiFfRG
+$ bash -i  build.sh -j8 -i ~/.local/share/DiFfRG
 ```
 The `build.sh` bash script will build and setup the DiFfRG project and all its requirements. This can take up to half an hour as the deal.ii library is quite large.
 This script has the following options:
@@ -109,11 +109,11 @@ This script has the following options:
 
 Depending on your amount of CPU cores, you should adjust the `-j` parameter which indicates the number of threads used in the build process. Note that choosing this too large may lead to extreme RAM usage, so tread carefully - DiFfRG will try to auto-detect an appropriate value if `-j` is not set.
 
-As soon as the build has finished, you can find a full install of the library in the directory passed to `-i` (here `/opt/DiFfRG`); the default is `~/.local/share/DiFfRG`.
+As soon as the build has finished, you can find a full install of the library in the directory passed to `-i`; the default is `~/.local/share/DiFfRG`.
 
 If you have changes to the library code, you can update the library by running
 ```bash
-$ bash -i update_DiFfRG.sh -c -j8 -i /opt/DiFfRG
+$ bash -i update_DiFfRG.sh -c -j8 -i ~/.local/share/DiFfRG
 ```
 where once again the `-j` parameter should be adjusted to your amount of CPU cores.
 The `update_DiFfRG.sh` script takes the following optional arguments:
@@ -127,7 +127,7 @@ The `update_DiFfRG.sh` script takes the following optional arguments:
 
 The compiler is selected through the standard `CC`/`CXX` (and, optionally, `FC`) environment variables, which are propagated to DiFfRG and every bundled dependency:
 ```bash
-$ CXX=clang++ CC=clang bash -i build.sh -j8 -i /opt/DiFfRG
+$ CXX=clang++ CC=clang bash -i build.sh -j8 -i ~/.local/share/DiFfRG
 ```
 You can also set these in the `config` file (see the commented `export CC=…`/`export CXX=…` lines there). Because CMake caches the compiler on the first configure, switching compilers afterwards requires a clean build tree (run `clear_all.sh`).
 
@@ -141,10 +141,10 @@ By default a compatible system copy of each is used if found, otherwise it is bu
 Each can be controlled independently, e.g.:
 ```bash
 # Use a specific prefix for one or more dependencies:
-$ bash -i build.sh -j8 -b /usr -t /usr -s /opt/sundials -i /opt/DiFfRG
+$ bash -i build.sh -j8 -b /usr -t /usr -s /opt/sundials -i ~/.local/share/DiFfRG
 #   (equivalently: cmake ... -DBOOST_DIR=/usr -DTBB_DIR=/usr -DSUNDIALS_DIR=/opt/sundials)
 # Force building a bundled, pinned dependency (ignore any system copy):
-$ BUILD_BOOST=1 BUILD_TBB=1 BUILD_SUNDIALS=1 bash -i build.sh -j8 -i /opt/DiFfRG
+$ BUILD_BOOST=1 BUILD_TBB=1 BUILD_SUNDIALS=1 bash -i build.sh -j8 -i ~/.local/share/DiFfRG
 #   (equivalently: cmake ... -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_SUNDIALS=ON)
 ```
 Note on Boost: deal.II uses the legacy module-mode `FindBoost`, which needs *compiled* Boost component

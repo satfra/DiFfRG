@@ -8,7 +8,7 @@ The DiFfRG python package is a collection of tools for the analysis of results f
 To install the DiFfRG python package, you can either use the wheel file provided with a local DiFfRG build:
 
 ```shell
-pip install /opt/DiFfRG/python/dist/DiFfRG-1.0.0-py3-none-any.whl
+pip install ~/.local/share/DiFfRG/python/dist/DiFfRG-1.0.0-py3-none-any.whl
 ```
 
 or you can download the wheel file from the DiFfRG repository and install it:
