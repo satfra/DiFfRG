@@ -1,0 +1,72 @@
+DiFfRG -- additional permissions under GNU GPL version 3 section 7
+==================================================================
+
+DiFfRG is distributed under the GNU General Public License version 3 or later;
+see the LICENSE file for the full text. The following additional permission is
+granted by the DiFfRG copyright holders under section 7 of that licence.
+
+
+ADDITIONAL PERMISSION -- NVIDIA CUDA
+------------------------------------
+
+  Additional permission under GNU GPL version 3 section 7
+
+  If you modify this Program, or any covered work, by linking or combining it
+  with the NVIDIA CUDA Toolkit, the NVIDIA CUDA runtime and driver libraries,
+  the NVIDIA CUDA Core Compute Libraries (CCCL, comprising Thrust, CUB and
+  libcu++), and/or the NVIDIA math libraries distributed with the CUDA Toolkit
+  (including but not limited to cuBLAS, cuSOLVER, cuSPARSE, cuRAND and cuFFT),
+  or with modified versions of those libraries, the licensors of this Program
+  grant you additional permission to convey the resulting work.
+
+  Corresponding Source for a non-source form of such a combination shall
+  include the source code for the parts of the NVIDIA libraries used as well as
+  that of the covered work.
+
+
+NOTES (NON-NORMATIVE)
+---------------------
+
+The following notes explain the scope and intent of the permission above. They
+are explanatory only and grant nothing in themselves.
+
+1. WHY THIS EXISTS. DiFfRG can optionally be built with a CUDA backend
+   (-DUSE_CUDA=ON; OFF by default). Such a build links against the proprietary
+   NVIDIA CUDA runtime. The GPL's "System Libraries" exception (GPLv3 section 1)
+   is generally understood to cover the CUDA runtime, since it ships as part of
+   the normal packaging of the CUDA Toolkit, which also provides the nvcc
+   compiler used to produce the work. That argument is widely relied upon by
+   other GPL-licensed scientific codes with CUDA backends, but it has never been
+   tested in court. This permission removes the need to rely on it as far as
+   DiFfRG's own code is concerned.
+
+2. WHAT IT DOES NOT COVER. The DiFfRG copyright holders can only grant
+   additional permissions for code they hold copyright in. DiFfRG also links
+   third-party GPL and LGPL libraries whose copyright is held by others --
+   most importantly GSL (GPL-3.0-or-later), and deal.II (LGPL-2.1-or-later).
+   This permission does not, and cannot, extend to those. Anyone distributing a
+   CUDA-enabled *binary* of DiFfRG therefore still relies on the System
+   Libraries exception with respect to GSL. Note that this exception is part of
+   the GPL itself rather than something a licensor grants, so it applies to GSL
+   on the same terms as to DiFfRG.
+
+   This does not affect distribution of DiFfRG in source form, which is how it
+   is published: GPL obligations attach to conveying a work, and building
+   privately for one's own use is not conveying.
+
+3. CCCL AND THE NVIDIA SOFTWARE LICENSE. CCCL is predominantly licensed under
+   Apache-2.0 with LLVM Exception, with CUB under BSD-3-Clause and portions of
+   Thrust under BSL-1.0 and a FreeBSD licence -- all compatible with the GPL. A
+   small number of libcu++ headers are instead covered by a proprietary NVIDIA
+   Software License, whose terms are not GPL-compatible. In CCCL v2.7.0 (the
+   version DiFfRG pins) these are exactly four files:
+
+       libcudacxx/include/cuda/pipeline
+       libcudacxx/include/cuda/annotated_ptr
+       libcudacxx/include/cuda/std/detail/__annotated_ptr
+       libcudacxx/include/cuda/std/detail/__access_property
+
+   DiFfRG does not use any of them, and none is reachable from the CCCL headers
+   it does include. See the CCCL entry in third_party.txt for the verification.
+   The permission above nonetheless names CCCL, so that the position does not
+   depend on that continuing to hold.

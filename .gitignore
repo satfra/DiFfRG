@@ -276,3 +276,7 @@ TSWLatexianTemp*
 # standalone packages
 *.sta
 *.DS_STORE
+
+# Third-party header fetched at configure time (see DiFfRG/cmake/setup_build_system.cmake).
+# qmc publishes no licence upstream, so it is not redistributed with DiFfRG.
+DiFfRG/include/qmc/

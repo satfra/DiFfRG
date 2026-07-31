@@ -170,6 +170,84 @@ else()
   message(STATUS "GSL found: ${GSL_INCLUDE_DIR}")
 endif()
 
+# Fetch qmc (the Quasi-Monte-Carlo integrator by Borowka et al.,
+# https://github.com/mppmu/qmc, arXiv:1811.11720).
+#
+# qmc is NOT redistributed with DiFfRG: upstream publishes no licence, so we
+# have no right to ship a copy. Instead the official single-header release
+# asset is deposited into the source tree at configure time, which keeps the
+# `#include <qmc/qmc.hpp>` paths and the include/ install rule unchanged.
+# The file is listed in .gitignore.
+#
+# Note that qmc itself includes <gsl/gsl_multifit_nlinear.h>, hence the
+# placement directly after the GSL block above.
+set(QMC_VERSION "v1.2.0")
+set(QMC_SHA256
+    "909300dd2484c7e7e76b7b0c1589eeee8d911a0e733f15ed643147d566266537")
+set(QMC_HEADER "${BASE_DIR}/include/qmc/qmc.hpp")
+
+set(QMC_URL
+    "https://github.com/mppmu/qmc/releases/download/${QMC_VERSION}/qmc.hpp")
+
+if(EXISTS "${QMC_HEADER}")
+  message(STATUS "qmc header found: ${QMC_HEADER}")
+else()
+  message(STATUS "Downloading qmc ${QMC_VERSION} to ${QMC_HEADER}")
+
+  # Download to a temporary file and only move it into place once it has been
+  # verified, so that an interrupted or failed download can never leave a
+  # corrupt header behind for the next configure run to pick up. (Note that
+  # file(DOWNLOAD ... EXPECTED_HASH) is unsuitable here: it raises its own
+  # fatal error before we get a chance to clean up, and a failed HTTP request
+  # leaves the response body sitting at the destination path.)
+  set(_qmc_tmp "${QMC_HEADER}.tmp")
+  file(DOWNLOAD "${QMC_URL}" "${_qmc_tmp}" TLS_VERIFY ON STATUS _qmc_status)
+  list(GET _qmc_status 0 _qmc_error)
+  list(GET _qmc_status 1 _qmc_message)
+
+  if(_qmc_error)
+    file(REMOVE "${_qmc_tmp}")
+    message(
+      FATAL_ERROR
+        "\n"
+        "======================================================================\n"
+        "  Failed to download the qmc integrator header.\n"
+        "======================================================================\n"
+        "  Reason: ${_qmc_message}\n"
+        "  URL:    ${QMC_URL}\n"
+        "\n"
+        "  DiFfRG does not ship qmc, because upstream publishes no licence;\n"
+        "  it is downloaded at configure time instead.\n"
+        "\n"
+        "  If this machine has no network access, fetch that file elsewhere and\n"
+        "  place it at:\n"
+        "    ${QMC_HEADER}\n"
+        "======================================================================\n"
+    )
+  endif()
+
+  file(SHA256 "${_qmc_tmp}" _qmc_actual_sha256)
+  if(NOT _qmc_actual_sha256 STREQUAL QMC_SHA256)
+    file(REMOVE "${_qmc_tmp}")
+    message(
+      FATAL_ERROR
+        "\n"
+        "======================================================================\n"
+        "  Checksum mismatch for the downloaded qmc integrator header.\n"
+        "======================================================================\n"
+        "  URL:      ${QMC_URL}\n"
+        "  expected: ${QMC_SHA256}\n"
+        "  actual:   ${_qmc_actual_sha256}\n"
+        "\n"
+        "  The download was discarded. This usually means the release asset\n"
+        "  changed upstream or the transfer was tampered with.\n"
+        "======================================================================\n"
+    )
+  endif()
+
+  file(RENAME "${_qmc_tmp}" "${QMC_HEADER}")
+endif()
+
 # Find rapidcsv
 cpmaddpackage(
   NAME

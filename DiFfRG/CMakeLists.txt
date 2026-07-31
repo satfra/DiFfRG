@@ -123,8 +123,17 @@ message(STATUS "deal.II source directory: ${CPM_PACKAGE_deal.II_SOURCE_DIR}")
 
 message(STATUS "packages: ${CPM_PACKAGES};deal.II;sundials;boost")
 
+# NOTE: ../third_party.txt is maintained BY HAND and must not be overwritten by
+# this target. CPMLicenses can only see packages registered through CPM at
+# generation time, so it silently omits everything resolved via find_package()
+# or ExternalProject_Add() -- most importantly GSL, which is what makes DiFfRG a
+# GPL work, but also Eigen, oneTBB, Catch2 and the third-party code shipped in
+# the source tree (CPM.cmake, doxygen-awesome-css). Its output is therefore
+# written to the build directory and kept only as a cross-check: run
+# `make write-licenses` and diff it against ../third_party.txt when adding or
+# updating a CPM dependency.
 cpm_licenses_create_disclaimer_target(
-  write-licenses "${CMAKE_CURRENT_SOURCE_DIR}/../third_party.txt"
+  write-licenses "${CMAKE_CURRENT_BINARY_DIR}/third_party_generated.txt"
   "${CPM_PACKAGES};deal.II;sundials;boost")
 
 # ##############################################################################
