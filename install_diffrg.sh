@@ -9,6 +9,8 @@
 #   bash install_diffrg.sh
 #
 # A wizard that walks through the typical choices:
+#   - which DiFfRG to install: a release (>= v1.10.0) or main; the pre-built
+#     bundle is the newest one built from the same dependency inputs,
 #   - pre-built dependency bundle (fast; Linux x86_64 with AVX2) or full
 #     self-build of the dependency superbuild,
 #   - install prefix and temporary build folder,
@@ -17,10 +19,13 @@
 #   - optional copy of the Examples/Tutorials and documentation sources.
 #
 # Every question can instead be answered with a flag for non-interactive use:
+#   --ref vX.Y.Z|main          DiFfRG release (>= v1.10.0) or main to install
+#                              (default: newest release)
 #   --mode prebuilt|source     installation mode
 #   --prefix DIR               install prefix        (default ~/.local/share/DiFfRG)
 #   --build-dir DIR            temporary build dir   (default /tmp/diffrg-build)
-#   --deps-version X.Y.Z       prebuilt bundle version (default: latest)
+#   --deps-version X.Y.Z       prebuilt bundle version (default: the newest one
+#                              built from the same dependency inputs as --ref)
 #   --deps-variant NAME        prebuilt bundle variant (default: platform CPU
 #                              bundle; wizard offers the CUDA one when a GPU is found)
 #   --deps-file TARBALL        prebuilt: install from a local bundle tarball
@@ -51,10 +56,13 @@ Walks through the typical choices (pre-built dependency bundle or full
 self-build, install prefix, build folder, features, examples) and performs the
 complete installation. Flags for non-interactive use:
 
+  --ref vX.Y.Z|main          DiFfRG release (>= v1.10.0) or main to install
+                             (default: newest release)
   --mode prebuilt|source     installation mode
   --prefix DIR               install prefix        (default ~/.local/share/DiFfRG)
   --build-dir DIR            temporary build dir   (default /tmp/diffrg-build)
-  --deps-version X.Y.Z       prebuilt bundle version (default: latest)
+  --deps-version X.Y.Z       prebuilt bundle version (default: the newest one
+                             built from the same dependency inputs as --ref)
   --deps-variant NAME        prebuilt bundle variant (default: platform CPU bundle)
   --deps-file TARBALL        prebuilt: install from a local bundle tarball
   --threads N                build threads         (default 6)
@@ -75,6 +83,8 @@ EOF
 
 REPO_URL="${DIFFRG_REPO_URL:-https://github.com/satfra/DiFfRG.git}"
 REPO_API="https://api.github.com/repos/satfra/DiFfRG"
+# Oldest release the installer offers.
+MIN_RELEASE=1.10.0
 DOCS_URL="https://satfra.github.io/DiFfRG"
 
 err() {
@@ -106,6 +116,7 @@ reset_stale_build() {
 }
 
 # ------------------------------------------------------------------ defaults --
+ref=''
 mode=''
 prefix="${FOLDER:-$HOME/.local/share/DiFfRG}"
 build_dir="/tmp/diffrg-build"
@@ -128,6 +139,10 @@ force=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+  --ref)
+    ref="$2"
+    shift 2
+    ;;
   --mode)
     mode="$2"
     shift 2
@@ -430,6 +445,47 @@ kokkos_arch_of() {
   esac
 }
 
+# ------------------------------------------------------------------- releases --
+# Release tags vX.Y.Z >= v${MIN_RELEASE}, newest first; empty when offline.
+list_releases() {
+  local v
+  git ls-remote --tags --refs "${REPO_URL}" 2>/dev/null |
+    grep -oE 'refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's|refs/tags/v||' | sort -r -V |
+    while IFS= read -r v; do
+      [[ "$(printf '%s\n' "${MIN_RELEASE}" "${v}" | sort -V | head -1)" == "${MIN_RELEASE}" ]] &&
+        echo "v${v}"
+    done
+}
+
+# ------------------------------------------------------------------- bundles --
+# A bundle fits a DiFfRG revision when both were built from the same dependency
+# inputs: the hash of deps-inputs-hash.sh at that revision equals the
+# deps_inputs_hash in the bundle's manifest. This is what CI checks, too.
+
+# Dependency-inputs hash of <ref> for <variant>, from a sparse, blobless clone
+# of just the hashed paths (a few seconds); empty on failure.
+ref_inputs_hash() {
+  local tmp hash=''
+  tmp="$(mktemp -d)"
+  if git -c advice.detachedHead=false clone -q --depth 1 --branch "$1" --filter=blob:none \
+    --no-checkout "${REPO_URL}" "${tmp}" 2>/dev/null &&
+    git -C "${tmp}" sparse-checkout set --no-cone /superbuild.cmake /dependencies/ /patches/ /containers/release/ &&
+    git -C "${tmp}" checkout -q 2>/dev/null; then
+    hash="$(bash "${tmp}/containers/release/deps-inputs-hash.sh" "$2" "${tmp}" 2>/dev/null || true)"
+  fi
+  rm -rf "${tmp}"
+  echo "${hash}"
+}
+
+# deps_inputs_hash of bundle <version> <variant>. BUNDLE_MANIFEST.json is the
+# tarball's second entry, so the first 256 KB of the download contain it.
+bundle_inputs_hash() {
+  local name="diffrg-deps-$1-$2"
+  curl -fsSL -r 0-262143 "https://github.com/satfra/DiFfRG/releases/download/deps-v$1/${name}.tar.zst" 2>/dev/null |
+    tar --zstd -xOf - "${name}/BUNDLE_MANIFEST.json" 2>/dev/null |
+    grep -oE '"deps_inputs_hash": *"[^"]*"' | sed -E 's/.*: *"([^"]*)"/\1/' || true
+}
+
 # ------------------------------------------------------------------ preflight --
 for tool in git cmake curl tar make; do
   command -v "${tool}" >/dev/null || err "'${tool}' is required but not installed."
@@ -455,6 +511,22 @@ echo "   DiFfRG installer"
 echo "  ============================================="
 
 # --------------------------------------------------------------------- wizard --
+mapfile -t releases < <(list_releases)
+if [[ -z ${ref} ]]; then
+  if [[ ${#releases[@]} -eq 0 ]]; then
+    warn "Could not list DiFfRG releases; installing main."
+    ref=main
+  else
+    choose _c "Which DiFfRG version?" \
+      "${releases[@]/%/ -- release}" \
+      "main -- latest development version"
+    if [[ ${_c} -lt ${#releases[@]} ]]; then ref="${releases[${_c}]}"; else ref=main; fi
+  fi
+elif [[ ${ref} != main && ${#releases[@]} -gt 0 && " ${releases[*]} " != *" ${ref} "* ]]; then
+  err "--ref must be main or one of: ${releases[*]}"
+fi
+info "Installing DiFfRG ${ref}"
+
 if [[ -z ${mode} ]]; then
   if [[ ${prebuilt_ok} -eq 1 ]]; then
     choose _c "How should DiFfRG's dependencies be installed?" \
@@ -508,20 +580,39 @@ if [[ ${mode} == prebuilt && -z ${deps_file} && ${deps_variant} != *-openmpi && 
   fi
 fi
 
-if [[ ${mode} == prebuilt && -z ${deps_version} && -z ${deps_file} ]]; then
-  info "Fetching available dependency bundles..."
+# Use the newest bundle built from the same dependency inputs as ${ref}. A
+# release without one is an error; main falls back to the newest bundle, since
+# its inputs may have moved ahead of the published bundles.
+if [[ ${mode} == prebuilt && -z ${deps_file} && -z ${deps_version} ]]; then
+  bundle_variant="${deps_variant}"
+  if [[ -z ${bundle_variant} ]]; then
+    [[ "$(uname -s)" == Darwin ]] && bundle_variant=macos-arm64-cpu || bundle_variant=linux-x86_64-v3-cpu
+  fi
+  [[ ${opt_mpi} -eq 1 && ${bundle_variant} != *-openmpi ]] && bundle_variant="${bundle_variant}-openmpi"
+
+  info "Looking for a dependency bundle matching ${ref} (${bundle_variant})..."
   mapfile -t versions < <(curl -fsSL "${REPO_API}/releases?per_page=100" 2>/dev/null |
     grep -oE '"tag_name": *"deps-v[0-9]+\.[0-9]+\.[0-9]+"' |
-    grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -rV | head -5)
-  if [[ ${#versions[@]} -eq 0 ]]; then
+    grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -rV || true)
+  [[ ${#versions[@]} -gt 0 ]] ||
     err "No dependency bundle releases found -- re-run with --mode source, or check your network."
-  elif [[ ${#versions[@]} -eq 1 || ${interactive} -eq 0 ]]; then
-    deps_version="${versions[0]}"
-  else
-    choose _c "Which dependency bundle version?" "${versions[@]/#/deps-v}"
-    deps_version="${versions[${_c}]}"
+  want_hash="$(ref_inputs_hash "${ref}" "${bundle_variant}")"
+  if [[ -n ${want_hash} ]]; then
+    for v in "${versions[@]}"; do
+      [[ "$(bundle_inputs_hash "${v}" "${bundle_variant}")" == "${want_hash}" ]] && {
+        deps_version="${v}"
+        break
+      }
+    done
   fi
-  info "Using dependency bundle deps-v${deps_version}"
+  if [[ -n ${deps_version} ]]; then
+    info "Using dependency bundle deps-v${deps_version} (built from ${ref}'s dependency inputs)"
+  elif [[ ${ref} == main ]]; then
+    deps_version="${versions[0]}"
+    warn "No published bundle matches main's dependency inputs; using the newest, deps-v${deps_version}. If the library build fails, use --mode source."
+  else
+    err "No published dependency bundle matches ${ref} (${bundle_variant}). Use --mode source, or force one with --deps-version."
+  fi
 fi
 
 if [[ ${mode} == source ]]; then
@@ -586,6 +677,7 @@ ask threads "Build threads" "${threads}"
 # -------------------------------------------------------------------- summary --
 echo
 echo "  ---------------------------------------------"
+echo "   DiFfRG:          ${ref}"
 echo "   Mode:            ${mode}"
 [[ ${mode} == prebuilt ]] && echo "   Bundle:          ${deps_file:-deps-v${deps_version}} (${deps_variant:-platform default}$([[ -z ${deps_file} && ${opt_mpi} -eq 1 && ${deps_variant} != *-openmpi ]] && echo ", Open MPI"))"
 if [[ ${mode} == source ]]; then
@@ -613,12 +705,17 @@ fi
 # ------------------------------------------------------------------ checkout --
 mkdir -p "${build_dir}"
 src="${build_dir}/DiFfRG"
+# The bundle was chosen for ${ref}, so building any other revision is an error,
+# not something to warn about and continue.
 if [[ -d ${src}/.git ]]; then
-  info "Updating existing checkout in ${src}..."
-  git -C "${src}" pull --ff-only || warn "Could not update ${src}; using it as-is."
+  info "Switching the existing checkout in ${src} to ${ref}..."
+  if [[ ${ref} == main ]]; then checkout_args=(-B main); else checkout_args=(--detach); fi
+  { git -C "${src}" fetch --depth 1 origin "${ref}" &&
+    git -C "${src}" -c advice.detachedHead=false checkout "${checkout_args[@]}" FETCH_HEAD; } ||
+    err "Could not switch ${src} to ${ref}. Delete ${src} and re-run."
 else
-  info "Cloning DiFfRG into ${src}..."
-  git clone --depth 1 "${REPO_URL}" "${src}"
+  info "Cloning DiFfRG ${ref} into ${src}..."
+  git -c advice.detachedHead=false clone --depth 1 --branch "${ref}" "${REPO_URL}" "${src}"
 fi
 
 # --------------------------------------------------------------------- build --

@@ -57,6 +57,13 @@ of everything that variant is built from. CI uses the release pinned in
 its own bundle otherwise -- so after publishing a bundle for new dependency
 inputs, bump the pin.
 
+`install_diffrg.sh` uses the same hash to choose a bundle: for the selected
+release tag (or `main`) it computes `deps-inputs-hash.sh` from a sparse clone
+and installs the newest `deps-v*` whose manifest matches, reading the manifest
+from the first 256 KB of the tarball (it must stay the archive's second
+entry). A tag with no matching bundle is refused, so publish the bundle before
+tagging a release that changes the dependency inputs.
+
 ## What makes the tarball relocatable
 
 Built at the canonical prefix `/opt/diffrg`, then post-processed
