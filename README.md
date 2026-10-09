@@ -1,8 +1,6 @@
-[![Tests](https://img.shields.io/endpoint?style=for-the-badge&url=https://gist.githubusercontent.com/satfra/336ebc0aaa7dc9a0e71ca01dd4361a12/raw/diffrg-tests.json)](https://github.com/satfra/DiFfRG_current/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/endpoint?style=for-the-badge&url=https://gist.githubusercontent.com/satfra/336ebc0aaa7dc9a0e71ca01dd4361a12/raw/diffrg-tests.json)](https://github.com/satfra/DiFfRG/actions/workflows/ci.yml)
 [![arXiv](https://img.shields.io/badge/arXiv-2412.13043-b31b1b.svg?style=for-the-badge)](https://arxiv.org/abs/2412.13043)
-[![Documentation](https://img.shields.io/badge/documentation-2C4AA8?style=for-the-badge&logo=readthedocs&logoColor=white)](https://satfra.github.io/DiFfRG_current/)
-
-<h3>[This is the development repository for DiFfRG. For the current stable version, please visit [the main repository](https://github.com/satfra/DiFfRG)</h3>
+[![Documentation](https://img.shields.io/badge/documentation-2C4AA8?style=for-the-badge&logo=readthedocs&logoColor=white)](https://satfra.github.io/DiFfRG/)
 
 # DiFfRG - A Discretization Framework for functional Renormalization Group flows
 
@@ -48,7 +46,7 @@ If you use DiFfRG in your scientific work, please cite the corresponding paper:
 
 From a shell, run
 ```bash
-bash <(curl -s -L https://github.com/satfra/DiFfRG_current/raw/refs/heads/main/install_diffrg.sh)
+bash <(curl -s -L https://github.com/satfra/DiFfRG/raw/refs/heads/main/install_diffrg.sh)
 ```
 A short install wizard walks through the typical choices — pre-built dependency bundle or from source, where to install and build, toggle features (MPI, GPU, ...), copy the examples and tutorials — then performs the installation.
 
@@ -116,28 +114,28 @@ If using Windows, instead of running the project directly, it is recommended to 
 
 From the shell, run
 ```bash
-bash <(curl -s -L https://github.com/satfra/DiFfRG_current/raw/refs/heads/main/install_diffrg.sh)
+bash <(curl -s -L https://github.com/satfra/DiFfRG/raw/refs/heads/main/install_diffrg.sh)
 ```
 A short wizard walks through the typical choices — pre-built dependency bundle or full self-build, install prefix, build folder, features (MPI, GPU, ...), and an optional copy of the examples and tutorials — then performs the complete installation. Every question also has a command-line flag (`--help`) for scripted use.
 
-The **pre-built dependency bundle** downloads deal.II, Kokkos, Boost, TBB, SUNDIALS, HDF5 and friends as a ~50 MB binary from [GitHub Releases](https://github.com/satfra/DiFfRG_current/releases) instead of compiling them for hours; only the DiFfRG library itself is compiled locally (minutes). Bundles come in a CPU-only and a CUDA variant (the wizard offers the latter when it finds an NVIDIA GPU), each with or without MPI (Open MPI, with PETSc and MUMPS; needs the distro's Open MPI development package), and need Linux x86_64 with AVX2 (any consumer CPU from ~2013 on) and glibc ≥ 2.34. For other MPIs (Intel MPI, Cray MPICH, ... — typical on clusters), other CPUs, or other platforms the wizard's self-build path covers the full feature set.
+The **pre-built dependency bundle** downloads deal.II, Kokkos, Boost, TBB, SUNDIALS, HDF5 and friends as a ~50 MB binary from [GitHub Releases](https://github.com/satfra/DiFfRG/releases) instead of compiling them for hours; only the DiFfRG library itself is compiled locally (minutes). Bundles come in a CPU-only and a CUDA variant (the wizard offers the latter when it finds an NVIDIA GPU), each with or without MPI (Open MPI, with PETSc and MUMPS; needs the distro's Open MPI development package), and need Linux x86_64 with AVX2 (any consumer CPU from ~2013 on) and glibc ≥ 2.34. For other MPIs (Intel MPI, Cray MPICH, ... — typical on clusters), other CPUs, or other platforms the wizard's self-build path covers the full feature set.
 
 ### From source
 
 The wizard's self-build path compiles the full dependency superbuild with your choice of features:
 ```bash
-bash <(curl -s -L https://github.com/satfra/DiFfRG_current/raw/refs/heads/main/install_diffrg.sh) --mode source
+bash <(curl -s -L https://github.com/satfra/DiFfRG/raw/refs/heads/main/install_diffrg.sh) --mode source
 ```
 Add e.g. `--mpi --gpu --threads 6 --prefix ${HOME}/.local/share/DiFfRG --yes` for a non-interactive run (`--help` lists all options). Experts can drive the superbuild directly with CMake — see *Manual installation* below.
 
-On a GPU machine the wizard also asks which NVIDIA architectures to compile for, defaulting to the GPUs it finds (`--cuda-arch "8.0;9.0"` for a scripted run). This matters: CUDA code compiled for the wrong architecture either refuses to start or is JIT-compiled by the driver on every launch, which DiFfRG's large flow kernels cannot afford. See [Choosing the GPU architecture](https://satfra.github.io/DiFfRG_current/getting_started/installation.html) for the details.
+On a GPU machine the wizard also asks which NVIDIA architectures to compile for, defaulting to the GPUs it finds (`--cuda-arch "8.0;9.0"` for a scripted run). This matters: CUDA code compiled for the wrong architecture either refuses to start or is JIT-compiled by the driver on every launch, which DiFfRG's large flow kernels cannot afford. See [Choosing the GPU architecture](https://satfra.github.io/DiFfRG/getting_started/installation.html) for the details.
 
 ### CMake
 
 You can download a script to install DiFfRG locally directly from a CMake file by putting into your `CMakeLists.txt` the lines
 ```CMake
 file(DOWNLOAD
-  https://github.com/satfra/DiFfRG_current/raw/refs/heads/main/DiFfRG/cmake/InstallDiFfRG.cmake
+  https://github.com/satfra/DiFfRG/raw/refs/heads/main/DiFfRG/cmake/InstallDiFfRG.cmake
   ${CURRENT_BINARY_DIR}/cmake/InstallDiFfRG.cmake)
 include(${CURRENT_BINARY_DIR}/cmake/InstallDiFfRG.cmake)
 ```
@@ -155,7 +153,7 @@ set(PARALLEL_JOBS 8)
 
 You can also manually clone DiFfRG to a directory of your choice
 ```bash
-$ git clone https://github.com/satfra/DiFfRG_current.git
+$ git clone https://github.com/satfra/DiFfRG.git
 ```
 Then, create a build directory and run cmake
 ```bash

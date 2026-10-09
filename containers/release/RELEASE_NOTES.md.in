@@ -6,7 +6,7 @@ source against the bundle in minutes.
 ### Install
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/satfra/DiFfRG_current/main/install-diffrg-deps.sh) --version @VERSION@
+bash <(curl -sL https://raw.githubusercontent.com/satfra/DiFfRG/main/install-diffrg-deps.sh) --version @VERSION@
 ```
 
 The installer verifies the checksum, relocates the bundle to your prefix

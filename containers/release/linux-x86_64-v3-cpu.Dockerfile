@@ -117,7 +117,7 @@ RUN GIT_SHA="${git_sha}" DEPS_INPUTS_HASH="${deps_inputs_hash}" bash /src/contai
 # fails right here.
 FROM rockylinux:9
 LABEL type=diffrg-deps-release
-LABEL org.opencontainers.image.source=https://github.com/satfra/DiFfRG_current
+LABEL org.opencontainers.image.source=https://github.com/satfra/DiFfRG
 
 ARG bundle_version=0.0.0
 ARG mpi=none

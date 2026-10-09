@@ -3,9 +3,9 @@
 # DiFfRG interactive installer.
 #
 # Run from anywhere:
-#   bash <(curl -sL https://raw.githubusercontent.com/satfra/DiFfRG_current/main/install_diffrg.sh)
+#   bash <(curl -sL https://raw.githubusercontent.com/satfra/DiFfRG/main/install_diffrg.sh)
 # or
-#   wget -qO install_diffrg.sh https://raw.githubusercontent.com/satfra/DiFfRG_current/main/install_diffrg.sh
+#   wget -qO install_diffrg.sh https://raw.githubusercontent.com/satfra/DiFfRG/main/install_diffrg.sh
 #   bash install_diffrg.sh
 #
 # A wizard that walks through the typical choices:
@@ -45,7 +45,7 @@ usage() {
 DiFfRG interactive installer.
 
 Run from anywhere:
-  bash <(curl -sL https://raw.githubusercontent.com/satfra/DiFfRG_current/main/install_diffrg.sh)
+  bash <(curl -sL https://raw.githubusercontent.com/satfra/DiFfRG/main/install_diffrg.sh)
 
 Walks through the typical choices (pre-built dependency bundle or full
 self-build, install prefix, build folder, features, examples) and performs the
@@ -73,9 +73,9 @@ complete installation. Flags for non-interactive use:
 EOF
 }
 
-REPO_URL="${DIFFRG_REPO_URL:-https://github.com/satfra/DiFfRG_current.git}"
-REPO_API="https://api.github.com/repos/satfra/DiFfRG_current"
-DOCS_URL="https://satfra.github.io/DiFfRG_current"
+REPO_URL="${DIFFRG_REPO_URL:-https://github.com/satfra/DiFfRG.git}"
+REPO_API="https://api.github.com/repos/satfra/DiFfRG"
+DOCS_URL="https://satfra.github.io/DiFfRG"
 
 err() {
   echo -e "\033[1;31mERROR:\033[0m $*" >&2
@@ -612,7 +612,7 @@ fi
 
 # ------------------------------------------------------------------ checkout --
 mkdir -p "${build_dir}"
-src="${build_dir}/DiFfRG_current"
+src="${build_dir}/DiFfRG"
 if [[ -d ${src}/.git ]]; then
   info "Updating existing checkout in ${src}..."
   git -C "${src}" pull --ff-only || warn "Could not update ${src}; using it as-is."

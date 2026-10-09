@@ -9,7 +9,7 @@
 # hours) -- either by hand or with --build-library.
 #
 # Usage:
-#   bash <(curl -sL https://raw.githubusercontent.com/satfra/DiFfRG_current/main/install-diffrg-deps.sh) [options]
+#   bash <(curl -sL https://raw.githubusercontent.com/satfra/DiFfRG/main/install-diffrg-deps.sh) [options]
 #
 # Options:
 #   --prefix DIR      install prefix (default: $HOME/.local/share/DiFfRG; env FOLDER)
@@ -39,7 +39,7 @@ multi-hour dependency superbuild is skipped; the DiFfRG library itself is then
 built from source against the bundle (minutes).
 
 Usage:
-  bash <(curl -sL https://raw.githubusercontent.com/satfra/DiFfRG_current/main/install-diffrg-deps.sh) [options]
+  bash <(curl -sL https://raw.githubusercontent.com/satfra/DiFfRG/main/install-diffrg-deps.sh) [options]
 
 Options:
   --prefix DIR      install prefix (default: $HOME/.local/share/DiFfRG; env FOLDER)
@@ -60,7 +60,7 @@ install_diffrg.sh --mode source (in the same repository).
 EOF
 }
 
-REPO="satfra/DiFfRG_current"
+REPO="satfra/DiFfRG"
 BUILD_PREFIX="/opt/diffrg" # canonical prefix baked into release bundles
 
 os_name="$(uname -s)"

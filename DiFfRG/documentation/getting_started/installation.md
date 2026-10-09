@@ -77,18 +77,18 @@ If using other environments, e.g. [ENROOT](https://github.com/NVIDIA/enroot), th
 
 From the shell, run
 ```bash
-$ bash <(curl -s -L https://github.com/satfra/DiFfRG_current/raw/refs/heads/main/install_diffrg.sh)
+$ bash <(curl -s -L https://github.com/satfra/DiFfRG/raw/refs/heads/main/install_diffrg.sh)
 ```
 
 A short wizard walks through the typical choices — pre-built dependency bundle or full self-build, install prefix, build folder, features (MPI, GPU, ...), and an optional copy of the examples and tutorials — then performs the complete installation. Every question also has a command-line flag (`--help`) for scripted use.
 
-The **pre-built dependency bundle** downloads deal.II, Kokkos, Boost, TBB, SUNDIALS, HDF5 and friends as a ~50 MB binary from [GitHub Releases](https://github.com/satfra/DiFfRG_current/releases) instead of compiling them for hours; only the DiFfRG library itself is compiled locally (minutes). Bundles come in a CPU-only and a CUDA variant (the wizard offers the latter when it finds an NVIDIA GPU), and require a CPU with AVX2 (any consumer CPU from ~2013 on) and glibc ≥ 2.34 (Rocky/Alma 9+, Ubuntu 22.04+, Debian 12+, Fedora, Arch). Each also exists with MPI (`--mpi`, or the wizard's question): it links Open MPI ≥ 4.1 from the host — install your distro's Open MPI development package (`libopenmpi-dev openmpi-bin`, `openmpi-devel`, `openmpi`) first — and adds PETSc with hypre and MUMPS. The library build then enables MPI by itself. For other MPIs (Intel MPI, Cray MPICH, MVAPICH — typical on clusters), other CPUs, or other platforms the wizard's self-build path covers the full feature set. The bundle step alone is also available non-interactively as `install-diffrg-deps.sh` (`--help` for options).
+The **pre-built dependency bundle** downloads deal.II, Kokkos, Boost, TBB, SUNDIALS, HDF5 and friends as a ~50 MB binary from [GitHub Releases](https://github.com/satfra/DiFfRG/releases) instead of compiling them for hours; only the DiFfRG library itself is compiled locally (minutes). Bundles come in a CPU-only and a CUDA variant (the wizard offers the latter when it finds an NVIDIA GPU), and require a CPU with AVX2 (any consumer CPU from ~2013 on) and glibc ≥ 2.34 (Rocky/Alma 9+, Ubuntu 22.04+, Debian 12+, Fedora, Arch). Each also exists with MPI (`--mpi`, or the wizard's question): it links Open MPI ≥ 4.1 from the host — install your distro's Open MPI development package (`libopenmpi-dev openmpi-bin`, `openmpi-devel`, `openmpi`) first — and adds PETSc with hypre and MUMPS. The library build then enables MPI by itself. For other MPIs (Intel MPI, Cray MPICH, MVAPICH — typical on clusters), other CPUs, or other platforms the wizard's self-build path covers the full feature set. The bundle step alone is also available non-interactively as `install-diffrg-deps.sh` (`--help` for options).
 
 ### Quick install from source
 
 The wizard's self-build path compiles the full dependency superbuild with your choice of features:
 ```bash
-$ bash <(curl -s -L https://github.com/satfra/DiFfRG_current/raw/refs/heads/main/install_diffrg.sh) --mode source
+$ bash <(curl -s -L https://github.com/satfra/DiFfRG/raw/refs/heads/main/install_diffrg.sh) --mode source
 ```
 
 Add e.g. `--mpi --gpu --threads 6 --prefix ${HOME}/.local/share/DiFfRG --yes` for a non-interactive run; `install_diffrg.sh --help` lists all options. Experts can drive the superbuild directly with CMake, as described next.
@@ -97,12 +97,12 @@ Add e.g. `--mpi --gpu --threads 6 --prefix ${HOME}/.local/share/DiFfRG --yes` fo
 
 Clone the repository:
 ```bash
-$ git clone https://github.com/satfra/DiFfRG_current.git
+$ git clone https://github.com/satfra/DiFfRG.git
 ```
 
 Then, create a build directory and run cmake:
 ```bash
-$ cd DiFfRG_current
+$ cd DiFfRG
 $ mkdir build
 $ cd build
 $ cmake ../ -DCMAKE_INSTALL_PREFIX=~/.local/share/DiFfRG/ -DCMAKE_BUILD_TYPE=Release
