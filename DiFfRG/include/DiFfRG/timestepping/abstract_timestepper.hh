@@ -147,11 +147,11 @@ namespace DiFfRG
    * - /timestepping/explicit/abs_tol: The absolute tolerance for an explicit timestepping algorithm.
    * - /timestepping/explicit/rel_tol: The relative tolerance for an explicit timestepping algorithm.
    * - /timestepping/explicit/detect_stuck: Whether repeated-time callback detection is enabled.
-   * - /timestepping/explicit/error_control: IDA + Adams-Bashforth-Moulton only. Control the local error of the
+   * - /timestepping/explicit/error_control: Adams-Bashforth-Moulton steppers only. Control the local error of the
    *   explicit steps with explicit/abs_tol and rel_tol, estimated by the predictor-corrector difference: a step that
    *   fails it is retaken at half the step size (down to explicit/minimal_dt), and the step size grows back to
-   *   explicit/dt once the error stays small (default false: fixed step explicit/dt). The estimate is reported at
-   *   /output/verbosity >= 2 either way.
+   *   explicit/dt once the error stays small (default true; false: fixed step explicit/dt). The estimate is reported
+   *   at /output/verbosity >= 2 either way.
    *
    * Flow snapshots and restarts (all optional; see run() and documentation/getting_started/snapshots.md):
    * - /timestepping/snapshots/k: list of RG scales at which to write a snapshot (needs /physical/Lambda).
@@ -268,6 +268,7 @@ namespace DiFfRG
         expl.abs_tol = config.get_double_or_warn("/timestepping/explicit/abs_tol", 1e-3);
         expl.rel_tol = config.get_double_or_warn("/timestepping/explicit/rel_tol", 1e-3);
         expl.detect_stuck = config.get_bool("/timestepping/explicit/detect_stuck", true);
+        expl.error_control = config.get_bool("/timestepping/explicit/error_control", true);
 
         // Sanity checks:
         if (expl.minimal_dt <= 0.0) throw std::invalid_argument("Minimal timestep size must be positive.");
@@ -598,6 +599,7 @@ namespace DiFfRG
       double abs_tol;
       double rel_tol;
       bool detect_stuck;
+      bool error_control;
     } expl;
 
     std::size_t next_jacobian_build_id = 0;

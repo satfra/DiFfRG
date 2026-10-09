@@ -4,8 +4,6 @@
 #include <random>
 
 // external libraries
-#include <boost/numeric/odeint.hpp>
-#include <boost/numeric/odeint/external/eigen/eigen.hpp>
 #include <deal.II/base/timer.h>
 #include <deal.II/lac/block_vector.h>
 
@@ -15,6 +13,7 @@
 #include <DiFfRG/discretization/common/abstract_adaptor.hh>
 #include <DiFfRG/discretization/common/abstract_assembler.hh>
 #include <DiFfRG/discretization/data/output_session.hh>
+#include <DiFfRG/timestepping/abm_error_control.hh>
 #include <DiFfRG/timestepping/boost_abm.hh>
 
 namespace DiFfRG
@@ -36,6 +35,42 @@ namespace DiFfRG
       if (!(length > 0.)) return dt;
       const double n_steps = std::max(1., std::ceil(length / dt - 1e-9));
       return length / n_steps;
+    }
+
+    /**
+     * @brief Integrate y from t_start to t_stop with 8-step Adams-Bashforth-Moulton, calling output_step after every
+     * step. Under /timestepping/explicit/error_control the step size adapts (see internal::ABMStepControl), staying on
+     * the grid of uniform_step so that the last step ends exactly on t_stop.
+     */
+    void integrate_abm(auto &&system, Eigen::VectorXd &y, const double t_start, const double t_stop, const auto &expl,
+                       auto &&output_step, const ReportPort &log)
+    {
+      internal::ABMWithErrorEstimate<8> abm;
+      const double base_dt = uniform_step(t_start, t_stop, expl.dt);
+      internal::ABMStepControl step_control({.enabled = expl.error_control,
+                                                              .aligned = true,
+                                                              .t0 = t_start,
+                                                              .base_dt = base_dt,
+                                                              .minimal_dt = expl.minimal_dt,
+                                                              .abs_tol = expl.abs_tol,
+                                                              .rel_tol = expl.rel_tol});
+      double cur_dt = base_dt;
+      double step_time = t_start;
+      output_step(y, step_time);
+
+      uint step = 0;
+      while (step_time <= t_stop && !is_close(step_time, t_stop, 1e-3 * cur_dt)) {
+        step_control.step(abm, system, y, step_time, cur_dt, [&](const double t, const double dt, const double err) {
+          log.progress(ProgressEvent{.topic = progress_topics::explicit_step, .time = t, .minimum_verbosity = 2}
+                           .field("dt", dt)
+                           .field("err", err));
+        });
+        step++;
+        output_step(y, step_time);
+      }
+
+      log.info("TimeStepperBoostABM: finished after {} steps ({} retaken at a smaller step size)", step,
+               step_control.rejected());
     }
   } // namespace
 
@@ -137,21 +172,7 @@ namespace DiFfRG
     Eigen::VectorXd y_eigen(initial_data.size());
     dealii_to_eigen(initial_data, y_eigen);
 
-    using namespace boost::numeric::odeint;
-    adams_bashforth_moulton<8, Eigen::VectorXd> abm;
-    const double cur_dt = uniform_step(t_start, t_stop, expl.dt);
-    double step_time = t_start;
-    output_step(y_eigen, step_time);
-
-    uint step = 0;
-    while (step_time <= t_stop && !is_close(step_time, t_stop, 1e-3 * cur_dt)) {
-      abm.do_step(residual, y_eigen, step_time, cur_dt);
-      step++;
-      step_time += cur_dt;
-      output_step(y_eigen, step_time);
-    }
-
-    this->log.info("TimeStepperBoostABM_impl::run: finished after {} steps", step);
+    integrate_abm(residual, y_eigen, t_start, t_stop, expl, output_step, this->log);
 
     eigen_to_dealii(y_eigen, initial_data);
     this->drain_output();
@@ -244,21 +265,7 @@ namespace DiFfRG
     Eigen::VectorXd y_eigen(initial_data.size());
     dealii_to_eigen(initial_data, y_eigen);
 
-    using namespace boost::numeric::odeint;
-    adams_bashforth_moulton<8, Eigen::VectorXd> abm;
-    const double cur_dt = uniform_step(t_start, t_stop, expl.dt);
-    double step_time = t_start;
-    output_step(y_eigen, step_time);
-
-    uint step = 0;
-    while (step_time <= t_stop && !is_close(step_time, t_stop, 1e-3 * cur_dt)) {
-      abm.do_step(residual, y_eigen, step_time, cur_dt);
-      step++;
-      step_time += cur_dt;
-      output_step(y_eigen, step_time);
-    }
-
-    this->log.info("TimeStepperBoostABM_impl::run: finished after {} steps", step);
+    integrate_abm(residual, y_eigen, t_start, t_stop, expl, output_step, this->log);
 
     eigen_to_dealii(y_eigen, initial_data);
     this->drain_output();
@@ -344,21 +351,7 @@ namespace DiFfRG
                           .minimum_verbosity = 1});
     };
 
-    using namespace boost::numeric::odeint;
-    adams_bashforth_moulton<8, Eigen::VectorXd> abm;
-    const double cur_dt = uniform_step(t_start, t_stop, expl.dt);
-    double step_time = t_start;
-    output_step(y_eigen, step_time);
-
-    uint step = 0;
-    while (step_time <= t_stop && !is_close(step_time, t_stop, 1e-3 * cur_dt)) {
-      abm.do_step(residual, y_eigen, step_time, cur_dt);
-      step++;
-      step_time += cur_dt;
-      output_step(y_eigen, step_time);
-    }
-
-    this->log.info("TimeStepperBoostABM_impl::run_vars: finished after {} steps", step);
+    integrate_abm(residual, y_eigen, t_start, t_stop, expl, output_step, this->log);
 
     eigen_to_dealii(y_eigen, initial_data);
     this->drain_output();

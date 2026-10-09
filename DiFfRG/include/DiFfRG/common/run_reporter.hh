@@ -29,6 +29,8 @@ namespace DiFfRG
   namespace progress_topics
   {
     inline constexpr ProgressTopic timestep{"step", {}};
+    /// One explicit multistep step: its size and local error estimate.
+    inline constexpr ProgressTopic explicit_step{"step", "explicit"};
     inline constexpr ProgressTopic explicit_residual{"res", "explicit"};
     inline constexpr ProgressTopic implicit_residual{"res", "implicit"};
     inline constexpr ProgressTopic variables{"vars", {}};
