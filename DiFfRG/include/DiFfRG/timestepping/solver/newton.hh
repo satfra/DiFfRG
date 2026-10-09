@@ -1,12 +1,13 @@
 #pragma once
 
+#include <DiFfRG/common/run_reporter.hh>
+
 // standard library
 #include <functional>
 
 // external libraries
 #include <deal.II/base/config.h>
 #include <deal.II/base/timer.h>
-#include <deal.II/lac/vector_memory.h>
 
 namespace DiFfRG
 {
@@ -28,6 +29,8 @@ namespace DiFfRG
           n_stepsize_iterations(n_stepsize_iterations_), ignore_nonconv(false)
     {
     }
+
+    void set_report_port(ReportPort port) { report_port = std::move(port); }
 
     /**
      * @brief Should it be necessary, one can force a recalculation of the jacobian hereby.
@@ -52,10 +55,7 @@ namespace DiFfRG
       iterate_vector = iterate;
       VectorType &u = iterate_vector;
 
-      GrowingVectorMemory<VectorType> mem;
-      typename VectorMemory<VectorType>::Pointer Du(mem);
-
-      Du->reinit(u);
+      Du.reinit(u);
       residual_vector.reinit(u);
 
       // fill res with (f(u), v)
@@ -63,6 +63,7 @@ namespace DiFfRG
       if (!std::isfinite(residual_vector.l2_norm())) throw std::runtime_error("Initial residual non-finite!");
       resnorm = get_EEst();
       double old_residual = 0.;
+      double res_l2 = residual_vector.l2_norm();
       double assembly_time = 0.;
 
       while (check()) {
@@ -76,34 +77,35 @@ namespace DiFfRG
           jacobians++;
         }
 
-        Du->reinit(u);
+        Du.reinit(u);
         try {
-          lin_solve(*Du.get(), residual_vector);
+          lin_solve(Du, residual_vector);
         } catch (std::exception &) {
           throw std::runtime_error("Linear solve failed!");
         }
 
-        u.add(-1., *Du);
+        u.add(-1., Du);
         old_residual = resnorm;
+        double old_res_l2 = res_l2;
 
         residual(residual_vector, u);
-        resnorm = get_EEst();
-        if (!std::isfinite(residual_vector.l2_norm())) {
-          std::cerr << "Residual non-finite!" << std::endl;
-          throw std::runtime_error("Residual non-finite!");
-        }
+        res_l2 = residual_vector.l2_norm();
+        if (!std::isfinite(res_l2)) throw std::runtime_error("Residual non-finite!");
 
-        // Simple line search: decrease the step size until the residual is smaller than the one in the step before
+        // Simple line search: use cheap l2_norm comparisons instead of full get_EEst()
         uint step_size = 0;
-        while (resnorm >= old_residual) {
+        while (res_l2 >= old_res_l2) {
           ++step_size;
           if (step_size > n_stepsize_iterations) {
             break;
           }
-          u.add(1. / double(1 << step_size), *Du);
+          u.add(1. / double(1 << step_size), Du);
           residual(residual_vector, u);
-          resnorm = get_EEst();
+          res_l2 = residual_vector.l2_norm();
         }
+
+        // compute full error estimate once after line search
+        resnorm = get_EEst();
       }
 
       timings_newton.push_back(timer.wall_time() - assembly_time);
@@ -174,6 +176,8 @@ namespace DiFfRG
     VectorType residual_vector;
     VectorType initial_vector;
     VectorType iterate_vector;
+    VectorType Du;
+    VectorType eest_tmp;
     double abstol, reltol, assemble_threshold;
     uint max_steps, n_stepsize_iterations;
 
@@ -183,6 +187,7 @@ namespace DiFfRG
     uint step, jacobians;
 
     std::vector<double> timings_newton;
+    ReportPort report_port;
 
     /**
      * @brief Calculate the current error estimate
@@ -195,18 +200,15 @@ namespace DiFfRG
       const VectorType &u_prev = initial_vector;
       const VectorType &u = iterate_vector;
 
-      GrowingVectorMemory<VectorType> mem;
-      typename VectorMemory<VectorType>::Pointer tmp(mem);
-      tmp->reinit(u, true);
+      eest_tmp.reinit(u);
 
       using std::abs, std::max, std::sqrt;
-      tbb::parallel_for(tbb::blocked_range<uint>(0, tmp->size()), [&](tbb::blocked_range<uint> r) {
+      tbb::parallel_for(tbb::blocked_range<uint>(0, eest_tmp.size()), [&](tbb::blocked_range<uint> r) {
         for (uint n = r.begin(); n < r.end(); ++n) {
-          (*tmp)[n] = abs(err[n]) / (abstol + max(abs(u_prev[n]), abs(u[n])) * reltol);
+          eest_tmp[n] = abs(err[n]) / (abstol + max(abs(u_prev[n]), abs(u[n])) * reltol);
         }
       });
-      return tmp->l2_norm() / sqrt(tmp->size());
-      return tmp->linfty_norm(); // tmp->l2_norm() / sqrt(tmp->size());
+      return eest_tmp.l2_norm() / sqrt(eest_tmp.size());
     }
 
     /**
@@ -217,11 +219,10 @@ namespace DiFfRG
      */
     bool check()
     {
-      if (step > max_steps) return false;
       if (step == 0) return true;
-      double err = get_EEst();
-      converged = err <= 1.;
-      return !converged;
+      // Convergence is tested before the step limit, so that the last allowed step can still converge.
+      converged = get_EEst() <= 1.;
+      return !converged && step <= max_steps;
     }
   };
 } // namespace DiFfRG

@@ -4,36 +4,27 @@
 #include <sstream>
 
 // external libraries
-#include <deal.II/base/multithread_info.h>
-#include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/timer.h>
 #include <deal.II/dofs/dof_handler.h>
-#include <deal.II/fe/fe_interface_values.h>
-#include <deal.II/fe/fe_values.h>
 #include <deal.II/lac/full_matrix.h>
 #include <deal.II/lac/sparse_matrix.h>
 #include <deal.II/lac/vector.h>
-#include <deal.II/meshworker/mesh_loop.h>
-#include <deal.II/numerics/fe_field_function.h>
-#include <deal.II/numerics/matrix_tools.h>
-#include <deal.II/numerics/vector_tools.h>
 
 // DiFfRG
 #include <DiFfRG/common/utils.hh>
-#include <DiFfRG/discretization/common/EoM.hh>
 #include <DiFfRG/discretization/common/abstract_assembler.hh>
-#include <DiFfRG/discretization/data/data_output.hh>
+#include <DiFfRG/discretization/data/output_session.hh>
+#include <DiFfRG/physics/integration/map_completion.hh>
 
 namespace DiFfRG
 {
   namespace Variables
   {
     using namespace dealii;
-    using std::array;
 
     template <typename... T> auto fe_tie(T &&...t)
     {
-      return named_tuple<std::tuple<T &...>, "variables">(std::tie(t...));
+      return named_tuple<std::tuple<T &...>, StringSet<"variables">>(std::tie(t...));
     }
 
     /**
@@ -49,24 +40,39 @@ namespace DiFfRG
       using Model = Model_;
       using NumberType = double;
       using VectorType = Vector<double>;
+      using SparseMatrixType = SparseMatrix<double>;
 
       using Components = typename Model_::Components;
       static constexpr uint dim = 0;
 
-      Assembler(Model &model, const JSONValue &json) : model(model), threads(json.get_uint("/discretization/threads"))
+      /// This assembler has no FE space at all (dim == 0), so it needs no report port; the config is
+      /// unused.
+      Assembler(Model &model, const ConfigTree & /*config*/) : model(model)
       {
-        if (threads == 0) threads = dealii::MultithreadInfo::n_threads() / 2;
         static_assert(Components::count_fe_functions() == 0, "The pure variable assembler cannot handle FE functions!");
         reinit();
       }
 
       virtual void reinit_vector(VectorType &vec) const override { vec.reinit(0); }
+      // Serial by construction: this assembler has no FE space at all (dim == 0) and hard-codes
+      // dealii::Vector/SparseMatrix in its base-class list, so there is no distributed policy here.
+      virtual void reinit_matrix(SparseMatrixType &matrix) const override
+      {
+        matrix.reinit(get_sparsity_pattern_jacobian());
+      }
+      virtual MPI_Comm get_communicator() const override { return MPI_COMM_SELF; }
+      // dim == 0: no FE space, and the vector type is serial by construction, so the view is a
+      // passthrough and the layout arguments are ignored.
+      virtual void reinit_solution_view(SolutionView<VectorType> &view) const override
+      {
+        view.reinit(dealii::IndexSet(), dealii::IndexSet(), MPI_COMM_SELF);
+      }
 
       virtual IndexSet get_differential_indices() const override { return IndexSet(); }
 
-      virtual void attach_data_output(DataOutput<dim, VectorType> &data_out, const VectorType &solution,
+      virtual void attach_data_output(OutputFrame<dim, VectorType> &data_out, const VectorType &solution,
                                       const VectorType &variables, const VectorType &dt_solution = VectorType(),
-                                      const VectorType &residual = VectorType())
+                                      const VectorType &residual = VectorType()) override
       {
         (void)dt_solution;
         (void)residual;
@@ -76,6 +82,29 @@ namespace DiFfRG
       virtual void reinit() override {}
 
       virtual void set_time(double t) override { model.set_time(t); }
+
+      /// There is no spatial part: a snapshot of a variables-only flow holds just the variables.
+      virtual SnapshotSpatialState capture_snapshot_state(const Vector<double> & /*spatial_replica*/) const override
+      {
+        return {};
+      }
+
+      virtual void restore_snapshot_state(const SnapshotSpatialState &state, Vector<double> & /*spatial*/) override
+      {
+        if (!state.empty())
+          throw std::runtime_error("Snapshot restore: the snapshot holds a spatial discretization, but this is a "
+                                   "variables-only (dim = 0) flow.");
+      }
+
+      virtual void save_model_state(ModelState &state) const override
+      {
+        DiFfRG::internal::save_model_state(model, state);
+      }
+
+      virtual bool load_model_state(const ModelState &state) override
+      {
+        return DiFfRG::internal::load_model_state(model, state);
+      }
 
       virtual const SparsityPattern &get_sparsity_pattern_jacobian() const override
       {
@@ -87,6 +116,8 @@ namespace DiFfRG
       {
         Timer timer;
         model.dt_variables(residual, fe_tie(variables));
+        // Fences AND lands any map() results still sitting in pinned staging -- see MapCompletion.
+        flush_maps();
         timings_residual.push_back(timer.wall_time());
       };
 
@@ -95,16 +126,23 @@ namespace DiFfRG
       {
         Timer timer;
         model.template jacobian_variables<0>(jacobian, fe_tie(variables));
+        flush_maps();
         timings_jacobian.push_back(timer.wall_time());
       };
 
-      void readouts(DataOutput<dim, VectorType> &data_out, const VectorType &, const VectorType &variables) const
+      void readouts(OutputFrame<dim, VectorType> &data_out, const VectorType &, const VectorType &variables) const
       {
-        auto helper = [&](auto EoMfun, auto outputter) {
-          (void)EoMfun;
-          outputter(data_out, Point<0>(), fe_tie(variables));
+        auto helper = [&](auto &&...args) {
+          if constexpr (sizeof...(args) == 3) {
+            auto &&[id, EoMfun, outputter] = std::forward_as_tuple(std::forward<decltype(args)>(args)...);
+            data_out.register_readout(id);
+            (void)EoMfun;
+            outputter(data_out, Point<0>(), fe_tie(variables));
+          } else {
+            DiFfRG::internal::validate_readout_helper_arity<decltype(args)...>();
+          }
         };
-        model.template readouts_multiple(helper, data_out);
+        model.readouts_multiple(helper, data_out);
       }
 
       virtual void mass(VectorType &, const VectorType &, const VectorType &, NumberType) override {}
@@ -125,19 +163,15 @@ namespace DiFfRG
       {
         (void)variables;
       }
-
-      void log(const std::string logger) const
+      SummaryEvent summary() const override
       {
-        std::stringstream ss;
-        ss << "Variable Assembler: " << std::endl;
-        ss << "        Residual: " << average_time_residual_assembly() * 1000 << "ms (" << num_residuals() << ")"
-           << std::endl;
-        ss << "        Jacobian: " << average_time_jacobian_assembly() * 1000 << "ms (" << num_jacobians() << ")"
-           << std::endl;
-        spdlog::get(logger)->info(ss.str());
+        SummaryEvent result{.component = "variables"};
+        result.timing("residual", average_time_residual_assembly() * 1000, num_residuals())
+            .timing("jac", average_time_jacobian_assembly() * 1000, num_jacobians());
+        return result;
       }
 
-      double average_time_residual_assembly()
+      double average_time_residual_assembly() const
       {
         double t = 0.;
         double n = timings_residual.size();
@@ -147,7 +181,7 @@ namespace DiFfRG
       }
       uint num_residuals() const { return timings_residual.size(); }
 
-      double average_time_jacobian_assembly()
+      double average_time_jacobian_assembly() const
       {
         double t = 0.;
         double n = timings_jacobian.size();
@@ -159,8 +193,6 @@ namespace DiFfRG
 
     private:
       Model &model;
-
-      uint threads;
 
       SparsityPattern sparsity_pattern_mass;
       SparsityPattern sparsity_pattern_jacobian;

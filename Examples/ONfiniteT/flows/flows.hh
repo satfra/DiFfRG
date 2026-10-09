@@ -1,29 +1,34 @@
 #pragma once
 
-#include "V/V.hh"
+#include "DiFfRG/common/utils.hh"
+#include "DiFfRG/physics/integration.hh"
+#include "./V/V.hh"
+#include "./V_pion/V_pion.hh"
+#include "./V_sigma/V_sigma.hh"
 
-#include "def.hh"
-#include <DiFfRG/physics/flow_equations.hh>
-
-class ON_finiteTFlowEquations : public FlowEquationsFiniteT
+class ONFiniteTFlows
 {
-public:
-  ON_finiteTFlowEquations(const JSONValue &json);
+  public:
+  ONFiniteTFlows(const DiFfRG::ConfigTree& config)
+  ;
 
-private:
-  const std::array<uint, 1> grid_size_int;
-  const std::array<uint, 2> grid_sizes_angle_int;
-  const std::array<uint, 3> grid_sizes_3D_int;
-  const std::array<uint, 4> grid_sizes_4D_int;
+  void set_k(const double k)
+  ;
 
-  const std::array<uint, 2> grid_sizes_int_fT;
-  const std::array<uint, 3> grid_sizes_angle_int_fT;
-  const std::array<uint, 4> grid_sizes_4D_int_fT;
+  void set_T(const double T)
+  ;
 
-  const std::array<uint, 2> grid_sizes_2D_cartesian_int;
-  const std::array<uint, 3> grid_sizes_3D_cartesian_int;
+  void set_typical_E(const double E)
+  ;
 
-public:
-  QuadratureProvider quadrature_provider;
-  Flows::V_integrator V_integrator;
+  void set_x_extent(const double x_extent)
+  ;
+
+  DiFfRG::QuadratureProvider quadrature_provider;
+
+  V_integrator V;
+
+  V_pion_integrator V_pion;
+
+  V_sigma_integrator V_sigma;
 };

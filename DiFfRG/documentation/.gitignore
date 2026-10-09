@@ -1,0 +1,8 @@
+# Generated documentation artefacts — never committed.
+_build/
+doxygen/
+_generated_mathematica/
+autoapi/
+# Local build environment / logs.
+.venv*
+*.log

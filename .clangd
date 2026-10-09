@@ -1,0 +1,8 @@
+CompileFlags:
+  CompilationDatabase: build
+---
+If:
+  PathMatch:
+    - DiFfRG/build/.*
+Index:
+  Background: Skip

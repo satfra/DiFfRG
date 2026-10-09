@@ -1,0 +1,104 @@
+# On-demand build of the pre-built Apple Silicon dependency bundle
+# (diffrg-deps-<version>-macos-arm64-cpu.tar.zst). EXPERIMENTAL -- the macOS
+# packaging path is younger than the Linux one; expect to iterate here.
+#
+# Runs natively on GitHub's arm64 macOS runners (M-series hardware) via the
+# same script a local Mac would use (containers/release/macos-arm64-cpu.sh).
+# The result is stored as a workflow artifact; with draft_release=true it is
+# additionally attached to a DRAFT release deps-v<version> for manual review
+# and publishing.
+name: release-deps-macos
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_version:
+        description: "Bundle version (X.Y.Z, becomes tag deps-vX.Y.Z)"
+        required: true
+      run_smoke:
+        description: "Validation depth after building"
+        type: choice
+        options: [install-and-build, quick-tests]
+        default: install-and-build
+      draft_release:
+        description: "Attach the result to a draft release deps-v<version>"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # only used when draft_release=true
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: release-deps-macos
+  cancel-in-progress: false
+
+jobs:
+  build-and-validate:
+    runs-on: macos-14 # arm64 (M-series) hardware
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build prerequisites
+        run: |
+          brew install gcc gsl gnu-tar zstd
+          sudo mkdir -p /opt/diffrg && sudo chown "$(id -u)" /opt/diffrg
+
+      - name: Build the bundle
+        run: bash ./containers/release/macos-arm64-cpu.sh -v "${{ inputs.bundle_version }}" -j 3
+
+      # Same validation shape as one Linux matrix leg: install the tarball to
+      # a fresh prefix through the real installer (exercises the relocation
+      # and install_name_tool/codesign path), then build the library on it.
+      - name: Smoke-test the tarball
+        run: |
+          name="diffrg-deps-${{ inputs.bundle_version }}-macos-arm64-cpu"
+          bash install-diffrg-deps.sh \
+            --file "containers/release/dist/${name}.tar.zst" \
+            --prefix "$HOME/diffrg-smoke"
+          cmake -S DiFfRG -B "$HOME/diffrg-smoke-build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUNDLED_DIR="$HOME/diffrg-smoke/bundled" \
+            -DDiFfRG_TEST=ON -DDiFfRG_DOCUMENTATION=OFF -DMARCH=none
+          cmake --build "$HOME/diffrg-smoke-build" -j 3
+          if [[ "${{ inputs.run_smoke }}" == quick-tests ]]; then
+            ctest --test-dir "$HOME/diffrg-smoke-build" -LE slow -j1 --output-on-failure
+          fi
+
+      - name: Stamp
+        run: |
+          name="diffrg-deps-${{ inputs.bundle_version }}-macos-arm64-cpu"
+          if [[ "${{ inputs.run_smoke }}" == quick-tests ]]; then
+            echo "tested-with-ctest" > "containers/release/dist/${name}.tar.zst.tested"
+          else
+            echo "tested-build-only" > "containers/release/dist/${name}.tar.zst.tested"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diffrg-deps-${{ inputs.bundle_version }}-macos-arm64-cpu
+          path: containers/release/dist/
+          if-no-files-found: error
+
+      - name: Attach to draft release
+        if: inputs.draft_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="deps-v${{ inputs.bundle_version }}"
+          gh release view "${tag}" --repo "${{ github.repository }}" >/dev/null 2>&1 \
+            || gh release create "${tag}" --repo "${{ github.repository }}" \
+                 --draft --title "DiFfRG dependency bundle ${{ inputs.bundle_version }}" \
+                 --notes "Draft -- assets uploaded by the release-deps workflows." \
+                 --target "${GITHUB_SHA}"
+          gh release upload "${tag}" containers/release/dist/* --clobber --repo "${{ github.repository }}"
+
+      - name: Summary
+        run: |
+          echo "## diffrg-deps ${{ inputs.bundle_version }} (macos-arm64-cpu, EXPERIMENTAL)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- validation: ${{ inputs.run_smoke }} on this runner" >> "$GITHUB_STEP_SUMMARY"
+          echo "- artifact: diffrg-deps-${{ inputs.bundle_version }}-macos-arm64-cpu" >> "$GITHUB_STEP_SUMMARY"

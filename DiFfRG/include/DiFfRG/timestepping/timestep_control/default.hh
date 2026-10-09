@@ -1,17 +1,19 @@
 #pragma once
 
 // standard library
+#include <cmath>
 #include <iomanip>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 
-// external libraries
-#include <spdlog/spdlog.h>
+#include <DiFfRG/common/math.hh>
 
 namespace DiFfRG
 {
   /**
    * @brief This is a default time controller implementation which should be used as a base class for any other time
-   * controller. It only implements the basic tasks that should be done when advancing time, i.e. saving, logging if the
+   * controller. It only implements the basic tasks that should be done when advancing time, i.e. saving, aborting if the
    * stepper got stuck, checking if the simulation is finished and restricting the minimal timestep.
    *
    * @tparam NEWT the used solver type which should at least explose the methods set_ignore_nonconv(bool)->void and
@@ -23,7 +25,7 @@ namespace DiFfRG
     TC_Default(NEWT &newton_, unsigned int alg_order_, double t_, double max_t_, double dt_, double min_dt_,
                double max_dt_, double output_dt_)
         : newton(newton_), alg_order(alg_order_), t(t_), max_t(max_t_), sug_dt(dt_), min_dt(min_dt_), max_dt(max_dt_),
-          output_dt(output_dt_), cur_dt(sug_dt), last_save(t), last_t(t_), stuck(0), fin(false)
+          output_dt(output_dt_), cur_dt(sug_dt), last_save(t), last_t(t_), t_start(t_), stuck(0), fin(false)
     {
     }
 
@@ -64,7 +66,8 @@ namespace DiFfRG
       // check if the stepper should output data
       if (t > last_save + output_dt) {
         of(t);
-        last_save = int(t / output_dt) * output_dt;
+        // Anchored at the start, like the output grids of the other steppers.
+        last_save = t_start + std::floor((t - t_start) / output_dt) * output_dt;
       }
 
       // should the suggested timestep be below the minimum timestep, tell the solver that it should
@@ -86,11 +89,10 @@ namespace DiFfRG
         of(t);
         fin = true;
       }
-      // if we got unrecoverably stuck also abort the timestepping
+      // Unrecoverably stuck: throw rather than finish, since callers rely on ending at max_t.
       if (stuck > 10) {
         of(t);
-        fin = true;
-        spdlog::get("log")->error("Timestepping got stuck at t = {}", t);
+        throw std::runtime_error("Timestepping got stuck at t = " + std::to_string(t));
       }
     }
 
@@ -125,6 +127,7 @@ namespace DiFfRG
     NEWT &newton;
     unsigned int alg_order;
     double t, max_t, sug_dt, min_dt, max_dt, output_dt, cur_dt, last_save, last_t;
+    const double t_start;
     unsigned int stuck;
 
     bool fin;

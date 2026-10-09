@@ -1,36 +1,31 @@
-#include <DiFfRG/common/configuration_helper.hh>
-#include <DiFfRG/common/utils.hh>
-#include <DiFfRG/discretization/discretization.hh>
-#include <DiFfRG/timestepping/timestepping.hh>
+#include <DiFfRG/DiFfRG.hh>
+using namespace DiFfRG;
 
 #include "model.hh"
-
-using namespace dealii;
-using namespace DiFfRG;
 
 // Choices for types
 using Model = ON_finiteT;
 constexpr uint dim = Model::dim;
-using Discretization = CG::Discretization<Model::Components, double, RectangularMesh<dim>>;
-using VectorType = typename Discretization::VectorType;
-using SparseMatrixType = typename Discretization::SparseMatrixType;
-using Assembler = CG::Assembler<Discretization, Model>;
-using TimeStepper = TimeStepperSUNDIALS_IDA<VectorType, SparseMatrixType, dim, UMFPack>;
+using Discretization = CG::Discretization<Model, RectangularMesh<dim>>;
+using Assembler = CG::Assembler<Discretization>;
+using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
 
 int main(int argc, char *argv[])
 {
+  // Initialize DiFfRG and thus the MPI and Kokkos environments
+  const auto config_helper = DiFfRG::Init(argc, argv).get_configuration_helper();
   // get all needed parameters and parse from the CLI
-  ConfigurationHelper config_helper(argc, argv);
-  const auto json = config_helper.get_json();
+  const auto config = config_helper.get_config();
 
   // Define the objects needed to run the simulation
-  Model model(json);
-  RectangularMesh<dim> mesh(json);
-  Discretization discretization(mesh, json);
-  Assembler assembler(discretization, model, json);
-  DataOutput<dim, VectorType> data_out(json);
-  HAdaptivity mesh_adaptor(assembler, json);
-  TimeStepper time_stepper(json, &assembler, &data_out, &mesh_adaptor);
+  Model model(config);
+  RectangularMesh<dim> mesh{Config::ConfigurationMesh<dim>(config)};
+  OutputSession<Assembler> data_out(config);
+  const auto log = data_out.report_port();
+  Discretization discretization(mesh, config, log);
+  Assembler assembler(discretization, model, config);
+  HAdaptivity mesh_adaptor(assembler, config);
+  TimeStepper time_stepper(config, assembler, data_out, mesh_adaptor);
 
   // Set up the initial condition
   FE::FlowingVariables initial_condition(discretization);
@@ -39,13 +34,12 @@ int main(int argc, char *argv[])
   // Now we start the timestepping
   Timer timer;
   try {
-    time_stepper.run(&initial_condition, 0., json.get_double("/timestepping/final_time"));
+    time_stepper.run(initial_condition, 0., config.get_double("/timestepping/final_time"));
   } catch (std::exception &e) {
-    spdlog::get("log")->error("Simulation finished with exception {}", e.what());
+    log.error("Simulation finished with exception {}", e.what());
     return -1;
   }
   auto time = timer.wall_time();
-  assembler.log("log");
-  spdlog::get("log")->info("Simulation finished after " + time_format(time));
+  log.info("Simulation finished after " + time_format(time));
   return 0;
 }

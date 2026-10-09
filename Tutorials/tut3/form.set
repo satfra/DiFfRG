@@ -1,0 +1,10 @@
+# cli.py 1.0.0 start_externalevaluate --path /usr/local/Wolfram/Wolfram/14.1/SystemFiles/Components/WolframClientForPython --path-cwd --installpath /usr/local/Wolfram/Wolfram/14.1 --kernelversion 14.1 (cpu: 16, mem: 32775184384; total cpu: 16, total mem: 32775184384; 1x16)
+compresssize 320000
+largesize 6386922857
+scratchsize 2128974285
+smallextension 1916076856
+smallsize 1277384571
+sortiosize 8028396
+termsinsmall 12773856
+threadscratchoutsize 2560000
+threadscratchsize 2560000

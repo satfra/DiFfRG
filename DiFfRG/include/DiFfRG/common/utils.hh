@@ -1,25 +1,29 @@
 #pragma once
 
 // standard library
+#include <concepts>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 // external libraries
-#include <spdlog/sinks/basic_file_sink.h>
-#include <spdlog/spdlog.h>
+#include <deal.II/base/utilities.h>
 
 // DiFfRG
+#include <DiFfRG/common/config_tree.hh>
 #include <DiFfRG/common/fixed_string.hh>
-#include <DiFfRG/common/json.hh>
+#include <DiFfRG/common/kokkos.hh>
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/common/tuples.hh>
 
 namespace DiFfRG
 {
   using uint = unsigned int;
+
+  using dealii::Utilities::int_to_string;
 
   /**
    * @brief A compile-time for loop, which calls the lambda f of signature void(integer) for each index.
@@ -32,8 +36,6 @@ namespace DiFfRG
     }
   }
 
-  std::shared_ptr<spdlog::logger> build_logger(const std::string &name, const std::string &filename);
-
   /**
    * @brief Strips all special characters from a string, e.g. for use in filenames.
    *
@@ -41,14 +43,6 @@ namespace DiFfRG
    * @return std::string The stripped string
    */
   std::string strip_name(const std::string &name);
-
-  /**
-   * @brief Takes a string of comma-separated numbers and outputs it as a vector.
-   *
-   * @param str The string of comma-separated numbers
-   * @return std::vector<double>
-   */
-  std::vector<double> string_to_double_array(const std::string &str);
 
   /**
    * @brief Return number with fixed precision after the decimal point
@@ -93,6 +87,13 @@ namespace DiFfRG
    * @brief Nice output from seconds to h/min/s style string
    */
   std::string time_format(size_t time_in_seconds);
+
+  template <typename T>
+    requires(!std::is_same_v<T, size_t>)
+  std::string time_format(T time_in_seconds)
+  {
+    return time_format(static_cast<size_t>(time_in_seconds));
+  }
 
   /**
    * @brief Nice output from seconds to h/min/s style string

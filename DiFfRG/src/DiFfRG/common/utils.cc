@@ -1,4 +1,5 @@
 // standard library
+#include <filesystem>
 #include <fstream>
 
 // DiFfRG
@@ -6,29 +7,6 @@
 
 namespace DiFfRG
 {
-  std::shared_ptr<spdlog::logger> build_logger(const std::string &name, const std::string &filename)
-  {
-    try {
-      auto log = spdlog::basic_logger_mt(name, filename);
-      log->set_pattern("[%Y/%m/%d] [%H:%M:%S] [%v]");
-      log->flush_on(spdlog::level::info);
-      return log;
-    } catch (const spdlog::spdlog_ex &e) {
-      throw std::runtime_error("Could not create logger: " + std::string(e.what()));
-      return nullptr;
-    }
-  }
-
-  std::vector<double> string_to_double_array(const std::string &str)
-  {
-    std::vector<double> array;
-    std::istringstream ss(str);
-    std::string buf;
-    while (std::getline(ss, buf, ','))
-      array.push_back(std::stod(buf));
-    return array;
-  }
-
   std::string strip_name(const std::string &name)
   {
     std::string stripped_name = name;
@@ -52,7 +30,9 @@ namespace DiFfRG
   bool create_folder(const std::string &path_)
   {
     auto path = make_folder(path_);
-    return (system((std::string("mkdir -p ") + path).c_str()) == 0);
+    std::error_code ec;
+    std::filesystem::create_directories(path, ec);
+    return !ec;
   }
 
   std::string time_format(size_t time_in_seconds)

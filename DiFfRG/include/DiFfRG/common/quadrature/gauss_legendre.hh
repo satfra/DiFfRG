@@ -1,7 +1,5 @@
 #pragma once
 
-#include <DiFfRG/common/cuda_prefix.hh>
-
 namespace DiFfRG
 {
   template <size_t N, typename ctype> struct GLQuadrature {
@@ -9,8 +7,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<1, ctype> {
-    __constant__ ctype x[1];
-    __constant__ ctype w[1];
+    ctype x[1];
+    ctype w[1];
     consteval GLQuadrature()
     {
       x[0] = 0.50000000000000000000000000000000;
@@ -19,8 +17,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<2, ctype> {
-    __constant__ ctype x[2];
-    __constant__ ctype w[2];
+    ctype x[2];
+    ctype w[2];
     consteval GLQuadrature()
     {
       x[0] = 0.2113248654051871177454256097490;
@@ -31,8 +29,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<3, ctype> {
-    __constant__ ctype x[3];
-    __constant__ ctype w[3];
+    ctype x[3];
+    ctype w[3];
     consteval GLQuadrature()
     {
       x[0] = 0.1127016653792583114820734600218;
@@ -45,8 +43,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<4, ctype> {
-    __constant__ ctype x[4];
-    __constant__ ctype w[4];
+    ctype x[4];
+    ctype w[4];
     consteval GLQuadrature()
     {
       x[0] = 0.0694318442029737123880267555536;
@@ -61,8 +59,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<5, ctype> {
-    __constant__ ctype x[5];
-    __constant__ ctype w[5];
+    ctype x[5];
+    ctype w[5];
     consteval GLQuadrature()
     {
       x[0] = 0.0469100770306680036011865608503;
@@ -79,8 +77,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<6, ctype> {
-    __constant__ ctype x[6];
-    __constant__ ctype w[6];
+    ctype x[6];
+    ctype w[6];
     consteval GLQuadrature()
     {
       x[0] = 0.0337652428984239860938492227530;
@@ -99,8 +97,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<7, ctype> {
-    __constant__ ctype x[7];
-    __constant__ ctype w[7];
+    ctype x[7];
+    ctype w[7];
     consteval GLQuadrature()
     {
       x[0] = 0.0254460438286207377369051579761;
@@ -121,8 +119,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<8, ctype> {
-    __constant__ ctype x[8];
-    __constant__ ctype w[8];
+    ctype x[8];
+    ctype w[8];
     consteval GLQuadrature()
     {
       x[0] = 0.0198550717512318841582195657153;
@@ -145,8 +143,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<9, ctype> {
-    __constant__ ctype x[9];
-    __constant__ ctype w[9];
+    ctype x[9];
+    ctype w[9];
     consteval GLQuadrature()
     {
       x[0] = 0.0159198802461869550822118985482;
@@ -171,8 +169,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<10, ctype> {
-    __constant__ ctype x[10];
-    __constant__ ctype w[10];
+    ctype x[10];
+    ctype w[10];
     consteval GLQuadrature()
     {
       x[0] = 0.0130467357414141399610179939578;
@@ -199,8 +197,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<11, ctype> {
-    __constant__ ctype x[11];
-    __constant__ ctype w[11];
+    ctype x[11];
+    ctype w[11];
     consteval GLQuadrature()
     {
       x[0] = 0.0108856709269715035980309994386;
@@ -229,8 +227,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<12, ctype> {
-    __constant__ ctype x[12];
-    __constant__ ctype w[12];
+    ctype x[12];
+    ctype w[12];
     consteval GLQuadrature()
     {
       x[0] = 0.0092196828766403746547254549254;
@@ -261,8 +259,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<13, ctype> {
-    __constant__ ctype x[13];
-    __constant__ ctype w[13];
+    ctype x[13];
+    ctype w[13];
     consteval GLQuadrature()
     {
       x[0] = 0.0079084726407059252635852755964;
@@ -295,8 +293,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<14, ctype> {
-    __constant__ ctype x[14];
-    __constant__ ctype w[14];
+    ctype x[14];
+    ctype w[14];
     consteval GLQuadrature()
     {
       x[0] = 0.0068580956515938305792013666480;
@@ -331,8 +329,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<15, ctype> {
-    __constant__ ctype x[15];
-    __constant__ ctype w[15];
+    ctype x[15];
+    ctype w[15];
     consteval GLQuadrature()
     {
       x[0] = 0.0060037409897572857552171407067;
@@ -369,8 +367,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<16, ctype> {
-    __constant__ ctype x[16];
-    __constant__ ctype w[16];
+    ctype x[16];
+    ctype w[16];
     consteval GLQuadrature()
     {
       x[0] = 0.0052995325041750337019229132748;
@@ -409,8 +407,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<20, ctype> {
-    __constant__ ctype x[20];
-    __constant__ ctype w[20];
+    ctype x[20];
+    ctype w[20];
     consteval GLQuadrature()
     {
       x[0] = 0.0034357004074525376069388057643;
@@ -457,8 +455,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<24, ctype> {
-    __constant__ ctype x[24];
-    __constant__ ctype w[24];
+    ctype x[24];
+    ctype w[24];
     consteval GLQuadrature()
     {
       x[0] = 0.0024063900014893199100012951496;
@@ -513,8 +511,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<32, ctype> {
-    __constant__ ctype x[32];
-    __constant__ ctype w[32];
+    ctype x[32];
+    ctype w[32];
     consteval GLQuadrature()
     {
       x[0] = 0.0013680690752592182275094356675;
@@ -585,8 +583,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<48, ctype> {
-    __constant__ ctype x[48];
-    __constant__ ctype w[48];
+    ctype x[48];
+    ctype w[48];
     consteval GLQuadrature()
     {
       x[0] = 0.0006144963737869406997292542184;
@@ -689,8 +687,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<64, ctype> {
-    __constant__ ctype x[64];
-    __constant__ ctype w[64];
+    ctype x[64];
+    ctype w[64];
     consteval GLQuadrature()
     {
       x[0] = 0.0003474791321139302715471878272;
@@ -825,8 +823,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<96, ctype> {
-    __constant__ ctype x[96];
-    __constant__ ctype w[96];
+    ctype x[96];
+    ctype w[96];
     consteval GLQuadrature()
     {
       x[0] = 0.0001552480583846165861549471078;
@@ -1025,8 +1023,8 @@ namespace DiFfRG
   };
 
   template <typename ctype> struct GLQuadrature<128, ctype> {
-    __constant__ ctype x[128];
-    __constant__ ctype w[128];
+    ctype x[128];
+    ctype w[128];
     consteval GLQuadrature()
     {
       x[0] = 0.0000875560264340427631959585091;

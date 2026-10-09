@@ -13,8 +13,8 @@ namespace DiFfRG
     class lambda10_integrator
     {
     public:
-      lambda10_integrator(QuadratureProvider &quadrature_provider, std::array<uint, 1> grid_sizes,
-                          const double x_extent, const JSONValue &json);
+      lambda10_integrator(QuadratureProvider &quadrature_provider, std::array<uint, 2> grid_sizes,
+                          const double x_extent, const double q0_extent, const uint q0_summands, const ConfigTree &json);
       lambda10_integrator(const lambda10_integrator &other);
       ~lambda10_integrator();
 
@@ -30,7 +30,8 @@ namespace DiFfRG
         if constexpr (std::is_same_v<NT, double>) return get_CT(std::forward<T>(t)...);
       }
 
-      void set_T(const double T, const double E = 0);
+      void set_T(const double value);
+      void set_q0_extent(const double value);
 
     private:
       std::future<double> request_CT(const double k, const double p0f, const double T, const double muq,
@@ -48,11 +49,13 @@ namespace DiFfRG
                     const double lambda10);
 
       QuadratureProvider &quadrature_provider;
-      const std::array<uint, 1> grid_sizes;
-      std::array<uint, 1> jac_grid_sizes;
+      const std::array<uint, 2> grid_sizes;
+      std::array<uint, 2> jac_grid_sizes;
       const double x_extent;
+      const double q0_extent;
+      const uint q0_summands;
       const double jacobian_quadrature_factor;
-      const JSONValue json;
+      const ConfigTree json;
 
       std::unique_ptr<DiFfRG::IntegratorFiniteTq0TBB<4, double, lambda10_kernel<__REGULATOR__>>> integrator;
     };

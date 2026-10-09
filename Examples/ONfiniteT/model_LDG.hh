@@ -1,25 +1,25 @@
 #pragma once
 
-#include "flows/flows.hh"
-#include <DiFfRG/model/model.hh>
-
-using namespace dealii;
+#include <DiFfRG/DiFfRG.hh>
 using namespace DiFfRG;
 
+#include "flows/flows.hh"
+
 struct Parameters {
-  Parameters(const JSONValue &value)
+  Parameters(const ConfigTree &config)
   {
     try {
-      Lambda = value.get_double("/physical/Lambda");
-      N = value.get_double("/physical/N");
-      T = value.get_double("/physical/T");
-      lambda = value.get_double("/physical/lambda");
-      m2 = value.get_double("/physical/m2");
+      Lambda = config.get_double("/physical/Lambda");
+      N = config.get_double("/physical/N");
+      T = config.get_double("/physical/T");
+      lambda2 = config.get_double("/physical/lambda2");
+      lambda4 = config.get_double("/physical/lambda4");
+      lambda6 = config.get_double("/physical/lambda6");
     } catch (std::exception &e) {
       std::cout << "Error in reading parameters: " << e.what() << std::endl;
     }
   }
-  double Lambda, N, T, lambda, m2;
+  double Lambda, N, T, lambda2, lambda4, lambda6;
 };
 
 // As for components, we have one FE function (u) and no extractors or variables.
@@ -51,16 +51,16 @@ public:
 
 protected:
   const Parameters prm;
-  mutable ON_finiteTFlowEquations flow_equations;
+  mutable ONFiniteTFlows flow_equations;
 
   // ----------------------------------------------------------------------------------------------------
   // initialization
   // ----------------------------------------------------------------------------------------------------
 public:
-  ON_finiteT(const JSONValue &json) : def::fRG(json.get_double("/physical/Lambda")), prm(json), flow_equations(json)
+  ON_finiteT(const ConfigTree &config) : def::fRG(config.get_double("/physical/Lambda")), prm(config), flow_equations(config)
   {
     flow_equations.set_k(Lambda);
-    flow_equations.print_parameters("log");
+    flow_equations.set_T(prm.T);
 
     // We notify the assembler, that the (1,0) LDG function depends on the (0,0) LDG function.
     this->components().add_dependency(1, 0, 0, 0);
@@ -71,7 +71,7 @@ public:
   template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
   {
     const auto &rho = pos[0];
-    values[idxf("u")] = prm.m2 + prm.lambda / 2. * rho;
+    values[idxf("u")] = prm.lambda2 + prm.lambda4 * rho + prm.lambda6 * powr<2>(rho);
   }
 
   void set_time(double t_)
@@ -97,7 +97,7 @@ public:
     const auto m2Pi = fe_functions[idxf("u")];
     const auto m2Sigma = fe_functions[idxf("u")] + 2. * rho * fe_derivatives[idxl("du")];
 
-    flux[idxf("u")][0] = flow_equations.V_integrator.get<NT>(k, prm.N, prm.T, rho, m2Pi, m2Sigma);
+    flow_equations.V.get(flux[idxf("u")][0], k, prm.N, prm.T, m2Pi, m2Sigma);
   }
 
   template <uint submodel, typename NT, typename Variables>
@@ -120,7 +120,7 @@ public:
     const double mPi = m2Pi > 0. ? std::sqrt(m2Pi) : 0.;
     const double mSigma = m2Sigma > 0. ? std::sqrt(m2Sigma) : 0.;
 
-    auto &out_file = output.csv_file("data.csv");
+    auto out_file = output.table("data.csv");
     out_file.set_Lambda(Lambda);
 
     out_file.value("sigma [GeV]", sigma);

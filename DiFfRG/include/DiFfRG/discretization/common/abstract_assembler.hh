@@ -1,12 +1,27 @@
 #pragma once
 
 // DiFfRG
-#include <DiFfRG/common/types.hh>
-#include <DiFfRG/discretization/data/data_output.hh>
+#include <DiFfRG/common/linear_algebra.hh>
+#include <DiFfRG/common/mpi.hh>
+#include <DiFfRG/discretization/common/snapshot_state.hh>
+#include <DiFfRG/discretization/common/solution_view.hh>
+#include <DiFfRG/discretization/data/output_session.hh>
 
 namespace DiFfRG
 {
   using namespace dealii;
+
+  template <unsigned int dim, typename VectorType> class DataOutput;
+
+  namespace internal
+  {
+    template <typename... Args> constexpr void validate_readout_helper_arity()
+    {
+      static_assert(sizeof...(Args) == 3,
+                    "The readout helper now requires a stable readout ID: helper(id, EoM, outputter)");
+    }
+
+  } // namespace internal
 
   /**
    * @brief This is the general assembler interface for any kind of discretization.
@@ -27,7 +42,8 @@ namespace DiFfRG
    * source term. We will henceforth call the first equation a **DAE** (differential algebraic equation) and the second
    * equation an **ODE** (ordinary differential equation).
    *
-   * For more information, please also refer to the [guide](#HowTo) and the documentation of DiFfRG::def::AbstractModel.
+   * For more information, please also refer to the Numerical Models guide in the documentation and the documentation
+   * of DiFfRG::def::AbstractModel.
    *
    * The second equation is used in all residual and jacobian functions which do not take the time derivative as an
    * explicit argument, while the first equation is used in all other methods.
@@ -40,19 +56,24 @@ namespace DiFfRG
   public:
     using NumberType = typename get_type::NumberType<VectorType>;
 
+    /** Return aggregate assembly statistics for the run summary. */
+    virtual SummaryEvent summary() const { return {}; }
+
     /**
-     * @brief Attach any data output to the DataOutput object provided. This can be used to extract additional data from
-     * the solution and write it to the output file. This includes both derivatives and other spatial functions, as well
-     * as single values that can be appended to the .csv file.
+     * @brief Contribute the assembler's fields and model readouts to one scoped output frame.
      *
-     * @param data_out The DataOutput object to attach the data to
+     * @param data_out The current output frame
      * @param solution The spatial solution vector
      * @param variables The additional variables vector
      */
-    virtual void attach_data_output(DataOutput<dim, VectorType> &data_out, const VectorType &solution,
+    virtual void attach_data_output(OutputFrame<dim, VectorType> &data_out, const VectorType &solution,
                                     const VectorType &variables = VectorType(),
                                     const VectorType &dt_solution = VectorType(),
                                     const VectorType &residual = VectorType()) = 0;
+
+    [[deprecated("Override attach_data_output(OutputFrame<dim, VectorType>&, ...) instead")]] virtual void
+    attach_data_output(DataOutput<dim, VectorType> &, const VectorType &, const VectorType & = VectorType(),
+                       const VectorType & = VectorType(), const VectorType & = VectorType()) = delete;
 
     /**
      * @brief Reinitialize the assembler. This is necessary if the mesh has changed, e.g. after a mesh refinement.
@@ -82,6 +103,25 @@ namespace DiFfRG
     virtual IndexSet get_differential_indices() const = 0;
 
     /**
+     * @brief Per-dof absolute tolerances for an implicit (IDA) time stepper.
+     *
+     * The uniform /timestepping/implicit/abs_tol treats every dof alike. A model whose components live on very
+     * different scales -- e.g. small expansion coefficients that only ever enter added to a much larger
+     * quantity -- can instead set an absolute tolerance per dof through the model hook `abs_tolerances` (see
+     * def::HasAbsTolerances). The tolerances may depend on the state; the IDA steppers re-read them (a warm restart
+     * of IDA) whenever some dof needs a tighter one by more than /timestepping/implicit/local_tolerance_refresh.
+     *
+     * @param atol     Output, sized and filled by the assembler when it returns true.
+     * @param solution The current (spatial) solution.
+     * @return false if the assembler or model does not provide local tolerances; the stepper then uses abs_tol.
+     */
+    virtual bool local_abs_tolerances(VectorType & /*atol*/, const VectorType & /*solution*/, double /*abs_tol*/,
+                                      double /*rel_tol*/) const
+    {
+      return false;
+    }
+
+    /**
      * @brief Reinitialize an arbitrary vector so that it has the correct size and structure.
      *
      * @param vector The vector to be reinitialized
@@ -89,11 +129,74 @@ namespace DiFfRG
     virtual void reinit_vector(VectorType &vector) const = 0;
 
     /**
+     * @brief Reinitialize a matrix to the jacobian's sparsity pattern.
+     *
+     * The counterpart of reinit_vector, and it exists for the same reason: callers must not build
+     * the object themselves. `SparseMatrixType m(get_sparsity_pattern_jacobian())` is fine for a
+     * serial matrix and impossible for a distributed one, which needs the owned row set and a
+     * communicator as well -- neither of which a timestepper has any business knowing. Routing
+     * this through the assembler keeps the timesteppers policy-agnostic.
+     */
+    virtual void reinit_matrix(SparseMatrixType &matrix) const = 0;
+
+    /**
+     * @brief The communicator this assembler's linear algebra lives on.
+     *
+     * MPI_COMM_SELF for a serial discretization, so callers never branch on the build type.
+     */
+    virtual MPI_Comm get_communicator() const = 0;
+
+    /**
+     * @brief Establish the layout of a fully-replicated read-only view of the solution.
+     *
+     * Output, the EoM search and the potential solves all read arbitrary global dof indices, which
+     * a vector holding only this rank's rows cannot answer. Refreshing one of these before handing
+     * it to them keeps all of that code unchanged. See SolutionView.
+     */
+    virtual void reinit_solution_view(SolutionView<VectorType> &view) const = 0;
+
+    /**
      * @brief Obtain the mass matrix.
      *
      * @return const SparseMatrixType& The mass matrix
      */
     virtual const SparseMatrixType &get_mass_matrix() const = 0;
+
+    /**
+     * @name Flow snapshots
+     *
+     * Used by AbstractTimestepper::run to write and restore snapshots of a flow. The defaults make
+     * an assembler that does not implement them fail loudly only when snapshots are actually used.
+     */
+    //@{
+
+    /**
+     * @brief Record the spatial state in a dof-numbering independent layout.
+     *
+     * @param spatial_replica A vector from which every global dof can be read (a refreshed
+     * SolutionView). Only reads, so it may be called on the writer rank alone.
+     */
+    virtual SnapshotSpatialState capture_snapshot_state([[maybe_unused]] const VectorType &spatial_replica) const
+    {
+      throw std::runtime_error("This assembler does not support flow snapshots.");
+    }
+
+    /**
+     * @brief Rebuild the snapshot's mesh if it differs from the current one, reinitialize, and
+     * fill @p spatial with the snapshot's values. Collective: called on every rank.
+     */
+    virtual void restore_snapshot_state([[maybe_unused]] const SnapshotSpatialState &state,
+                                        [[maybe_unused]] VectorType &spatial)
+    {
+      throw std::runtime_error("This assembler does not support restarting from flow snapshots.");
+    }
+
+    /** @brief Let the model add its history-dependent state; see ModelState. */
+    virtual void save_model_state([[maybe_unused]] ModelState &state) const {}
+
+    /** @brief Hand restored state to the model. @return whether the model implements load_state. */
+    virtual bool load_model_state([[maybe_unused]] const ModelState &state) { return false; }
+    //@}
 
     /**
      * @name Residual and jacobian functions
@@ -111,7 +214,7 @@ namespace DiFfRG
     virtual void residual_variables([[maybe_unused]] VectorType &residual, [[maybe_unused]] const VectorType &variables,
                                     [[maybe_unused]] const VectorType &spatial_solution)
     {
-      throw std::runtime_error("Not implemented!");
+      throw std::runtime_error("residual_variables() is not implemented by this assembler");
     };
 
     /**
@@ -126,7 +229,7 @@ namespace DiFfRG
                                     [[maybe_unused]] const VectorType &variables,
                                     [[maybe_unused]] const VectorType &spatial_solution)
     {
-      throw std::runtime_error("Not implemented!");
+      throw std::runtime_error("jacobian_variables() is not implemented by this assembler");
     };
 
     /**

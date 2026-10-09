@@ -1,21 +1,22 @@
-if(USE_CUDA)
-  set(flow_sources
-    flows/AA/ZA.cu
-    flows/AA/m2A.cu
-    flows/cbc/Zc.cu
-    flows/AAA/ZA3.cu
-    flows/Acbc/ZAcbc.cu
-    flows/AAAA/ZA4.cu
-	flows/flows.cc
-    PARENT_SCOPE)
-else()
-  set(flow_sources
-    flows/AA/ZA.cc
-    flows/AA/m2A.cc
-    flows/cbc/Zc.cc
-    flows/AAA/ZA3.cc
-    flows/Acbc/ZAcbc.cc
-    flows/AAAA/ZA4.cc
-	flows/flows.cc
-    PARENT_SCOPE)
-endif()
+set(YangMillsFlows_SOURCES 
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZA/src/constructor.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZA/src/CT_get.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZA/src/CT_map_1.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZA3/src/constructor.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZA3/src/CT_get.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZA3/src/CT_map_1.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZA4/src/constructor.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZA4/src/CT_get.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZA4/src/CT_map_1.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZAcbc/src/constructor.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZAcbc/src/CT_get.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/ZAcbc/src/CT_map_1.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/Zc/src/constructor.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/Zc/src/CT_get.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/Zc/src/CT_map_1.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/flows.cc)
+
+add_library(YangMillsFlows STATIC ${YangMillsFlows_SOURCES})
+add_library(YangMillsFlows_nowarn INTERFACE)
+target_compile_options(YangMillsFlows_nowarn INTERFACE -Wno-unused-parameter -Wno-unused-variable)
+target_link_libraries(YangMillsFlows DiFfRG::DiFfRG YangMillsFlows_nowarn)

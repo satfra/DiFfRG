@@ -12,17 +12,41 @@
 
 namespace DiFfRG
 {
-  template <FixedString _str, size_t... _val> struct NDBlock {
+  /**
+   * @brief A class to describe a function with a compile-time name and a fixed number of dimensions.
+   *
+   * @tparam _str The name of the function.
+   * @tparam _val The dimensions of the function.
+   */
+  template <FixedString _str, size_t... _val> struct FunctionND {
     static constexpr FixedString name = _str;
     static constexpr size_t size = (_val * ...);
     static constexpr size_t dim = sizeof...(_val);
     static constexpr std::array<size_t, dim> nd_sizes{{_val...}};
   };
 
-  template <FixedString _str> using Scalar = NDBlock<_str, 1>;
-  template <FixedString _str, size_t... _val> using FunctionND = NDBlock<_str, _val...>;
+  /*
+   * @brief A class to describe a scalar variable.
+   *
+   * @tparam _str The name of the variable.
+   */
+  template <FixedString _str> struct Scalar {
+    /*
+    You're probably wondering why this is not a specialization of FunctionND.
+    Well, depending on your compiler, this may end up in a wierd bug, where it messes up the internals of the array in
+    FixedString. I was not able to fully debug this, and therefore we circumvent the problem by very explicitly defining
+    the Scalar class.
+    */
+    static constexpr FixedString name = _str;
+    static constexpr size_t size = 1;
+    static constexpr size_t dim = 1;
+    static constexpr std::array<size_t, dim> nd_sizes{{1}};
+  };
 
   template <typename... _descriptors> struct SubDescriptor {
+    // tuple of all FixedString names
+    static constexpr auto names_tuple = std::tie(_descriptors::name...);
+
     static constexpr std::array<const char *, sizeof...(_descriptors)> names{{_descriptors::name...}};
     static constexpr std::array<size_t, sizeof...(_descriptors)> sizes{{_descriptors::size...}};
     using descriptor_tuple = std::tuple<_descriptors...>;
@@ -40,32 +64,53 @@ namespace DiFfRG
         }(std::make_index_sequence<sizeof...(_descriptors)>{}),
         "Names of a SubDescriptor must be unique!");
 
-    constexpr size_t get(const char *name) const
+    template <unsigned N> consteval size_t get(FixedString<N> name) const
     {
       size_t running_sum = 0;
       for (size_t i = 0; i < names.size(); ++i) {
-        if (0 == std::strcmp(names[i], name)) return running_sum;
+        // if (0 == std::strcmp(names[i], name)) return running_sum;
+        if(strings_equal(names[i], name)) return running_sum;
         running_sum += sizes[i];
       }
       // produce a compile-time error if the name is not found in the list
-      return running_sum != total_size ? 0
-                                       : throw std::invalid_argument("SubDescriptor::get: Name \"" + std::string(name) +
-                                                                     "\" not found. Available names are: " +
-                                                                     ((std::string(_descriptors::name) + "; ") + ...));
+      throw std::invalid_argument(
+          "SubDescriptor::get: Name \"" + std::string(name) +
+          "\" not found. Available names are: " + ((std::string(_descriptors::name) + "; ") + ...));
     }
 
-    constexpr size_t operator[](const char *name) const { return get(name); }
-    constexpr size_t operator()(const char *name) const { return get(name); }
+    template <unsigned N> consteval size_t operator[](FixedString<N> name) const { return get(name); }
+    template <unsigned N> consteval size_t operator()(FixedString<N> name) const { return get(name); }
 
-    constexpr char const *name(size_t index) const { return names[index]; }
+    template <unsigned N> consteval size_t operator[](char const(&arr)[N]) const { return get( FixedString<N-1>(arr) ); }
+    template <unsigned N> consteval size_t operator()(char const(&arr)[N]) const { return get( FixedString<N-1>(arr) ); }
 
-    constexpr std::array<const char *, sizeof...(_descriptors)> get_names() const { return names; }
-    static std::vector<std::string> get_names_vector() { return {names.begin(), names.end()}; }
+    consteval char const *name(size_t index) const { return names[index]; }
 
-    constexpr size_t size(const char *name) const
+    consteval std::array<const char *, sizeof...(_descriptors)> get_names() const { return names; }
+    /**
+     * @brief One name per component: a descriptor of size n > 1 contributes name_0, ..., name_{n-1}.
+     */
+    static std::vector<std::string> get_names_vector()
+    {
+      std::vector<std::string> result;
+      for (size_t i = 0; i < names.size(); ++i) {
+        if (sizes[i] == 1)
+          result.emplace_back(names[i]);
+        else
+          for (size_t j = 0; j < sizes[i]; ++j)
+            result.push_back(std::string(names[i]) + "_" + std::to_string(j));
+      }
+      return result;
+    }
+
+    template<unsigned N>
+    consteval size_t size(char const(&arr)[N]) const
     {
       for (size_t i = 0; i < names.size(); ++i)
-        if (0 == std::strcmp(names[i], name)) return sizes[i];
+        if(strings_equal(names[i], arr)) return sizes[i];
+      throw std::invalid_argument(
+          "SubDescriptor::size: Name \"" + std::string(arr) +
+          "\" not found. Available names are: " + ((std::string(_descriptors::name) + "; ") + ...));
     }
   };
 

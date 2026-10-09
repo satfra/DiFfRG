@@ -78,9 +78,11 @@ namespace DiFfRG
      * The interpolator checks if it can reproduce the original data with a given relative precision.
      *
      * @param tolerance The relative precision to use.
+     * @param x_column The column holding the independent variable, which the interpolants are
+     * evaluated at.
      * @return true If the interpolator is consistent with the original data.
      */
-    bool check_consistency(double tolerance) const;
+    bool check_consistency(double tolerance, uint x_column) const;
 
   public:
     /**

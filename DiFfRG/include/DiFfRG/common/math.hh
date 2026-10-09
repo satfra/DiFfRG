@@ -2,21 +2,26 @@
 
 // DiFfRG
 #include <DiFfRG/common/complex_math.hh>
-#include <DiFfRG/common/cuda_prefix.hh>
-#include <DiFfRG/common/utils.hh>
+#include <DiFfRG/common/kokkos.hh>
 
 // standard library
 #include <cmath>
-#include <type_traits>
 
 // external libraries
-#include <Eigen/Dense>
 #include <autodiff/forward/real.hpp>
-#include <deal.II/lac/block_vector.h>
-#include <deal.II/lac/vector.h>
+#include <type_traits>
 
 namespace DiFfRG
 {
+  /**
+   * @brief Type trait: true iff T is any autodiff::Real<N, U> specialization.
+   * Allows generic handling of higher-order forward-mode AD types beyond
+   * autodiff::real (= autodiff::Real<1, double>).
+   */
+  template <typename T> struct is_autodiff_real : std::false_type {};
+  template <size_t N, typename U> struct is_autodiff_real<autodiff::Real<N, U>> : std::true_type {};
+  template <typename T> inline constexpr bool is_autodiff_real_v = is_autodiff_real<T>::value;
+
   /**
    * @brief Finite-ness check for autodiff::real
    *
@@ -39,19 +44,31 @@ namespace DiFfRG
    */
   template <int n, typename NumberType>
     requires requires(NumberType x) {
-      x *x;
+      x * x;
       NumberType(1.) / x;
     }
-  constexpr __forceinline__ __host__ __device__ NumberType powr(const NumberType x)
+  constexpr KOKKOS_INLINE_FUNCTION NumberType powr(const NumberType x)
   {
     if constexpr (n == 0)
       return NumberType(1.);
     else if constexpr (n < 0)
       return NumberType(1.) / powr<-n, NumberType>(x);
-    else if constexpr (n > 1)
-      return x * powr<n - 1, NumberType>(x);
-    else
+    else if constexpr (n == 1)
       return x;
+    else if constexpr (n % 2 == 0)
+      return powr<n / 2>(x) * powr<n / 2>(x);
+    else
+      return powr<n / 2>(x) * powr<n / 2>(x) * x;
+  }
+
+  template <typename NumberType>
+    requires std::is_integral_v<NumberType>
+  constexpr KOKKOS_INLINE_FUNCTION NumberType factorial(const NumberType &x)
+  {
+    NumberType res = 1;
+    for (NumberType i = 2; i <= x; ++i)
+      res *= i;
+    return res;
   }
 
   /**
@@ -60,7 +77,7 @@ namespace DiFfRG
    * @tparam NT Type of the number
    * @param d Dimension of the sphere
    */
-  template <typename NT> constexpr __forceinline__ __host__ __device__ double V_d(NT d)
+  template <typename NT> constexpr KOKKOS_INLINE_FUNCTION double V_d(NT d)
   {
     using std::pow;
     using std::tgamma;
@@ -75,7 +92,7 @@ namespace DiFfRG
    * @param d Dimension of the sphere
    * @param extent Extent of the sphere
    */
-  template <typename NT1, typename NT2> constexpr __forceinline__ __host__ __device__ double V_d(NT1 d, NT2 extent)
+  template <typename NT1, typename NT2> constexpr KOKKOS_INLINE_FUNCTION double V_d(NT1 d, NT2 extent)
   {
     using std::pow;
     using std::tgamma;
@@ -88,7 +105,7 @@ namespace DiFfRG
    * @tparam NT Type of the number
    * @param d Dimension of the sphere
    */
-  template <typename NT> constexpr __forceinline__ __host__ __device__ double S_d(NT d)
+  template <typename NT> constexpr KOKKOS_INLINE_FUNCTION double S_d(NT d)
   {
     using std::pow;
     using std::tgamma;
@@ -125,7 +142,7 @@ namespace DiFfRG
    */
   template <typename NumberType>
     requires requires(NumberType x) { x >= 0; }
-  constexpr __forceinline__ __host__ __device__ auto heaviside_theta(const NumberType x)
+  constexpr KOKKOS_INLINE_FUNCTION auto heaviside_theta(const NumberType x)
   {
     if constexpr (std::is_same_v<NumberType, autodiff::real>)
       return x >= 0. ? 1. : 0.;
@@ -138,7 +155,7 @@ namespace DiFfRG
    */
   template <typename NumberType>
     requires requires(NumberType x) { x >= 0; }
-  constexpr __forceinline__ __host__ __device__ auto sign(const NumberType x)
+  constexpr KOKKOS_INLINE_FUNCTION auto sign(const NumberType x)
   {
     if constexpr (std::is_same_v<NumberType, autodiff::real>)
       return x >= 0. ? 1. : -1.;
@@ -154,14 +171,14 @@ namespace DiFfRG
    * @return bool
    */
   template <typename T1, typename T2, typename T3>
-    requires(std::is_floating_point<T1>::value || std::is_same_v<T1, autodiff::real> || is_complex<T1>::value) &&
-            (std::is_floating_point<T2>::value || std::is_same_v<T2, autodiff::real> || is_complex<T2>::value) &&
+    requires(std::is_floating_point<T1>::value || is_autodiff_real_v<T1> || is_complex<T1>::value) &&
+            (std::is_floating_point<T2>::value || is_autodiff_real_v<T2> || is_complex<T2>::value) &&
             std::is_floating_point<T3>::value
-  bool __forceinline__ __host__ __device__ is_close(T1 a, T2 b, T3 eps_)
+  bool KOKKOS_INLINE_FUNCTION is_close(T1 a, T2 b, T3 eps_)
   {
     if constexpr (is_complex<T1>::value || is_complex<T2>::value) {
       return is_close(real(a), real(b), eps_) && is_close(imag(a), imag(b), eps_);
-    } else if constexpr (std::is_same_v<T1, autodiff::real> || std::is_same_v<T2, autodiff::real>)
+    } else if constexpr (is_autodiff_real_v<T1> || is_autodiff_real_v<T2>)
       return is_close((double)a, (double)b, (double)eps_);
     else {
       T1 diff = std::fabs(a - b);
@@ -178,13 +195,13 @@ namespace DiFfRG
    * @return bool
    */
   template <typename T1, typename T2>
-    requires(std::is_floating_point<T1>::value || std::is_same_v<T1, autodiff::real> || is_complex<T1>::value) &&
-            (std::is_floating_point<T2>::value || std::is_same_v<T2, autodiff::real> || is_complex<T1>::value)
-  bool __forceinline__ __host__ __device__ is_close(T1 a, T2 b)
+    requires(std::is_floating_point<T1>::value || is_autodiff_real_v<T1> || is_complex<T1>::value) &&
+            (std::is_floating_point<T2>::value || is_autodiff_real_v<T2> || is_complex<T2>::value)
+  bool KOKKOS_INLINE_FUNCTION is_close(T1 a, T2 b)
   {
     if constexpr (is_complex<T1>::value || is_complex<T2>::value) {
       return is_close(real(a), real(b)) && is_close(imag(a), imag(b));
-    } else if constexpr (std::is_same_v<T1, autodiff::real> || std::is_same_v<T2, autodiff::real>) {
+    } else if constexpr (is_autodiff_real_v<T1> || is_autodiff_real_v<T2>) {
       constexpr auto eps_ = std::numeric_limits<double>::epsilon() * 10.;
       return is_close((double)a, (double)b, eps_);
     } else {
@@ -208,35 +225,74 @@ namespace DiFfRG
     return ret;
   }
 
-  /**
-   * @brief Converts a dealii vector to an Eigen vector
-   *
-   * @param dealii a dealii vector
-   * @param eigen an Eigen vector
-   */
-  void dealii_to_eigen(const dealii::Vector<double> &dealii, Eigen::VectorXd &eigen);
+  namespace compute
+  {
+    using ::Kokkos::abs;
+    using ::Kokkos::atan;
+    using ::Kokkos::cos;
+    using ::Kokkos::cosh;
+    using ::Kokkos::exp;
+    using ::Kokkos::imag;
+    using ::Kokkos::log;
+    using ::Kokkos::pow;
+    using ::Kokkos::real;
+    using ::Kokkos::sin;
+    using ::Kokkos::sinh;
+    using ::Kokkos::sqrt;
+    using ::Kokkos::tan;
+    using ::Kokkos::tanh;
 
-  /**
-   * @brief Converts a dealii block vector to an Eigen vector
-   *
-   * @param dealii a dealii block vector
-   * @param eigen an Eigen vector
-   */
-  void dealii_to_eigen(const dealii::BlockVector<double> &dealii, Eigen::VectorXd &eigen);
+    using ::Kokkos::fmax;
+    using ::Kokkos::fmin;
+    using ::Kokkos::max;
+    using ::Kokkos::min;
 
-  /**
-   * @brief Converts an Eigen vector to a dealii vector
-   *
-   * @param eigen an Eigen vector
-   * @param dealii a dealii vector
-   */
-  void eigen_to_dealii(const Eigen::VectorXd &eigen, dealii::Vector<double> &dealii);
+    using ::Kokkos::abs;
+    using ::Kokkos::fabs;
 
-  /**
-   * @brief Converts an Eigen vector to a dealii block vector
-   *
-   * @param eigen an Eigen vector
-   * @param dealii a dealii block vector
-   */
-  void eigen_to_dealii(const Eigen::VectorXd &eigen, dealii::BlockVector<double> &dealii);
+    using ::Kokkos::atan2;
+    using ::Kokkos::fma;
+
+    template <typename T1, typename T2, typename T3>
+      requires(!std::is_arithmetic_v<T1> || !std::is_arithmetic_v<T2> || !std::is_arithmetic_v<T3>)
+    constexpr KOKKOS_FORCEINLINE_FUNCTION auto fma(const T1 &a, const T2 &b, const T3 &c)
+    {
+      return a * b + c;
+    }
+
+    template <size_t N, typename T>
+      requires std::is_arithmetic_v<T>
+    constexpr KOKKOS_FORCEINLINE_FUNCTION T conj(const autodiff::Real<N, T> x)
+    {
+      return x;
+    }
+
+    template <size_t N, typename T>
+      requires std::is_arithmetic_v<T>
+    constexpr KOKKOS_FORCEINLINE_FUNCTION T conj(const cxReal<N, T> x)
+    {
+      cxReal<N, T> res;
+      autodiff::detail::For<0, N + 1>([&](auto i) constexpr { res[i] = Kokkos::conj(x[i]); });
+      return res;
+    }
+
+    template <typename T>
+      requires std::is_arithmetic_v<T>
+    constexpr KOKKOS_FORCEINLINE_FUNCTION T conj(const T x)
+    {
+      return x;
+    }
+
+    template <typename T>
+      requires is_complex<T>::value
+    constexpr KOKKOS_FORCEINLINE_FUNCTION T conj(const T x)
+    {
+      return Kokkos::conj(x);
+    }
+
+    using DiFfRG::powr;
+
+    template <typename NT> constexpr auto cot(const NT x) { return NT(1) / tan(x); }
+    template <typename NT> constexpr auto coth(const NT x) { return NT(1) / tanh(x); }
+  } // namespace compute
 } // namespace DiFfRG

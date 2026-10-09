@@ -14,6 +14,9 @@
 #include <DiFfRG/common/utils.hh>
 #include <DiFfRG/discretization/common/abstract_adaptor.hh>
 
+#include <concepts>
+#include <type_traits>
+
 namespace DiFfRG
 {
   using namespace dealii;
@@ -22,6 +25,24 @@ namespace DiFfRG
   {
   public:
     NoAdaptivity() {}
+
+    /**
+     * @brief Deduction-only constructor.
+     *
+     * NoAdaptivity needs nothing from the assembler; taking one lets a driver write
+     * `NoAdaptivity mesh_adaptor(assembler);` next to `HAdaptivity mesh_adaptor(assembler, json);`
+     * instead of respelling VectorType. The first constraint keeps this template from hijacking
+     * the copy constructor, the second turns a mismatched argument into a clean substitution
+     * failure rather than a silently wrong adaptor.
+     */
+    template <typename AssemblerOrDiscretization>
+      requires(!std::same_as<std::remove_cvref_t<AssemblerOrDiscretization>, NoAdaptivity>) &&
+              std::same_as<typename std::remove_cvref_t<AssemblerOrDiscretization>::VectorType, VectorType>
+    explicit NoAdaptivity(const AssemblerOrDiscretization &)
+    {
+    }
+
+    virtual ~NoAdaptivity() = default;
 
     /**
      * @brief Check if an adaptation step should be done and tranfer the given solution to the new mesh.
@@ -39,4 +60,7 @@ namespace DiFfRG
      */
     virtual bool adapt(VectorType &) override { return false; }
   };
+
+  template <typename AssemblerOrDiscretization>
+  NoAdaptivity(const AssemblerOrDiscretization &) -> NoAdaptivity<typename AssemblerOrDiscretization::VectorType>;
 } // namespace DiFfRG

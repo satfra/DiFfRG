@@ -1,0 +1,11 @@
+numpy
+scipy
+matplotlib
+adaptive[notebook]
+pandas
+h5py
+loky
+cloudpickle
+seaborn
+jupyter_bokeh
+vtk

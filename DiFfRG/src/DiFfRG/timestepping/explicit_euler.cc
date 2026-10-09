@@ -1,73 +1,77 @@
+// standard library
+#include <algorithm>
+
 // external libraries
 #include <deal.II/lac/block_vector.h>
 
 // DiFfRG
+#include <DiFfRG/common/eigen.hh>
 #include <DiFfRG/common/types.hh>
-#include <DiFfRG/discretization/data/data_output.hh>
+#include <DiFfRG/discretization/data/output_session.hh>
 #include <DiFfRG/timestepping/explicit_euler.hh>
 
 namespace DiFfRG
 {
   template <typename VectorType, typename SparseMatrixType, uint dim>
-  void TimeStepperExplicitEuler<VectorType, SparseMatrixType, dim>::run(
-      AbstractFlowingVariables<NumberType> *initial_condition, double start, double stop)
+  void TimeStepperExplicitEuler_impl<VectorType, SparseMatrixType, dim>::run_segment(
+      AbstractFlowingVariables<NumberType, VectorType> &initial_condition, double start, double stop)
   {
-    this->data_out = this->get_data_out();
-    this->adaptor = this->get_adaptor();
 
-    const SparseMatrixType &mass_matrix = assembler->get_mass_matrix();
+    const SparseMatrixType &mass_matrix = assembler.get_mass_matrix();
     InverseSparseMatrixType inverse_mass_matrix;
     inverse_mass_matrix.initialize(mass_matrix);
 
     // Start out by saving step 0
-    assembler->set_time(start);
+    assembler.set_time(start);
 
-    VectorType old_solution = initial_condition->spatial_data();
-    VectorType solution = initial_condition->spatial_data();
+    VectorType old_solution = initial_condition.spatial_data();
+    VectorType solution = initial_condition.spatial_data();
 
-    assembler->attach_data_output(*data_out, solution);
-
-    data_out->flush(start);
+    data_out.write_frame(start, [&](auto &frame) { assembler.attach_data_output(frame, solution); });
 
     double last_save = start;
     double t = start;
-    while (t < stop) {
-      const auto now = std::chrono::high_resolution_clock::now();
-
-      if ((*adaptor)(t, old_solution)) {
+    // Not `t < stop`: the rounding in t += dt must not leave a last step of size ~1e-17.
+    while (stop - t > 1e-10 * expl.dt) {
+      CalcDtTimer calc_timer;
+      if (adaptor(t, old_solution)) {
         solution = old_solution;
         inverse_mass_matrix.initialize(mass_matrix);
       }
 
+      // The last step is shortened to land on stop exactly: run() hands the state at stop to the
+      // next segment or writes it to a snapshot.
+      const double dt = std::min(expl.dt, stop - t);
+
       solution = 0.;
-      assembler->set_time(t);
-      assembler->residual(solution, old_solution, -expl.dt, 0.);
+      assembler.set_time(t);
+      assembler.residual(solution, old_solution, -dt, 0.);
       inverse_mass_matrix.solve(solution);
       solution += old_solution;
 
-      t += expl.dt;
+      t += dt;
       if ((t - last_save + 1e-4 * expl.dt) >= output_dt) {
-        assembler->attach_data_output(*data_out, solution);
-
-        data_out->flush(t);
+        data_out.write_frame(t, [&](auto &frame) { assembler.attach_data_output(frame, solution); });
         last_save = t;
       }
-      old_solution = solution;
+      old_solution.swap(solution);
 
-      const auto ms_passed =
-          std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - now)
-              .count();
-      console_out(t, "explicit residual", 1, ms_passed);
+      this->log.progress({.topic = progress_topics::explicit_residual,
+                          .time = t,
+                          .duration_ms = calc_timer.lap(),
+                          .minimum_verbosity = 1});
     }
 
-    initial_condition->spatial_data() = solution;
+    // After the swap at the end of the loop body, old_solution holds the state at t.
+    initial_condition.spatial_data() = old_solution;
+    this->drain_output();
   }
 } // namespace DiFfRG
 
-template class DiFfRG::TimeStepperExplicitEuler<dealii::Vector<double>, dealii::SparseMatrix<double>, 1>;
-template class DiFfRG::TimeStepperExplicitEuler<dealii::Vector<double>, dealii::SparseMatrix<double>, 2>;
-template class DiFfRG::TimeStepperExplicitEuler<dealii::Vector<double>, dealii::SparseMatrix<double>, 3>;
+template class DiFfRG::TimeStepperExplicitEuler_impl<dealii::Vector<double>, dealii::SparseMatrix<double>, 1>;
+template class DiFfRG::TimeStepperExplicitEuler_impl<dealii::Vector<double>, dealii::SparseMatrix<double>, 2>;
+template class DiFfRG::TimeStepperExplicitEuler_impl<dealii::Vector<double>, dealii::SparseMatrix<double>, 3>;
 
-template class DiFfRG::TimeStepperExplicitEuler<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 1>;
-template class DiFfRG::TimeStepperExplicitEuler<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 2>;
-template class DiFfRG::TimeStepperExplicitEuler<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 3>;
+template class DiFfRG::TimeStepperExplicitEuler_impl<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 1>;
+template class DiFfRG::TimeStepperExplicitEuler_impl<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 2>;
+template class DiFfRG::TimeStepperExplicitEuler_impl<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 3>;

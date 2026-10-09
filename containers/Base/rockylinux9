@@ -6,19 +6,29 @@ LABEL type=diffrg-build-test
 ARG threads=4
 
 # Rocky 9's default GCC (11) lacks full C++20; use gcc-toolset-12. openblas-devel
-# lives in the (disabled-by-default) devel repo. cmake from AppStream is >= 3.26.
-RUN dnf -y --enablerepo=devel install \
+# lives in the (disabled-by-default) devel repo; EPEL provides sundials-devel.
+# cmake from AppStream is >= 3.26. Rocky's Boost (1.75) is older than DiFfRG's
+# floor (1.81), so Boost falls back to the bundled build -- a deliberate test of
+# that path; TBB/HDF5/SUNDIALS are auto-detected.
+RUN dnf -y install epel-release \
+    && dnf -y --enablerepo=devel install \
         gcc-toolset-12 cmake git \
         openblas-devel gsl-devel \
+        boost-devel tbb-devel hdf5-devel sundials-devel \
         doxygen graphviz python3 patch which \
     && dnf clean all
 
-# Make gcc-toolset-12 the active toolchain for non-interactive bash (build.sh),
-# so its GCC 12 is on PATH for the whole build.
+# Make gcc-toolset-12 the active toolchain for non-interactive bash so its GCC 12
+# is on PATH for the whole build.
 RUN echo "source /opt/rh/gcc-toolset-12/enable" > /.bashenv
 ENV BASH_ENV=/.bashenv
 
 WORKDIR /DiFfRG
 COPY . /DiFfRG
 
-RUN bash build.sh -d -f -j ${threads}
+RUN cmake -S /DiFfRG -B /build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGPU=OFF -DMPI=OFF -DDiFfRG_DOCUMENTATION=OFF \
+    && cmake --build /build -j ${threads} \
+    && cmake -DDiFfRG_TEST=ON /build/DiFfRG/src/DiFfRG-build \
+    && cmake --build /build/DiFfRG/src/DiFfRG-build -j ${threads}

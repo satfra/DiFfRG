@@ -1,0 +1,47 @@
+--- a/include/deal.II/lac/vector_memory.templates.h
++++ b/include/deal.II/lac/vector_memory.templates.h
+@@ -31,6 +31,26 @@
+ DEAL_II_NAMESPACE_OPEN
+ 
+ 
++namespace internal
++{
++  // DiFfRG: set once a pool has been destroyed. InitFinalize::finalize()
++  // calls release_unused_memory() on the PETSc pools, and when the
++  // InitFinalize is torn down from an atexit handler registered before a pool
++  // was first used -- as DiFfRG::Init() does -- the pool's destructor has run
++  // by then. The flag lives outside the pool (a store to the pool itself from
++  // its destructor is dead, and compilers drop it), and is trivially
++  // destructible, so it outlives every pool.
++  template <typename VectorType>
++  bool &
++  growing_vector_memory_pool_destroyed()
++  {
++    static bool destroyed = false;
++    return destroyed;
++  }
++} // namespace internal
++
++
++
+ template <typename VectorType>
+ typename GrowingVectorMemory<VectorType>::Pool &
+ GrowingVectorMemory<VectorType>::get_pool()
+@@ -78,6 +98,7 @@ inline GrowingVectorMemory<VectorType>::Pool::~Pool()
+   // that are pointed to by the std::unique_ptrs
+   data->clear();
+   delete data;
++  internal::growing_vector_memory_pool_destroyed<VectorType>() = true;
+ }
+ 
+ 
+@@ -194,6 +215,9 @@ GrowingVectorMemory<VectorType>::release_unused_memory()
+ {
++  if (internal::growing_vector_memory_pool_destroyed<VectorType>())
++    return;
++
+   std::lock_guard<std::mutex> lock(mutex);
+ 
+   if (get_pool().data != nullptr)
+     get_pool().data->clear();
+ }

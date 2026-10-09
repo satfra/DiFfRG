@@ -1,0 +1,60 @@
+# The TOML twin of parameter.json. Both files are accepted; ConfigTree picks the reader
+# from the file extension. Run this tutorial against it with
+#
+#   ./tut1 -p parameter.toml
+#
+# or simply delete parameter.json, in which case parameter.toml is found automatically.
+# Parameter paths used from C++ and on the command line stay the same in either format,
+# e.g. json.get_double("/physical/Lambda") and -sd /physical/Lambda=2.0.
+
+[physical]
+Lambda = 1.0
+a = 0.0
+b = 1.0
+c = 0.0
+d = 0.0
+
+[discretization]
+fe_order = 3
+threads = 0
+overintegration = 0
+output_subdivisions = 2
+EoM_abs_tol = 1e-10
+EoM_max_iter = 200
+
+[discretization.grid]
+# Grid axes are given as "start:step:stop".
+x_grid = "0:1e-2:1"
+y_grid = "0:0.1:1"
+z_grid = "0:0.1:1"
+refine = 0
+
+[discretization.adaptivity]
+start_adapt_at = 0.0
+adapt_dt = 1e-1
+level = 0
+refine_percent = 1e-1
+coarsen_percent = 5e-2
+
+[timestepping]
+final_time = 10.0
+output_dt = 1e-1
+
+[timestepping.explicit]
+dt = 1e-4
+minimal_dt = 1e-6
+maximal_dt = 1e-1
+abs_tol = 1e-12
+rel_tol = 1e-4
+
+[timestepping.implicit]
+dt = 1e-4
+minimal_dt = 1e-6
+maximal_dt = 1e-1
+abs_tol = 1e-13
+rel_tol = 1e-7
+
+[output]
+verbosity = 1
+folder = "./"
+name = "output"

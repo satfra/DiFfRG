@@ -243,12 +243,12 @@ ShowCodeOptimizeFunctions[]
 
 (* ::Input::Initialization:: *)
 (*Anomalous dimensions*)
-kerneletaQ=<|"Path"->"qbq","Name"->"etaQ","Type"->"Quadratureq0","Angles"->1,"d"->4,"AD"->True,"ctype"->"double","Device"->"CPU"|>;
-kerneletaPhi=<|"Path"->"PhiPhi","Name"->"etaPhi","Type"->"Quadratureq0","Angles"->1,"d"->4,"AD"->True,"ctype"->"double","Device"->"CPU"|>;
+kerneletaQ=<|"Path"->"qbq","Name"->"etaQ","Type"->"Quadratureq0","Angles"->1,"d"->4,"AD"->True,"ComputeType"->"double","Device"->"CPU"|>;
+kerneletaPhi=<|"Path"->"PhiPhi","Name"->"etaPhi","Type"->"Quadratureq0","Angles"->1,"d"->4,"AD"->True,"ComputeType"->"double","Device"->"CPU"|>;
 
 (*Mesons*)
-kernelV=<|"Path"->"V","Name"->"V","Type"->"Quadrature","Angles"->0,"d"->3,"AD"->True,"ctype"->"double","Device"->"CPU"|>;
-kernelhPhi=<|"Path"->"Phiqbq","Name"->"hPhi0","Type"->"Quadratureq0","Angles"->1,"d"->4,"AD"->False,"ctype"->"double","Device"->"CPU"|>;
+kernelV=<|"Path"->"V","Name"->"V","Type"->"Quadrature","Angles"->0,"d"->3,"AD"->True,"ComputeType"->"double","Device"->"CPU"|>;
+kernelhPhi=<|"Path"->"Phiqbq","Name"->"hPhi0","Type"->"Quadratureq0","Angles"->1,"d"->4,"AD"->False,"ComputeType"->"double","Device"->"CPU"|>;
 
 kernels={
 kerneletaQ,kerneletaPhi,

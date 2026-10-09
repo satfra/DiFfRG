@@ -1,0 +1,35 @@
+# DiFfRG build test on Rocky Linux 9 with CUDA (GPU on, no MPI).
+# Build from the repository root as context.
+#
+# No GPU is present during `docker build`, so pin a CUDA architecture via the
+# cuda_arch build-arg (default AMPERE80 / compute 8.0). The test suite is
+# compiled here but executed only on a GPU host (containers/test_all.sh).
+FROM nvidia/cuda:12.8.1-devel-rockylinux9
+LABEL type=diffrg-build-test
+
+ARG threads=4
+ARG cuda_arch=AMPERE80
+
+# Rocky 9 needs gcc-toolset-12 for C++20; openblas-devel from the devel repo,
+# sundials-devel from EPEL. Boost (1.75) is below DiFfRG's 1.81 floor -> bundled.
+RUN dnf -y install epel-release \
+    && dnf -y --enablerepo=devel install \
+        gcc-toolset-12 cmake git \
+        openblas-devel gsl-devel \
+        boost-devel tbb-devel hdf5-devel sundials-devel \
+        doxygen graphviz python3 patch which \
+    && dnf clean all
+
+RUN echo "source /opt/rh/gcc-toolset-12/enable" > /.bashenv
+ENV BASH_ENV=/.bashenv
+
+WORKDIR /DiFfRG
+COPY . /DiFfRG
+
+RUN cmake -S /DiFfRG -B /build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGPU=ON -DMPI=OFF -DDiFfRG_DOCUMENTATION=OFF \
+        -DKokkos_ARCH=${cuda_arch} -DKokkos_ARCH_LIST=${cuda_arch} \
+    && cmake --build /build -j ${threads} \
+    && cmake -DDiFfRG_TEST=ON /build/DiFfRG/src/DiFfRG-build \
+    && cmake --build /build/DiFfRG/src/DiFfRG-build -j ${threads}

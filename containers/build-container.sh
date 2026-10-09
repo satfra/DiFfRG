@@ -1,10 +1,18 @@
 #!/bin/bash
 # ##############################################################################
-# Interactively build a single DiFfRG build-test container from containers/Base/.
+# Interactively build a single DiFfRG build-test container and run its tests.
 #
-# Usage: build-container.sh [-j <threads>]
-# The image builds the local working tree (via build.sh -d -f) and installs to
-# the default location (~/.local/share/DiFfRG).
+# Usage: build-container.sh [-j <threads>] [-a <cuda_arch>]
+#   -j  build threads (default: half the host cores)
+#   -a  Kokkos CUDA arch for CUDA images (default: AMPERE80)
+#
+# The image builds the local working tree (cmake superbuild) into the default
+# install prefix ($HOME/.local/share/DiFfRG) and
+# compiles the test suite. After a successful build the tests are run through
+# Singularity and both logs are written to containers/logs/:
+#   <image>.log         the build (compile) output, incl. system-vs-bundled deps
+#   <image>_ctest.log   the ctest results
+# CUDA images only run ctest when a host GPU (nvidia-smi) is available.
 # ##############################################################################
 
 scriptpath="$(
@@ -14,13 +22,15 @@ scriptpath="$(
 repo="$(cd -- "${scriptpath}/.." >/dev/null 2>&1 && pwd -P)"
 
 threads=''
-while getopts j: flag; do
+cuda_arch='AMPERE80'
+while getopts j:a: flag; do
   case "${flag}" in
   j) threads=${OPTARG} ;;
+  a) cuda_arch=${OPTARG} ;;
   esac
 done
 
-# Default to half the host cores (matches build.sh / run_tests.sh).
+# Default to half the host cores.
 if [[ -z ${threads} ]]; then
   ncores=''
   if command -v nproc >/dev/null 2>&1; then
@@ -33,39 +43,71 @@ if [[ -z ${threads} ]]; then
   [[ ${threads} -lt 1 ]] && threads=1
 fi
 
-cd "${scriptpath}"
+cd "${scriptpath}" || exit 1
 mkdir -p logs
 
-# List the available Base images.
-images=$(ls Base/)
-echo "Available DiFfRG build-test images (CPU-only):"
+# Collect images as "<subdir>/<name>" from both Base/ (CPU) and CUDA/.
+images=()
+for sub in Base CUDA; do
+  [[ -d ${sub} ]] || continue
+  for f in "${sub}"/*; do
+    [[ -f ${f} ]] && images+=("${f}")
+  done
+done
+if [[ ${#images[@]} -eq 0 ]]; then
+  echo "No container definitions found under Base/ or CUDA/."
+  exit 1
+fi
+
+echo "Available DiFfRG build-test images:"
 i=1
-for image in ${images}; do
-  echo "  $i) ${image}"
+for img in "${images[@]}"; do
+  echo "  $i) ${img}"
   i=$((i + 1))
 done
 echo
-read -p "Enter the number of the image to build: " choice
-if ! [[ ${choice} =~ ^[0-9]+$ ]] || [[ ${choice} -lt 1 ]] || [[ ${choice} -gt $(echo "${images}" | wc -l) ]]; then
+read -r -p "Enter the number of the image to build: " choice
+if ! [[ ${choice} =~ ^[0-9]+$ ]] || [[ ${choice} -lt 1 ]] || [[ ${choice} -gt ${#images[@]} ]]; then
   echo "Invalid choice."
   exit 1
 fi
-image=$(echo "${images}" | sed -n "${choice}p")
+dockerfile="${images[$((choice - 1))]}"
+name="$(basename "${dockerfile}")"
+tag="diffrg-test-${name}"
+is_cuda=0
+[[ ${dockerfile} == CUDA/* ]] && is_cuda=1
 
 echo
-echo "Building diffrg-test-${image} with ${threads} threads (context: ${repo})..."
-echo "Log: ${scriptpath}/logs/${image}.log"
-docker buildx build \
-  -t "diffrg-test-${image}" \
-  -f "${scriptpath}/Base/${image}" \
+echo "Building ${tag} with ${threads} threads (context: ${repo})..."
+echo "Build log: ${scriptpath}/logs/${name}.log"
+build_args=(--build-arg "threads=${threads}")
+[[ ${is_cuda} -eq 1 ]] && build_args+=(--build-arg "cuda_arch=${cuda_arch}")
+
+docker buildx build --load \
+  -t "${tag}" \
+  -f "${scriptpath}/${dockerfile}" \
   "${repo}" \
   --no-cache --progress=plain \
-  --build-arg threads="${threads}" 2>&1 | tee "logs/${image}.log"
+  "${build_args[@]}" 2>&1 | tee "logs/${name}.log"
 
-# tee hides docker's exit code; recover it.
-if [[ ${PIPESTATUS[0]} -eq 0 ]]; then
-  echo "   Successfully built diffrg-test-${image}."
-else
-  echo "   Build FAILED for ${image}. See logs/${image}.log."
+if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+  echo "   Build FAILED for ${name}. See logs/${name}.log."
   exit 1
+fi
+echo "   Successfully built ${tag}."
+
+# Run the test suite. ctest is invoked through bash -c so non-interactive shells
+# pick up BASH_ENV (e.g. Rocky's gcc-toolset-12 runtime).
+testdir="/build/DiFfRG/src/DiFfRG-build"
+ctest_cmd="ctest --test-dir ${testdir} --output-on-failure"
+if [[ ${is_cuda} -eq 1 ]]; then
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    echo "Running GPU tests (Singularity --nv). Log: logs/${name}_ctest.log"
+    bash "${scriptpath}/singularity-run.sh" -g -W "docker-daemon://${tag}" bash -lc "${ctest_cmd}" 2>&1 | tee "logs/${name}_ctest.log"
+  else
+    echo "No host GPU (nvidia-smi) found; skipping ctest for ${name}." | tee "logs/${name}_ctest.log"
+  fi
+else
+  echo "Running tests (Singularity). Log: logs/${name}_ctest.log"
+  bash "${scriptpath}/singularity-run.sh" -W "docker-daemon://${tag}" bash -lc "${ctest_cmd}" 2>&1 | tee "logs/${name}_ctest.log"
 fi

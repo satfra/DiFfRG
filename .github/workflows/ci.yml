@@ -1,0 +1,389 @@
+name: CI
+
+# Build DiFfRG against the pre-built dependency bundle (containers/release/) that
+# users install, pinned in .github/deps-bundle-version. If the dependency inputs
+# of this checkout (containers/release/deps-inputs-hash.sh) differ from the ones
+# the pinned bundle was built from, a bundle is built from this checkout first
+# (~3 h, cached by the input hash) and the library is tested against that.
+# Changing dependencies therefore works in a PR; cut a deps-v* release and bump
+# the pin before merging, so later runs download it instead.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      test_suite:
+        description: "CTest suite to run"
+        required: true
+        default: quick
+        type: choice
+        options:
+          - quick
+          - slow
+          - all
+      update_baselines:
+        description: "Refresh example regression baselines and upload them as an artifact"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Inside a job container the runner defaults run steps to `sh` (dash), which
+# breaks `set -o pipefail` and ${PIPESTATUS[@]}; force bash everywhere.
+defaults:
+  run:
+    shell: bash
+
+env:
+  DIFFRG_BUNDLE_VARIANT: linux-x86_64-v3-cpu
+  # GitHub-hosted ubuntu-latest runners for public repos have 4 vCPUs.
+  DIFFRG_BUILD_JOBS: 4
+  DIFFRG_TEST_JOBS: 4
+  DIFFRG_EXAMPLE_JOBS: 4
+  # The packages a bundle needs from the host (as in containers/release/test/ubuntu24.04.Dockerfile).
+  DIFFRG_APT_PACKAGES: >-
+    git cmake build-essential gfortran libopenblas-dev libgsl-dev zlib1g-dev
+    python3 patch ca-certificates curl zstd file pkg-config
+
+jobs:
+  deps-bundle:
+    name: Dependency bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 350 # a bundle build takes ~3 h on a hosted runner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency inputs
+        id: inputs
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < .github/deps-bundle-version)"
+          hash="$(bash containers/release/deps-inputs-hash.sh "${DIFFRG_BUNDLE_VARIANT}")"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "hash=${hash}" >> "${GITHUB_OUTPUT}"
+          echo "Pinned bundle: deps-v${version} (${DIFFRG_BUNDLE_VARIANT}); dependency inputs: \`${hash}\`" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Download the pinned bundle
+        id: release
+        env:
+          VERSION: ${{ steps.inputs.outputs.version }}
+          HASH: ${{ steps.inputs.outputs.hash }}
+        run: |
+          set -euo pipefail
+          name="diffrg-deps-${VERSION}-${DIFFRG_BUNDLE_VARIANT}"
+          url="https://github.com/${{ github.repository }}/releases/download/deps-v${VERSION}/${name}.tar.zst"
+          mkdir -p .ci/dist
+          curl -fsSL -o ".ci/dist/${name}.tar.zst" "${url}"
+          curl -fsSL -o ".ci/dist/${name}.tar.zst.sha256" "${url}.sha256"
+          (cd .ci/dist && sha256sum -c "${name}.tar.zst.sha256")
+          bundle_hash="$(tar --zstd -xOf ".ci/dist/${name}.tar.zst" "${name}/BUNDLE_MANIFEST.json" |
+            grep -oE '"deps_inputs_hash": *"[^"]*"' | sed -E 's/.*: *"([^"]*)"/\1/' || true)"
+          if [[ "${bundle_hash}" == "${HASH}" ]]; then
+            echo "source=release" >> "${GITHUB_OUTPUT}"
+            echo "Using the released bundle deps-v${VERSION}." >> "${GITHUB_STEP_SUMMARY}"
+          else
+            rm -rf .ci/dist
+            echo "deps-v${VERSION} was built from other dependency inputs (\`${bundle_hash:-none recorded}\`); a bundle is built from this checkout." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Restore a bundle built from these inputs
+        id: cache
+        if: steps.release.outputs.source != 'release'
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci/dist
+          key: diffrg-deps-${{ env.DIFFRG_BUNDLE_VARIANT }}-${{ steps.inputs.outputs.hash }}
+
+      - name: Reject fork dependency changes
+        if: steps.release.outputs.source != 'release' && steps.cache.outputs.cache-hit != 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::error::This pull request changes the dependency inputs, which needs a bundle build. Re-run from a branch in this repository, or ask a maintainer to publish a matching deps-v* release."
+          exit 1
+
+      # The superbuild needs ~25 GB of scratch; hosted runners start with ~14.
+      - name: Free disk space
+        if: steps.release.outputs.source != 'release' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/.ghcup /usr/local/share/boost
+          df -h /
+
+      # Version 0.0.0 marks a bundle that was never released.
+      - name: Build a bundle from this checkout
+        if: steps.release.outputs.source != 'release' && steps.cache.outputs.cache-hit != 'true'
+        run: bash containers/release/build-release.sh -v 0.0.0 -V "${DIFFRG_BUNDLE_VARIANT}" -j 4 -o .ci/dist
+
+      - name: Cache the built bundle
+        if: steps.release.outputs.source != 'release' && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci/dist
+          key: diffrg-deps-${{ env.DIFFRG_BUNDLE_VARIANT }}-${{ steps.inputs.outputs.hash }}
+
+      - name: Hand the bundle to the build jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: diffrg-deps-bundle
+          path: .ci/dist/*.tar.zst
+          if-no-files-found: error
+          retention-days: 3
+
+  build-and-test:
+    name: Build and test
+    needs: deps-bundle
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      - name: Install the toolchain
+        run: |
+          set -euo pipefail
+          apt-get -y update
+          DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends ${DIFFRG_APT_PACKAGES}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: diffrg-deps-bundle
+          path: .ci/dist
+
+      - name: Install the dependency bundle
+        run: |
+          set -euo pipefail
+          bash install-diffrg-deps.sh --file .ci/dist/*.tar.zst --prefix "${RUNNER_TEMP}/diffrg"
+          echo "DiFfRG_BUNDLED_DIR=${RUNNER_TEMP}/diffrg/bundled" >> "${GITHUB_ENV}"
+
+      - name: Build DiFfRG
+        id: build
+        run: |
+          set -euo pipefail
+          cmake -S DiFfRG -B DiFfRG/bin \
+            -DBUNDLED_DIR="${DiFfRG_BUNDLED_DIR}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDiFfRG_TEST=ON \
+            -DDiFfRG_DOCUMENTATION=OFF \
+            -DMARCH=none
+          cmake --build DiFfRG/bin -j "${{ env.DIFFRG_BUILD_JOBS }}"
+
+      # Runs only when the build succeeded (default fail-fast). Uses `set +e` so a
+      # test failure doesn't abort here -- we record the result, publish the badge,
+      # then fail the job at the end so a red badge is still written on failure.
+      - name: Run tests
+        id: tests
+        env:
+          TEST_SUITE: ${{ github.event_name == 'workflow_dispatch' && inputs.test_suite || 'quick' }}
+        run: |
+          set -o pipefail
+          case "${TEST_SUITE}" in
+            quick)
+              ctest_filter="-LE slow"
+              ;;
+            slow)
+              ctest_filter="-L slow"
+              ;;
+            all)
+              ctest_filter=""
+              ;;
+            *)
+              echo "::error::Unknown test suite: ${TEST_SUITE}"
+              exit 2
+              ;;
+          esac
+
+          echo "Running ${TEST_SUITE} test suite"
+          echo "CTest filter: ${ctest_filter:-<none>}"
+
+          set +e
+          ctest --test-dir DiFfRG/bin -j "${{ env.DIFFRG_TEST_JOBS }}" ${ctest_filter} --output-on-failure | tee "${RUNNER_TEMP}/ctest.log"
+          ctest_status=${PIPESTATUS[0]}
+          set -e
+
+          summary=$(grep -Eo '[0-9]+ tests failed out of [0-9]+' "${RUNNER_TEMP}/ctest.log" | tail -1 || true)
+          if [[ -n "${summary}" ]]; then
+            failed=$(echo "$summary" | awk '{print $1}')
+            total=$(echo "$summary" | awk '{print $NF}')
+          else
+            failed=${ctest_status}
+            total=0
+          fi
+          passed=$((total - failed))
+          echo "ctest_status=$ctest_status" >> "$GITHUB_OUTPUT"
+          echo "passed=$passed" >> "$GITHUB_OUTPUT"
+          echo "total=$total"   >> "$GITHUB_OUTPUT"
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+          echo "### Tests (${TEST_SUITE}): ${passed}/${total} passing" >> "$GITHUB_STEP_SUMMARY"
+
+      # Decide the badge text/colour. Runs even if the build failed (always()), so a
+      # broken build shows a red "build failed" badge instead of leaving the gist at
+      # its stale/placeholder value.
+      - name: Compute badge content
+        id: badge
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if [ "${{ steps.build.outcome }}" != "success" ]; then
+            echo "message=build failed" >> "$GITHUB_OUTPUT"
+            echo "color=red"            >> "$GITHUB_OUTPUT"
+          elif [ -z "${{ steps.tests.outputs.total }}" ]; then
+            echo "message=no tests run" >> "$GITHUB_OUTPUT"
+            echo "color=red"            >> "$GITHUB_OUTPUT"
+          else
+            echo "message=${{ steps.tests.outputs.passed }}/${{ steps.tests.outputs.total }} passing" >> "$GITHUB_OUTPUT"
+            if [ "${{ steps.tests.outputs.failed }}" = "0" ]; then
+              echo "color=brightgreen" >> "$GITHUB_OUTPUT"
+            else
+              echo "color=red"         >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      # Publish to a Gist that shields.io reads (see containers/ci/README.md for
+      # setup). Only on push to main: PRs (esp. from forks) can't access secrets.
+      - name: Update test-count badge
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: schneegans/dynamic-badges-action@v1.7.0
+        with:
+          auth: ${{ secrets.GIST_SECRET }}
+          gistID: 336ebc0aaa7dc9a0e71ca01dd4361a12
+          filename: diffrg-tests.json
+          label: tests
+          message: ${{ steps.badge.outputs.message }}
+          color: ${{ steps.badge.outputs.color }}
+
+      # Reflect build/test failures in the job conclusion (the test step swallows
+      # ctest's exit code on purpose; the build step's failure is preserved here too).
+      - name: Fail the job if the build or any test failed
+        if: always()
+        run: |
+          if [ "${{ steps.build.outcome }}" != "success" ]; then
+            echo "Build failed."
+            exit 1
+          fi
+          if [ "${{ steps.tests.outputs.ctest_status }}" != "0" ]; then
+            echo "CTest failed with exit code ${{ steps.tests.outputs.ctest_status }}."
+            exit 1
+          fi
+          if [ "${{ steps.tests.outputs.failed }}" != "0" ]; then
+            echo "${{ steps.tests.outputs.failed }} test(s) failed."
+            exit 1
+          fi
+
+  examples:
+    name: Build Examples
+    # Disabled for now: too slow for the standard GitHub-hosted runners. Remove
+    # this gate to re-enable; the job itself is already set up for ubuntu-latest.
+    if: false
+    needs: deps-bundle
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      - name: Install the toolchain
+        run: |
+          set -euo pipefail
+          apt-get -y update
+          DEBIAN_FRONTEND=noninteractive apt-get -y install --no-install-recommends ${DIFFRG_APT_PACKAGES}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: diffrg-deps-bundle
+          path: .ci/dist
+
+      - name: Install the dependency bundle
+        run: |
+          set -euo pipefail
+          bash install-diffrg-deps.sh --file .ci/dist/*.tar.zst --prefix "${RUNNER_TEMP}/diffrg"
+          echo "DiFfRG_BUNDLED_DIR=${RUNNER_TEMP}/diffrg/bundled" >> "${GITHUB_ENV}"
+
+      - name: Build all current Examples
+        env:
+          DIFFRG_BUILD_JOBS: ${{ env.DIFFRG_EXAMPLE_JOBS }}
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          bash containers/ci/build-examples.sh
+
+      - name: Add example summary
+        if: always()
+        run: |
+          if [ -f .ci/logs/examples-summary.md ]; then
+            cat .ci/logs/examples-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload example logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: example-build-logs
+          path: .ci/logs/examples/**
+          if-no-files-found: ignore
+
+  wolfram-examples:
+    name: Wolfram Examples
+    # Disabled for now: requires a self-hosted runner with wolframscript, FORM,
+    # FunKit and FormTracer installed, and the previous self-hosted runners are
+    # gone. Remove this gate (and provide such a runner) to re-enable.
+    if: false
+    needs: deps-bundle
+    runs-on: [self-hosted, linux, x64]
+    env:
+      REQUIRED_WOLFRAM_EXAMPLES: ""
+      RUN_EXAMPLE_REGRESSIONS: 1
+      UPDATE_BASELINES: ${{ inputs.update_baselines && '1' || '0' }}
+      EXAMPLE_REGRESSIONS: ${{ inputs.update_baselines && 'ONfiniteT QuarkMesonLPAprime YangMills_SP YangMills_Full' || '' }}
+      REQUIRED_EXAMPLE_REGRESSIONS: ""
+      WOLFRAM_TIMEOUT: 1800
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: diffrg-deps-bundle
+          path: .ci/dist
+
+      - name: Install the dependency bundle
+        run: |
+          set -euo pipefail
+          bash install-diffrg-deps.sh --file .ci/dist/*.tar.zst --prefix "${RUNNER_TEMP}/diffrg" --force
+          echo "DiFfRG_BUNDLED_DIR=${RUNNER_TEMP}/diffrg/bundled" >> "${GITHUB_ENV}"
+
+      - name: Run the Wolfram example generators and regressions
+        env:
+          WORKSPACE: ${{ github.workspace }}
+        run: bash containers/ci/run-wolfram-checks.sh
+
+      - name: Add Wolfram summary
+        if: always()
+        run: |
+          if [ -f .ci/logs/wolfram-summary.md ]; then
+            cat .ci/logs/wolfram-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f .ci/logs/example-regressions-summary.md ]; then
+            cat .ci/logs/example-regressions-summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload Wolfram logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wolfram-example-logs
+          path: |
+            .ci/logs/wolfram/**
+            .ci/logs/example-regressions/**
+            .ci/run-results/**
+            Examples/ci_baselines/**
+          if-no-files-found: ignore
+
+      - name: Upload refreshed example baselines
+        if: ${{ always() && inputs.update_baselines }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: example-ci-baselines
+          path: Examples/ci_baselines/**
+          if-no-files-found: error

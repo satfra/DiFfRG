@@ -1,0 +1,65 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "diffrg-base",
+      "hidden": true,
+      "binaryDir": "${sourceParentDir}/build",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceParentDir}/local_install",
+        "BUNDLED_DIR": "${sourceParentDir}/local_install/bundled",
+        "DiFfRG_TEST": "ON",
+        "HDF5": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "DiFfRG Debug",
+      "inherits": "diffrg-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "DiFfRG Release",
+      "inherits": "diffrg-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "release-mpi",
+      "displayName": "DiFfRG Release (MPI)",
+      "inherits": "release",
+      "cacheVariables": {
+        "MPI": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "debug",
+      "displayName": "Build DiFfRG Debug",
+      "configurePreset": "debug",
+      "jobs": 8
+    },
+    {
+      "name": "release",
+      "displayName": "Build DiFfRG Release",
+      "configurePreset": "release",
+      "jobs": 8
+    },
+    {
+      "name": "release-mpi",
+      "displayName": "Build DiFfRG Release (MPI)",
+      "configurePreset": "release-mpi",
+      "jobs": 6
+    }
+  ]
+}

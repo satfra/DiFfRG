@@ -1,0 +1,747 @@
+#pragma once
+
+#include "DiFfRG/physics/interpolation.hh"
+#include "DiFfRG/physics/physics.hh"
+
+namespace DiFfRG
+{
+  template <typename _Regulator, typename MemorySpace = GPU_memory> class ZA4_kernel
+  {
+  public:
+    using Regulator = _Regulator;
+
+    static KOKKOS_FORCEINLINE_FUNCTION auto
+    kernel(const double &l1, const double &cos1, const double &cos2, const double &phi, const double &p,
+           const double &k, const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &ZA3,
+           const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &ZAcbc,
+           const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &ZA4,
+           const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &dtZc,
+           const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &Zc,
+           const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &dtZA,
+           const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &ZA)
+    {
+      using namespace DiFfRG;
+      using namespace DiFfRG::compute;
+      const double cosl1p1 = (sqrt(1. + (-1.) * (powr<2>(cos1)))) * (cos2);
+      const double cosl1p2 = (-0.3333333333333333) *
+                             (cos2 + (-2.) * ((sqrt(2. + (-2.) * (powr<2>(cos2)))) * (cos(phi)))) *
+                             (sqrt(1. + (-1.) * (powr<2>(cos1))));
+      const double cosl1p3 =
+          (-0.3333333333333333) *
+          (cos2 + (cos(phi) + (-1.732050807568877) * (sin(phi))) * (sqrt(2. + (-2.) * (powr<2>(cos2))))) *
+          (sqrt(1. + (-1.) * (powr<2>(cos1))));
+      const double cosl1p4 =
+          (-0.3333333333333333) *
+          (cos2 + (cos(phi) + (1.732050807568877) * (sin(phi))) * (sqrt(2. + (-2.) * (powr<2>(cos2))))) *
+          (sqrt(1. + (-1.) * (powr<2>(cos1))));
+      const auto _repl1 = ZA(pow(1. + powr<6>(k), 0.16666666666666666667));
+      const auto _repl2 = RB(powr<2>(k), powr<2>(l1));
+      const auto _repl3 = Zc(k);
+      const auto _repl4 = RBdot(powr<2>(k), powr<2>(l1));
+      const auto _repl5 =
+          RB(powr<2>(k), powr<2>(l1) + (-2.) * (cosl1p1 + cosl1p2 + cosl1p3) * ((l1) * (p)) + powr<2>(p));
+      const auto _repl6 = ZA((1.02) * (pow(1. + powr<6>(k), 0.16666666666666666667)));
+      const auto _repl7 = ZA(l1);
+      const auto _repl8 = dtZA(pow(1. + powr<6>(k), 0.16666666666666666667));
+      const auto _repl9 = ZA3((0.816496580927726) *
+                              (sqrt(powr<2>(l1) + (-1.) * (cosl1p1 + cosl1p2 + cosl1p3) * ((l1) * (p)) + powr<2>(p))));
+      const auto _repl10 =
+          RB(powr<2>(k), powr<2>(l1) + (-2.) * (cosl1p1 + cosl1p2) * ((l1) * (p)) + (1.333333333333333) * (powr<2>(p)));
+      const auto _repl11 = ZA(sqrt(powr<2>(l1) + (-2.) * (cosl1p1 + cosl1p2 + cosl1p3) * ((l1) * (p)) + powr<2>(p)));
+      const auto _repl12 = RB(powr<2>(k), powr<2>(l1) + (-2.) * ((cosl1p1) * ((l1) * (p))) + powr<2>(p));
+      const auto _repl13 =
+          ZA(sqrt(powr<2>(l1) + (-2.) * (cosl1p1 + cosl1p2) * ((l1) * (p)) + (1.333333333333333) * (powr<2>(p))));
+      const auto _repl14 =
+          ZA3((0.3333333333333333) *
+              (sqrt((6.) * (powr<2>(l1)) + (-6.) * ((cosl1p1 + cosl1p2) * (2.) + cosl1p3) * ((l1) * (p)) +
+                    (10.) * (powr<2>(p)))));
+      const auto _repl15 = powr<2>(cosl1p3);
+      const auto _repl16 = powr<2>(l1);
+      const auto _repl17 = powr<2>(p);
+      const auto _repl18 = powr<2>(cosl1p2);
+      const auto _repl19 = powr<3>(cosl1p3);
+      const auto _repl20 = powr<3>(cosl1p2);
+      const auto _repl21 = powr<4>(cosl1p3);
+      const auto _repl22 = powr<6>(k);
+      const auto _repl23 = powr<3>(p);
+      const auto _repl24 = powr<4>(l1);
+      const auto _repl25 = powr<4>(p);
+      const auto _repl26 = powr<5>(l1);
+      const auto _repl27 = powr<6>(l1);
+      const auto _repl28 = powr<3>(l1);
+      const auto _repl29 = powr<2>(k);
+      const auto _repl30 = powr<5>(p);
+      const auto _repl31 = powr<4>(cosl1p2);
+      const auto _repl32 = powr<6>(p);
+      const auto _repl33 = powr<7>(l1);
+      const auto _repl34 = powr<8>(l1);
+      const auto _repl35 = powr<2>(cosl1p1);
+      const auto _repl36 = powr<7>(p);
+      const auto _repl37 = powr<5>(cosl1p3);
+      const auto _repl38 = powr<3>(cosl1p1);
+      const auto _repl39 = powr<5>(cosl1p2);
+      const auto _repl40 = powr<8>(p);
+      const auto _repl41 = powr<4>(cosl1p1);
+      const auto _repl42 = powr<9>(l1);
+      const auto _repl43 = powr<9>(p);
+      const auto _repl44 = powr<6>(cosl1p3);
+      const auto _repl45 = powr<5>(cosl1p1);
+      const auto _repl46 = powr<10>(l1);
+      const auto _repl47 = powr<6>(cosl1p2);
+      const auto _repl48 = powr<10>(p);
+      const auto _repl49 = powr<-2>((_repl1) * (_repl2) + (_repl16) * (_repl7));
+      const auto _repl50 = powr<6>(cosl1p1);
+      const auto _repl51 = powr<7>(cosl1p2);
+      return (-0.163265306122449) *
+                 ((_repl1) * (1. + _repl22) * (_repl4) + (_repl2) * ((-50.) * (_repl1) + (50.) * (_repl6)) * (_repl22) +
+                  (_repl2) * (1. + (1.) * (_repl22)) * (_repl8)) *
+                 ((_repl14) *
+                  ((-3756.) * ((_repl25) * (_repl27)) + (1764.) * ((_repl15) * ((_repl25) * (_repl27))) +
+                   (4050.) * ((_repl21) * ((_repl25) * (_repl27))) + (-1206.) * ((_repl19) * ((_repl26) * (_repl30))) +
+                   (-7159.999999999999) * ((_repl24) * (_repl32)) + (4128.) * ((_repl15) * ((_repl24) * (_repl32))) +
+                   (1548.) * ((_repl21) * ((_repl24) * (_repl32))) + (-54.) * ((_repl19) * ((_repl23) * (_repl33))) +
+                   (-432.) * ((_repl17) * (_repl34)) + (-756.) * ((_repl15) * ((_repl17) * (_repl34))) +
+                   (3645.) * ((_repl17) * ((_repl21) * (_repl34))) + (-1248.) * ((_repl19) * ((_repl28) * (_repl36))) +
+                   (-2052.) * ((_repl26) * ((_repl30) * (_repl37))) + (-3726.) * ((_repl23) * ((_repl33) * (_repl37))) +
+                   (-4834.) * ((_repl16) * (_repl40)) + (2176.) * ((_repl15) * ((_repl16) * (_repl40))) +
+                   (162.) * ((_repl25) * ((_repl27) * (_repl44))) + (243.) * ((_repl17) * ((_repl34) * (_repl44))) +
+                   (-243.) * ((_repl15) * (_repl46)) + (729.0000000000001) * ((_repl21) * (_repl46)) +
+                   (-1024.) * (_repl48) + (972.) * ((_repl23) * ((_repl33) * (_repl51))) +
+                   (972.) * ((_repl25) * ((_repl27) * (powr<8>(cosl1p1)))) +
+                   (3624.) * ((_repl26) * ((_repl30) * (cosl1p3))) + (1008.) * ((_repl23) * ((_repl33) * (cosl1p3))) +
+                   (3712.) * ((_repl28) * ((_repl36) * (cosl1p3))) + (836.) * ((_repl43) * ((cosl1p3) * (l1))) +
+                   (-1458.) * ((_repl37) * ((_repl42) * (p))) + (324.) * ((_repl42) * ((cosl1p3) * (p))) +
+                   (_repl24) *
+                       ((_repl17) * (-9234. + (-16281.) * (_repl15)) * (_repl24) +
+                        (_repl16) * (-25353. + (-22113.) * (_repl15)) * (_repl25) + (-1458.) * (_repl27) +
+                        (-17802.) * (_repl32) + (_repl23) * (50625. + (1215.) * (_repl15)) * ((_repl28) * (cosl1p3)) +
+                        (49868.99999999999) * ((_repl30) * ((cosl1p3) * (l1))) +
+                        (14580.) * ((_repl26) * ((cosl1p3) * (p)))) *
+                       (_repl31) +
+                   (_repl26) *
+                       ((_repl16) * (20898. + (3888.) * (_repl15)) * (_repl17) + (5832.000000000001) * (_repl24) +
+                        (19926.) * (_repl25) + (-27216.) * ((_repl23) * ((cosl1p3) * (l1))) +
+                        (-18954.) * ((_repl28) * ((cosl1p3) * (p)))) *
+                       ((_repl39) * (p)) +
+                   (_repl16) *
+                       ((_repl24) * (-3528. + (-22275.) * (_repl15) + (9153.) * (_repl21)) * (_repl25) +
+                        (_repl17) * (1755. + (-4131.) * (_repl15) + (6075.) * (_repl21)) * (_repl27) +
+                        (_repl16) * (-17742. + (-15012.) * (_repl15)) * (_repl32) +
+                        (486. + (-729.0000000000001) * (_repl15)) * (_repl34) + (-11368.) * (_repl40) +
+                        (_repl23) * (8586. + (-10449.) * (_repl15) + (-972.) * (_repl21)) * ((_repl26) * (cosl1p3)) +
+                        (_repl28) * (17712. + (-1404.) * (_repl15)) * ((_repl30) * (cosl1p3)) +
+                        (10824.) * ((_repl36) * ((cosl1p3) * (l1))) +
+                        (_repl33) * (-1215. + (-1458.) * (_repl15)) * ((cosl1p3) * (p))) *
+                       (_repl18) +
+                   ((3072.) * (_repl48) +
+                    (_repl28) *
+                        ((2700.) * (_repl19) + (-51858.) * (_repl20) +
+                         (-65252. + (-48816.00000000001) * (_repl15)) * (cosl1p2) + (-94120.) * (cosl1p3) +
+                         (-106866.) * ((_repl18) * (cosl1p3))) *
+                        (_repl36) +
+                    (_repl26) *
+                        ((-3473.999999999999) * (_repl19) + (42561. + (25974.) * (_repl15)) * (_repl20) +
+                         (-3240.) * (_repl37) + (21762.) * (_repl39) +
+                         (-70008.00000000001 + (-28809.) * (_repl15) + (-12825.) * (_repl21)) * (cosl1p2) +
+                         ((-11988.) * (_repl19) + (-6372.000000000001) * (cosl1p3)) * (_repl18) +
+                         (-90102.) * (cosl1p3) + (51111.) * ((_repl31) * (cosl1p3))) *
+                        (_repl30) +
+                    (-243. + (1458.) * (_repl15) + (-729.0000000000001) * (_repl18) +
+                     (1215.) * ((cosl1p2) * (cosl1p3))) *
+                        (_repl46) +
+                    (_repl16) *
+                        (-1594. + (33312.) * (_repl15) + (82452.) * (_repl18) + (115242.) * ((cosl1p2) * (cosl1p3))) *
+                        (_repl40) +
+                    (_repl17) *
+                        (1053. + (-8586.) * (_repl15) + (14013. + (1944.) * (_repl15)) * (_repl18) +
+                         (27702.) * (_repl21) + (-68768.99999999999) * (_repl31) + (-97848.) * ((_repl20) * (cosl1p3)) +
+                         ((61560.00000000001) * (_repl19) + (7209.) * (cosl1p3)) * (cosl1p2)) *
+                        (_repl34) +
+                    (_repl23) *
+                        ((-28323.) * (_repl19) + (54648. + (55080.) * (_repl15)) * (_repl20) + (-9234.) * (_repl37) +
+                         (55404.) * (_repl39) +
+                         (-26838. + (-21870.) * (_repl15) + (-43983.00000000001) * (_repl21)) * (cosl1p2) +
+                         (-14148.) * (cosl1p3) + (120123.) * ((_repl31) * (cosl1p3)) +
+                         ((-39042.) * (_repl19) + (33291.) * (cosl1p3)) * (_repl18)) *
+                        (_repl33) +
+                    (_repl25) *
+                        (4644. + (10881.) * (_repl15) + (35721.) * (_repl21) +
+                         (48708.00000000001 + (-21816.) * (_repl15) + (6237.) * (_repl21)) * (_repl18) +
+                         (-121689. + (-14256.) * (_repl15)) * (_repl31) + (486.) * (_repl44) +
+                         (-5832.000000000001) * (_repl47) + ((-324.) * (_repl19) + (-188892.) * (cosl1p3)) * (_repl20) +
+                         (-16686.) * ((_repl39) * (cosl1p3)) +
+                         ((77085.00000000001) * (_repl19) + (3402.) * (_repl37) + (90351.) * (cosl1p3)) * (cosl1p2)) *
+                        (_repl27) +
+                    (_repl24) *
+                        (-5424. + (69840.) * (_repl15) + (110952. + (-11736.) * (_repl15)) * (_repl18) +
+                         (-702.) * (_repl21) + (-16830.) * (_repl31) + (-24525.) * ((_repl20) * (cosl1p3)) +
+                         ((-5958.) * (_repl19) + (225468.) * (cosl1p3)) * (cosl1p2)) *
+                        (_repl32) +
+                    (_repl43) * ((-34188.) * (cosl1p2) + (-27480.) * (cosl1p3)) * (l1) +
+                    (_repl42) *
+                        ((-16038.) * (_repl19) + (20412.) * (_repl20) + (-3321. + (-15552.) * (_repl15)) * (cosl1p2) +
+                         (4779.) * (cosl1p3) + (11178.) * ((_repl18) * (cosl1p3))) *
+                        (p)) *
+                       (_repl35) +
+                   (_repl17) * ((-6318.) * (_repl16) + (-9072.) * (_repl17) + (3402.) * ((cosl1p3) * ((l1) * (p)))) *
+                       ((_repl27) * (_repl47)) +
+                   (_repl23) *
+                       ((-6803.999999999999) * (_repl16) + (-5183.999999999999) * (_repl17) +
+                        (3402.) * ((cosl1p2) * ((l1) * (p))) + (4374.) * ((cosl1p3) * ((l1) * (p)))) *
+                       ((_repl26) * (powr<7>(cosl1p1))) +
+                   (_repl20) *
+                       ((4644.) * ((_repl23) * (_repl24)) + (-972.) * ((_repl21) * ((_repl23) * (_repl24))) +
+                        ((-972.) * ((_repl17) * (_repl26)) + (1620.) * ((_repl25) * (_repl28))) * (_repl19) +
+                        (14526.) * ((_repl16) * (_repl30)) + (12480.) * (_repl36) +
+                        ((-16524.) * ((_repl17) * (_repl26)) + (-50031.00000000001) * ((_repl25) * (_repl28)) +
+                         (-2916.) * (_repl33) + (-34020.) * ((_repl32) * (l1))) *
+                            (cosl1p3) +
+                        (-486.) * ((_repl27) * (p)) +
+                        ((27378.) * ((_repl23) * (_repl24)) + (33507.) * ((_repl16) * (_repl30)) +
+                         (8748.) * ((_repl27) * (p))) *
+                            (_repl15)) *
+                       (_repl28) +
+                   (cosl1p2) *
+                       ((1584.) * ((_repl23) * (_repl27)) + (13344.) * ((_repl24) * (_repl30)) +
+                        (17428.) * ((_repl16) * (_repl36)) +
+                        ((3726.) * ((_repl25) * (_repl26)) + (3402.) * ((_repl17) * (_repl33))) * (_repl37) +
+                        ((4104.) * ((_repl25) * (_repl26)) + (1728.) * ((_repl28) * (_repl32)) +
+                         (5103.) * ((_repl17) * (_repl33)) + (729.0000000000001) * (_repl42)) *
+                            (_repl19) +
+                        (6016.) * (_repl43) + (-243.) * ((_repl23) * ((_repl27) * (_repl44))) +
+                        ((-2088.) * ((_repl25) * (_repl26)) + (-6054.) * ((_repl28) * (_repl32)) +
+                         (-270.) * ((_repl17) * (_repl33)) + (486.) * (_repl42) + (-3198.) * ((_repl40) * (l1))) *
+                            (cosl1p3) +
+                        (-324.) * ((_repl34) * (p)) +
+                        ((-14742.) * ((_repl23) * (_repl27)) + (-7992.) * ((_repl24) * (_repl30)) +
+                         (-4374.) * ((_repl34) * (p))) *
+                            (_repl21) +
+                        ((4482.) * ((_repl23) * (_repl27)) + (1530.) * ((_repl24) * (_repl30)) +
+                         (-2364.) * ((_repl16) * (_repl36)) + (243.) * ((_repl34) * (p))) *
+                            (_repl15)) *
+                       (l1) +
+                   (_repl17) *
+                       ((8991.) * (_repl24) + (21960.) * (_repl25) +
+                        (_repl16) *
+                            (23328. + (6803.999999999999) * (_repl15) + (3402.) * (_repl18) +
+                             (12555.) * ((cosl1p2) * (cosl1p3))) *
+                            (_repl17) +
+                        (_repl23) * ((-22086.) * (cosl1p2) + (-14202.) * (cosl1p3)) * (l1) +
+                        ((-20169.) * ((cosl1p2) * (p)) + (-27459.) * ((cosl1p3) * (p))) * (_repl28)) *
+                       ((_repl24) * (_repl50)) +
+                   (_repl16) *
+                       ((729.0000000000001) * (_repl34) + (48972.) * (_repl40) +
+                        (_repl28) *
+                            ((-2322.) * (_repl19) + (-6318.) * (_repl20) +
+                             (-183429. + (-20547.) * (_repl15)) * (cosl1p2) + (-135891.) * (cosl1p3) +
+                             (-31563.) * ((_repl18) * (cosl1p3))) *
+                            (_repl30) +
+                        (_repl23) *
+                            ((-36693.) * (_repl19) + (33048.) * (_repl20) +
+                             (-61128. + (-72657.) * (_repl15)) * (cosl1p2) + (-46602.) * (cosl1p3) +
+                             (-21708.) * ((_repl18) * (cosl1p3))) *
+                            (_repl26) +
+                        (_repl17) *
+                            (5589. + (36450.) * (_repl15) + (6075.) * (_repl18) + (59940.) * ((cosl1p2) * (cosl1p3))) *
+                            (_repl27) +
+                        (_repl16) *
+                            (100098. + (19944.) * (_repl15) + (103734.) * (_repl18) +
+                             (132255.) * ((cosl1p2) * (cosl1p3))) *
+                            (_repl32) +
+                        (_repl24) *
+                            (49581. + (36855.) * (_repl15) + (71955. + (7695.) * (_repl15)) * (_repl18) +
+                             (6318.) * (_repl21) + (-13122.) * (_repl31) + (-14580.) * ((_repl20) * (cosl1p3)) +
+                             ((16605.) * (_repl19) + (141075.) * (cosl1p3)) * (cosl1p2)) *
+                            (_repl25) +
+                        (_repl36) * ((-151758.) * (cosl1p2) + (-98622.) * (cosl1p3)) * (l1) +
+                        ((-7290.000000000001) * ((cosl1p2) * (p)) + (-14580.) * ((cosl1p3) * (p))) * (_repl33)) *
+                       (_repl41) +
+                   (_repl28) *
+                       ((-4374.) * (_repl27) + (-50076.00000000001) * (_repl32) +
+                        (_repl23) *
+                            ((7290.000000000001) * (_repl19) + (-3888.) * (_repl20) +
+                             (77003.99999999999 + (16200.) * (_repl15)) * (cosl1p2) + (62964.) * (cosl1p3) +
+                             (8100.) * ((_repl18) * (cosl1p3))) *
+                            (_repl28) +
+                        (_repl17) *
+                            (-21546. + (-35478.) * (_repl15) + (-13608.) * (_repl18) +
+                             (-65772.) * ((cosl1p2) * (cosl1p3))) *
+                            (_repl24) +
+                        (_repl16) *
+                            (-63864. + (-8046.) * (_repl15) + (-31698.) * (_repl18) +
+                             (-44982.) * ((cosl1p2) * (cosl1p3))) *
+                            (_repl25) +
+                        (_repl30) * ((82638.) * (cosl1p2) + (49122.) * (cosl1p3)) * (l1) +
+                        ((20898.) * ((cosl1p2) * (p)) + (33048.) * ((cosl1p3) * (p))) * (_repl26)) *
+                       ((_repl45) * (p)) +
+                   (_repl38) *
+                       ((-13662.) * ((_repl23) * (_repl27)) + (-53370.00000000001) * ((_repl24) * (_repl30)) +
+                        ((-29403.) * ((_repl23) * (_repl27)) + (-6372.000000000001) * ((_repl24) * (_repl30))) *
+                            (_repl21) +
+                        ((32940.) * ((_repl25) * (_repl26)) + (-8676.) * ((_repl28) * (_repl32)) +
+                         (39852.) * ((_repl17) * (_repl33))) *
+                            (_repl19) +
+                        (-53124.) * ((_repl16) * (_repl36)) + (2916.) * ((_repl25) * ((_repl26) * (_repl37))) +
+                        (-13122.) * ((_repl25) * ((_repl26) * (_repl39))) + (-20556.) * (_repl43) +
+                        ((86553.) * ((_repl25) * (_repl26)) + (186492.) * ((_repl28) * (_repl32)) +
+                         (3645.) * ((_repl17) * (_repl33)) + (2187.) * (_repl42) + (81564.) * ((_repl40) * (l1))) *
+                            (cosl1p3) +
+                        (486.) * ((_repl34) * (p)) +
+                        ((-12609.) * ((_repl23) * (_repl27)) + (-45873.00000000001) * ((_repl24) * (_repl30)) +
+                         (-46710.) * ((_repl16) * (_repl36)) + (-13122.) * ((_repl34) * (p))) *
+                            (_repl15) +
+                        (_repl16) *
+                            ((_repl17) * (-41661. + (-19926.) * (_repl15)) * (_repl24) +
+                             (_repl16) * (-140949. + (-378.) * (_repl15)) * (_repl25) + (1458.) * (_repl27) +
+                             (-152982.) * (_repl32) +
+                             (_repl23) * (16551. + (10692.) * (_repl15)) * ((_repl28) * (cosl1p3)) +
+                             (85905.) * ((_repl30) * ((cosl1p3) * (l1))) + (-3564.) * ((_repl26) * ((cosl1p3) * (p)))) *
+                            ((_repl18) * (p)) +
+                        (_repl17) *
+                            ((_repl16) * (-48600. + (-12312.) * (_repl15)) * (_repl17) + (-44712.) * (_repl24) +
+                             (36432.) * (_repl25) + (34938.) * ((_repl23) * ((cosl1p3) * (l1))) +
+                             (93312.) * ((_repl28) * ((cosl1p3) * (p)))) *
+                            ((_repl20) * (_repl28)) +
+                        (cosl1p2) *
+                            ((_repl24) * (111771. + (65528.99999999999) * (_repl15) + (11745.) * (_repl21)) *
+                                 (_repl25) +
+                             (_repl17) * (18711. + (58643.99999999999) * (_repl15)) * (_repl27) +
+                             (_repl16) * (213900. + (31671.) * (_repl15)) * (_repl32) +
+                             (729.0000000000001) * (_repl34) + (114324.) * (_repl40) +
+                             (_repl23) * (-76788. + (-75168.00000000001) * (_repl15)) * ((_repl26) * (cosl1p3)) +
+                             (_repl28) * (-237636. + (-13878.) * (_repl15)) * ((_repl30) * (cosl1p3)) +
+                             (-202428.) * ((_repl36) * ((cosl1p3) * (l1))) +
+                             (-17496.) * ((_repl33) * ((cosl1p3) * (p)))) *
+                            (l1) +
+                        (_repl23) *
+                            ((73628.99999999999) * (_repl16) + (25056.) * (_repl17) +
+                             (-27783.00000000001) * ((cosl1p3) * ((l1) * (p)))) *
+                            ((_repl24) * (_repl31))) *
+                       (l1) +
+                   ((16968.) * ((_repl26) * (_repl30)) + (2592.) * ((_repl23) * (_repl33)) +
+                    (21140.) * ((_repl28) * (_repl36)) +
+                    ((9234.) * ((_repl25) * (_repl27)) + (756.) * ((_repl24) * (_repl32)) +
+                     (6803.999999999999) * ((_repl17) * (_repl34))) *
+                        (_repl37) +
+                    ((-162.) * ((_repl26) * (_repl30)) + (-729.0000000000001) * ((_repl23) * (_repl33))) * (_repl44) +
+                    ((3312.) * ((_repl25) * (_repl27)) + (2796.) * ((_repl24) * (_repl32)) +
+                     (6237.) * ((_repl17) * (_repl34)) + (720.) * ((_repl16) * (_repl40)) + (2187.) * (_repl46)) *
+                        (_repl19) +
+                    (-972.) * ((_repl25) * ((_repl27) * (_repl51))) +
+                    ((9936.) * ((_repl25) * (_repl27)) + (16446.) * ((_repl24) * (_repl32)) +
+                     (-1458.) * ((_repl17) * (_repl34)) + (11950.) * ((_repl16) * (_repl40)) + (-972.) * (_repl46) +
+                     (3072.) * (_repl48)) *
+                        (cosl1p3) +
+                    (6852.000000000001) * ((_repl43) * (l1)) +
+                    ((-11754.) * ((_repl26) * (_repl30)) + (-23598.) * ((_repl23) * (_repl33)) +
+                     (864.) * ((_repl28) * (_repl36)) + (-8748.) * ((_repl42) * (p))) *
+                        (_repl21) +
+                    ((-23412.) * ((_repl26) * (_repl30)) + (4104.) * ((_repl23) * (_repl33)) +
+                     (-29764.) * ((_repl28) * (_repl36)) + (-6924.) * ((_repl43) * (l1)) +
+                     (3807.) * ((_repl42) * (p))) *
+                        (_repl15) +
+                    ((_repl24) * (-27294. + (25116.) * (_repl15) + (1782.) * (_repl21)) * (_repl32) +
+                     (_repl17) * (3564. + (-1863.) * (_repl15) + (27864.) * (_repl21)) * (_repl34) +
+                     (_repl16) * (-15138. + (18018.) * (_repl15)) * (_repl40) +
+                     (_repl25) * (-648. + (-10170.) * (_repl15) + (42525.) * (_repl21) + (243.) * (_repl44)) *
+                         (_repl27) +
+                     (486. + (1215.) * (_repl15)) * (_repl46) + (3072.) * (_repl48) +
+                     (_repl26) * (-47448. + (-14544.) * (_repl15) + (-1782.) * (_repl21)) * ((_repl30) * (cosl1p3)) +
+                     (_repl23) * (-5183.999999999999 + (-44226.00000000001) * (_repl15) + (-8748.) * (_repl21)) *
+                         ((_repl33) * (cosl1p3)) +
+                     (_repl28) * (-55896. + (2412.) * (_repl15)) * ((_repl36) * (cosl1p3)) +
+                     (-20556.) * ((_repl43) * ((cosl1p3) * (l1))) + (-15552.) * ((_repl19) * ((_repl42) * (p)))) *
+                        (cosl1p2) +
+                    (_repl28) *
+                        ((_repl17) * (73899. + (40257.) * (_repl15)) * (_repl24) +
+                         (_repl16) * (81819. + (12393.) * (_repl15)) * (_repl25) + (20412.) * (_repl27) +
+                         (-558.) * (_repl32) + (_repl23) * (-149040. + (-1215.) * (_repl15)) * ((_repl28) * (cosl1p3)) +
+                         (-26541.) * ((_repl30) * ((cosl1p3) * (l1))) + (-82944.) * ((_repl26) * ((cosl1p3) * (p)))) *
+                        ((_repl31) * (p)) +
+                    (_repl17) *
+                        ((_repl16) * (-64044. + (-3888.) * (_repl15)) * (_repl17) + (-36450.) * (_repl24) +
+                         (-10206.) * (_repl25) + (15552.) * ((_repl23) * ((cosl1p3) * (l1))) +
+                         (47304.) * ((_repl28) * ((cosl1p3) * (p)))) *
+                        ((_repl24) * (_repl39)) +
+                    (_repl16) *
+                        ((_repl24) * (-42885.00000000001 + (-74952.) * (_repl15) + (972.) * (_repl21)) * (_repl25) +
+                         (_repl17) * (-11988. + (-42444.) * (_repl15)) * (_repl27) +
+                         (_repl16) * (-22200. + (-20979.) * (_repl15)) * (_repl32) + (-2916.) * (_repl34) +
+                         (17100.) * (_repl40) + (_repl23) * (122958. + (1296.) * (_repl15)) * ((_repl26) * (cosl1p3)) +
+                         (_repl28) * (149004. + (-1620.) * (_repl15)) * ((_repl30) * (cosl1p3)) +
+                         (-3924.) * ((_repl36) * ((cosl1p3) * (l1))) + (33048.) * ((_repl33) * ((cosl1p3) * (p)))) *
+                        (_repl20) +
+                    (_repl23) *
+                        ((16038.) * (_repl16) + (5183.999999999999) * (_repl17) +
+                         (-3402.) * ((cosl1p3) * ((l1) * (p)))) *
+                        ((_repl26) * (_repl47)) +
+                    (_repl18) *
+                        ((-8586.) * ((_repl23) * (_repl27)) + (-3318.) * ((_repl24) * (_repl30)) +
+                         ((-16200.) * ((_repl23) * (_repl27)) + (-5265.) * ((_repl24) * (_repl30))) * (_repl21) +
+                         ((37503.) * ((_repl25) * (_repl26)) + (-3618.) * ((_repl28) * (_repl32)) +
+                          (19764.) * ((_repl17) * (_repl33))) *
+                             (_repl19) +
+                         (-896.) * ((_repl16) * (_repl36)) + (972.) * ((_repl25) * ((_repl26) * (_repl37))) +
+                         (-13632.) * (_repl43) +
+                         ((-47025.) * ((_repl25) * (_repl26)) + (6023.999999999999) * ((_repl28) * (_repl32)) +
+                          (-11826.) * ((_repl17) * (_repl33)) + (-2430.) * (_repl42) + (34398.) * ((_repl40) * (l1))) *
+                             (cosl1p3) +
+                         (-4293.) * ((_repl34) * (p)) +
+                         ((23571.) * ((_repl23) * (_repl27)) + (60237.) * ((_repl24) * (_repl30)) +
+                          (-1818.) * ((_repl16) * (_repl36)) + (4374.) * ((_repl34) * (p))) *
+                             (_repl15)) *
+                        (l1)) *
+                       (cosl1p1)) *
+                  ((powr<-1>(1. + _repl22)) *
+                   ((_repl49) *
+                    ((_repl9) *
+                     ((powr<-1>(_repl16 + _repl17 + (-2.) * ((cosl1p1) * ((l1) * (p))))) *
+                      ((powr<-1>((3.) * (_repl16) + (4.) * (_repl17) + (-6.) * ((cosl1p1) * ((l1) * (p))) +
+                                 (-6.) * ((cosl1p2) * ((l1) * (p))))) *
+                       ((powr<-1>(_repl16 + _repl17 +
+                                  (l1) * ((-2.) * (cosl1p1) + (-2.) * (cosl1p2) + (-2.) * (cosl1p3)) * (p))) *
+                        ((powr<-1>((3.) * ((_repl1) * (_repl10)) +
+                                   ((3.) * (_repl16) + (4.) * (_repl17) + (-6.) * ((cosl1p1) * ((l1) * (p))) +
+                                    (-6.) * ((cosl1p2) * ((l1) * (p)))) *
+                                       (_repl13))) *
+                         ((powr<-1>((_repl1) * (_repl5) +
+                                    (_repl16 + _repl17 +
+                                     (l1) * ((-2.) * (cosl1p1) + (-2.) * (cosl1p2) + (-2.) * (cosl1p3)) * (p)) *
+                                        (_repl11))) *
+                          ((powr<-1>((_repl1) * (_repl12) +
+                                     (_repl16 + _repl17 + (-2.) * ((cosl1p1) * ((l1) * (p)))) *
+                                         (ZA(sqrt(_repl16 + _repl17 + (-2.) * ((cosl1p1) * ((l1) * (p)))))))) *
+                           ((ZA3((0.816496580927726) *
+                                 (sqrt(_repl16 + _repl17 + (-1.) * ((cosl1p1) * ((l1) * (p))))))) *
+                            (ZA3((0.3333333333333333) *
+                                 (sqrt((6.) * (_repl16) + (10.) * (_repl17) +
+                                       (-6.) * ((2.) * (cosl1p1) + cosl1p2) * ((l1) * (p))))))))))))))))) +
+             (-0.04081632653061224) *
+                 ((_repl1) * (1. + _repl22) * (_repl4) + (_repl2) * ((-50.) * (_repl1) + (50.) * (_repl6)) * (_repl22) +
+                  (_repl2) * (1. + (1.) * (_repl22)) * (_repl8)) *
+                 ((_repl14) *
+                  ((4672. + (-527.9999999999999) * (_repl15) + (-6744.) * (_repl18) + (-6744.) * (_repl35) +
+                    (-13488.) * ((cosl1p1) * (cosl1p2)) + (-7272.) * ((cosl1p1) * (cosl1p3)) +
+                    (-7272.) * ((cosl1p2) * (cosl1p3))) *
+                       (_repl32) +
+                   (_repl16) *
+                       (13716. + (-10236.) * (_repl15) + (1464. + (-8595.) * (_repl15)) * (_repl18) +
+                        (4734.) * (_repl21) + (-17172.) * (_repl31) + (-17172.) * (_repl41) +
+                        ((-78840.) * (cosl1p2) + (-34677.) * (cosl1p3)) * (_repl38) +
+                        ((13644.) * (_repl19) + (-22596.) * (cosl1p3)) * (cosl1p2) +
+                        (-34677.) * ((_repl20) * (cosl1p3)) +
+                        ((13644.) * (_repl19) + (-78840.) * (_repl20) + (-132. + (-24480.) * (_repl15)) * (cosl1p2) +
+                         (-22596.) * (cosl1p3) + (-121473.) * ((_repl18) * (cosl1p3))) *
+                            (cosl1p1) +
+                        (1464. + (-8595.) * (_repl15) + (-123336.) * (_repl18) + (-121473.) * ((cosl1p2) * (cosl1p3))) *
+                            (_repl35)) *
+                       (_repl25) +
+                   (1080. + (-1890.) * (_repl15) + (-567. + (-243.) * (_repl15)) * (_repl18) + (-486.) * (_repl21) +
+                    (243.) * (_repl31) + (243.) * (_repl41) + ((-972.) * (_repl19) + (-1890.) * (cosl1p3)) * (cosl1p2) +
+                    (243.) * ((_repl20) * (cosl1p3)) +
+                    ((729.0000000000001) * (cosl1p2) + (243.) * (cosl1p3)) * (_repl38) +
+                    ((-972.) * (_repl19) + (729.0000000000001) * (_repl20) +
+                     (-2916. + (-810.) * (_repl15)) * (cosl1p2) + (-1890.) * (cosl1p3) +
+                     (405.) * ((_repl18) * (cosl1p3))) *
+                        (cosl1p1) +
+                    (-567. + (-243.) * (_repl15) + (486.) * (_repl18) + (405.) * ((cosl1p2) * (cosl1p3))) * (_repl35)) *
+                       (_repl27) +
+                   (_repl17) *
+                       (9144. + (-11898.) * (_repl15) +
+                        (-4257. + (18171.) * (_repl15) + (-4131.) * (_repl21)) * (_repl18) + (9666.) * (_repl21) +
+                        (-3159. + (486.) * (_repl15)) * (_repl31) + (-486.) * (_repl44) + (486.) * (_repl47) +
+                        (486.) * (_repl50) +
+                        ((27108.) * (_repl19) + (-2430.) * (_repl37) + (-18450.) * (cosl1p3)) * (cosl1p2) +
+                        ((-2430.) * (_repl19) + (-3807.) * (cosl1p3)) * (_repl20) + (1215.) * ((_repl39) * (cosl1p3)) +
+                        ((2430.) * (cosl1p2) + (1215.) * (cosl1p3)) * (_repl45) +
+                        ((-2430.) * (_repl19) + (4860.) * (_repl20) + (-31752. + (81.) * (_repl15)) * (cosl1p2) +
+                         (-3807.) * (cosl1p3) + (6561.) * ((_repl18) * (cosl1p3))) *
+                            (_repl38) +
+                        (-4257. + (18171.) * (_repl15) + (-57510. + (-1296.) * (_repl15)) * (_repl18) +
+                         (-4131.) * (_repl21) + (4374.) * (_repl31) +
+                         ((-8586.) * (_repl19) + (-44307.) * (cosl1p3)) * (cosl1p2) +
+                         (6561.) * ((_repl20) * (cosl1p3))) *
+                            (_repl35) +
+                        ((27108.) * (_repl19) + (-31752. + (81.) * (_repl15)) * (_repl20) + (-2430.) * (_repl37) +
+                         (2430.) * (_repl39) + (-13968. + (24192.) * (_repl15) + (-8586.) * (_repl21)) * (cosl1p2) +
+                         ((-8586.) * (_repl19) + (-44307.) * (cosl1p3)) * (_repl18) + (-18450.) * (cosl1p3) +
+                         (4698.) * ((_repl31) * (cosl1p3))) *
+                            (cosl1p1) +
+                        (-3159. + (486.) * (_repl15) + (4374.) * (_repl18) + (4698.) * ((cosl1p2) * (cosl1p3))) *
+                            (_repl41)) *
+                       (_repl24) +
+                   (_repl23) *
+                       ((-4824.) * (_repl19) + (23949. + (-18549.) * (_repl15)) * (_repl20) + (-324.) * (_repl37) +
+                        (648.) * (_repl39) + (648.) * (_repl45) +
+                        (-25200. + (25146.) * (_repl15) + (-11178.) * (_repl21)) * (cosl1p2) +
+                        ((12366.) * (cosl1p2) + (-2349.) * (cosl1p3)) * (_repl41) + (-5760.) * (cosl1p3) +
+                        (-2349.) * ((_repl31) * (cosl1p3)) +
+                        ((-26406.) * (_repl19) + (57618.00000000001) * (cosl1p3)) * (_repl18) +
+                        ((-26406.) * (_repl19) + (34182.) * (_repl20) + (88785. + (-37557.) * (_repl15)) * (cosl1p2) +
+                         (57618.00000000001) * (cosl1p3) + (33318.) * ((_repl18) * (cosl1p3))) *
+                            (_repl35) +
+                        (23949. + (-18549.) * (_repl15) + (34182.) * (_repl18) + (14148.) * ((cosl1p2) * (cosl1p3))) *
+                            (_repl38) +
+                        (-25200. + (25146.) * (_repl15) + (88785. + (-37557.) * (_repl15)) * (_repl18) +
+                         (-11178.) * (_repl21) + (12366.) * (_repl31) + (14148.) * ((_repl20) * (cosl1p3)) +
+                         ((-49140.) * (_repl19) + (128772.) * (cosl1p3)) * (cosl1p2)) *
+                            (cosl1p1)) *
+                       (_repl28) +
+                   (_repl30) *
+                       ((-588.) * (_repl19) + (21738.) * (_repl20) + (21738.) * (_repl38) +
+                        (-18052. + (13704.) * (_repl15)) * (cosl1p2) + (-3112.) * (cosl1p3) +
+                        (36030.) * ((_repl18) * (cosl1p3)) + ((67914.) * (cosl1p2) + (36030.) * (cosl1p3)) * (_repl35) +
+                        (-18052. + (13704.) * (_repl15) + (67914.) * (_repl18) +
+                         (74760.00000000001) * ((cosl1p2) * (cosl1p3))) *
+                            (cosl1p1)) *
+                       (l1) +
+                   (_repl26) *
+                       ((-3348.) * (_repl19) + (2592. + (243.) * (_repl15)) * (_repl20) + (972.) * (_repl37) +
+                        (-729.0000000000001) * (_repl39) + (-729.0000000000001) * (_repl45) +
+                        (-3851.999999999999 + (108.) * (_repl15) + (3402.) * (_repl21)) * (cosl1p2) +
+                        ((-2916.) * (cosl1p2) + (-1215.) * (cosl1p3)) * (_repl41) + (-504.) * (cosl1p3) +
+                        (-1215.) * ((_repl31) * (cosl1p3)) + ((3402.) * (_repl19) + (6210.) * (cosl1p3)) * (_repl18) +
+                        ((3402.) * (_repl19) + (-3645.) * (_repl20) + (18576. + (2349.) * (_repl15)) * (cosl1p2) +
+                         (6210.) * (cosl1p3) + (-3402.) * ((_repl18) * (cosl1p3))) *
+                            (_repl35) +
+                        (2592. + (243.) * (_repl15) + (-3645.) * (_repl18) + (-3402.) * ((cosl1p2) * (cosl1p3))) *
+                            (_repl38) +
+                        (-3851.999999999999 + (108.) * (_repl15) + (18576. + (2349.) * (_repl15)) * (_repl18) +
+                         (3402.) * (_repl21) + (-2916.) * (_repl31) + (-3402.) * ((_repl20) * (cosl1p3)) +
+                         ((7452.000000000001) * (_repl19) + (22248.) * (cosl1p3)) * (cosl1p2)) *
+                            (cosl1p1)) *
+                       (p)) *
+                  ((powr<-1>(1. + _repl22)) *
+                   ((_repl49) *
+                    ((_repl9) *
+                     ((powr<-1>((3.) * (_repl16) + (4.) * (_repl17) + (-6.) * ((cosl1p1) * ((l1) * (p))) +
+                                (-6.) * ((cosl1p2) * ((l1) * (p))))) *
+                      ((powr<-1>(_repl16 + _repl17 +
+                                 (l1) * ((-2.) * (cosl1p1) + (-2.) * (cosl1p2) + (-2.) * (cosl1p3)) * (p))) *
+                       ((powr<-1>((3.) * ((_repl1) * (_repl10)) +
+                                  ((3.) * (_repl16) + (4.) * (_repl17) + (-6.) * ((cosl1p1) * ((l1) * (p))) +
+                                   (-6.) * ((cosl1p2) * ((l1) * (p)))) *
+                                      (_repl13))) *
+                        ((powr<-1>((_repl1) * (_repl5) +
+                                   (_repl16 + _repl17 +
+                                    (l1) * ((-2.) * (cosl1p1) + (-2.) * (cosl1p2) + (-2.) * (cosl1p3)) * (p)) *
+                                       (_repl11))) *
+                         (ZA4((0.408248290463863) * (sqrt((3.) * (_repl16) + (5.) * (_repl17) +
+                                                          (-3.) * (cosl1p1 + cosl1p2) * ((l1) * (p)))))))))))))) +
+             (0.01530612244897959) *
+                 ((_repl1) * (_repl4) +
+                  ((50.) * ((-1.) * (_repl1) + _repl6) * ((_repl22) * (powr<-1>(1. + _repl22))) + _repl8) * (_repl2)) *
+                 ((_repl49) *
+                  ((16.) *
+                       (382. + (-9.) * (_repl15) + (-9.) * (_repl18) + (57.) * (_repl35) +
+                        (-75.) * ((cosl1p2) * (cosl1p3)) + (57.) * (cosl1p2 + cosl1p3) * (cosl1p1)) *
+                       (_repl17) +
+                   (-3.) *
+                       (-1304. + (-399.) * (_repl15) + (-3.) * (133. + (18.) * (_repl15)) * (_repl18) +
+                        (-27.) * (_repl21) + (-27.) * (_repl31) + (54.) * (_repl41) + (-81.) * ((_repl20) * (cosl1p3)) +
+                        (-3.) * (4. + (27.) * (_repl15)) * ((cosl1p2) * (cosl1p3)) +
+                        (108.) * (cosl1p2 + cosl1p3) * (_repl38) +
+                        (-3.) *
+                            ((9.) * (_repl19) + (9.) * (_repl20) + (262.) * (cosl1p2) +
+                             (15.) * ((_repl15) * (cosl1p2)) + (262.) * (cosl1p3) + (15.) * ((_repl18) * (cosl1p3))) *
+                            (cosl1p1) +
+                        (3.) * (-262. + (9.) * (_repl15) + (9.) * (_repl18) + (30.) * ((cosl1p2) * (cosl1p3))) *
+                            (_repl35)) *
+                       (_repl16) +
+                   (-9.) * (cosl1p2 + cosl1p3) *
+                       ((l1) *
+                        (872. + (151.) * (_repl15) + (151.) * (_repl18) + (282.) * (_repl35) +
+                         (20.) * ((cosl1p2) * (cosl1p3)) + (282.) * (cosl1p2 + cosl1p3) * (cosl1p1)) *
+                        (p))) *
+                  ((powr<-1>((3.) * (_repl16) + (4.) * (_repl17) + (-6.) * (cosl1p2 + cosl1p3) * ((l1) * (p)))) *
+                   ((powr<-1>((3.) * ((_repl1) * (RB(_repl29, _repl16 + (1.333333333333333) * (_repl17) +
+                                                                  (-2.) * (cosl1p2 + cosl1p3) * ((l1) * (p))))) +
+                              ((3.) * (_repl16) + (4.) * (_repl17) + (-6.) * (cosl1p2 + cosl1p3) * ((l1) * (p))) *
+                                  (ZA(sqrt(_repl16 + (1.333333333333333) * (_repl17) +
+                                           (-2.) * (cosl1p2 + cosl1p3) * ((l1) * (p))))))) *
+                    (powr<2>(ZA4((0.408248290463863) * (sqrt((3.) * (_repl16) + (5.) * (_repl17) +
+                                                             (-3.) * (cosl1p2 + cosl1p3) * ((l1) * (p)))))))))) +
+             (0.02040816326530612) *
+                 ((_repl1) * (1. + _repl22) * (_repl4) + (_repl2) * ((-50.) * (_repl1) + (50.) * (_repl6)) * (_repl22) +
+                  (_repl2) * (1. + (1.) * (_repl22)) * (_repl8)) *
+                 ((powr<-1>(1. + _repl22)) *
+                  ((-392. + (1176.) * (_repl18) + (1176.) * ((cosl1p1) * (cosl1p2)) +
+                    (1176.) * ((cosl1p2) * (cosl1p3))) *
+                       (_repl32) +
+                   (-120. + (63.) * (_repl15) + (210. + (27.) * (_repl15)) * (_repl18) + (-27.) * (_repl21) +
+                    (54.) * (_repl31) + (-27.) * (_repl41) + ((-27.) * (cosl1p2) + (-81.) * (cosl1p3)) * (_repl38) +
+                    (108.) * ((_repl20) * (cosl1p3)) + ((-27.) * (_repl19) + (210.) * (cosl1p3)) * (cosl1p2) +
+                    ((-81.) * (_repl19) + (108.) * (_repl20) + (210. + (-45.) * (_repl15)) * (cosl1p2) +
+                     (324.) * (cosl1p3) + (90.) * ((_repl18) * (cosl1p3))) *
+                        (cosl1p1) +
+                    (63. + (-54.) * (_repl15) + (27.) * (_repl18) + (-45.) * ((cosl1p2) * (cosl1p3))) * (_repl35)) *
+                       (_repl27) +
+                   (_repl16) *
+                       (-1364. + (406.) * (_repl15) + (1816. + (5232.000000000001) * (_repl15)) * (_repl18) +
+                        (5028.) * (_repl31) + (204.) * ((_repl38) * (cosl1p2)) + (10056.) * ((_repl20) * (cosl1p3)) +
+                        ((204.) * (_repl19) + (1816.) * (cosl1p3)) * (cosl1p2) +
+                        ((10056.) * (_repl20) + (1816. + (468.) * (_repl15)) * (cosl1p2) +
+                         (764.0000000000001) * (cosl1p3) + (10320.) * ((_repl18) * (cosl1p3))) *
+                            (cosl1p1) +
+                        (406. + (5232.000000000001) * (_repl18) + (468.) * ((cosl1p2) * (cosl1p3))) * (_repl35)) *
+                       (_repl25) +
+                   (_repl23) *
+                       ((-294.) * (_repl19) + (-7447.999999999999 + (-2130.) * (_repl15)) * (_repl20) +
+                        (-1164.) * (_repl39) +
+                        (2808. + (-4311.999999999999) * (_repl15) + (99.) * (_repl21)) * (cosl1p2) +
+                        (99.) * ((_repl41) * (cosl1p2)) + ((-285.) * (_repl19) + (-11172.) * (cosl1p3)) * (_repl18) +
+                        (1404.) * (cosl1p3) + (-2910.) * ((_repl31) * (cosl1p3)) +
+                        ((-2130.) * (_repl20) + (-4311.999999999999 + (1062.) * (_repl15)) * (cosl1p2) +
+                         (-798.) * (cosl1p3) + (-153.) * ((_repl18) * (cosl1p3))) *
+                            (_repl35) +
+                        (1404. + (-798.) * (_repl15) + (-11172. + (-153.) * (_repl15)) * (_repl18) +
+                         (-2910.) * (_repl31) + ((630.) * (_repl19) + (-8456.) * (cosl1p3)) * (cosl1p2) +
+                         (-3792.) * ((_repl20) * (cosl1p3))) *
+                            (cosl1p1) +
+                        (-294. + (-285.) * (_repl18) + (630.) * ((cosl1p2) * (cosl1p3))) * (_repl38)) *
+                       (_repl28) +
+                   (_repl17) *
+                       (-1072. + (402.) * (_repl15) + (1576. + (3579.) * (_repl15) + (-54.) * (_repl21)) * (_repl18) +
+                        (-99.) * (_repl21) + (3186. + (135.) * (_repl15)) * (_repl31) + (54.) * (_repl47) +
+                        (-27.) * ((_repl45) * (cosl1p2)) + (6372.000000000001) * ((_repl20) * (cosl1p3)) +
+                        (162.) * ((_repl39) * (cosl1p3)) +
+                        ((393.) * (_repl19) + (-27.) * (_repl37) + (1576.) * (cosl1p3)) * (cosl1p2) +
+                        ((393. + (-135.) * (_repl15)) * (cosl1p2) + (-630.) * (cosl1p3) +
+                         (-153.) * ((_repl18) * (cosl1p3))) *
+                            (_repl38) +
+                        (-99. + (-54.) * (_repl18) + (-108.) * ((cosl1p2) * (cosl1p3))) * (_repl41) +
+                        (402. + (-1062.) * (_repl15) + (3579. + (-144.) * (_repl15)) * (_repl18) + (135.) * (_repl31) +
+                         (72.) * ((_repl20) * (cosl1p3)) + ((-135.) * (_repl19) + (609.) * (cosl1p3)) * (cosl1p2)) *
+                            (_repl35) +
+                        ((-630.) * (_repl19) + (6372.000000000001 + (72.) * (_repl15)) * (_repl20) +
+                         (162.) * (_repl39) + (1576. + (609.) * (_repl15) + (-108.) * (_repl21)) * (cosl1p2) +
+                         (876.) * (cosl1p3) + (306.) * ((_repl31) * (cosl1p3)) +
+                         ((-153.) * (_repl19) + (6587.999999999999) * (cosl1p3)) * (_repl18)) *
+                            (cosl1p1)) *
+                       (_repl24) +
+                   (_repl30) *
+                       ((-4632.) * (_repl20) + (1544. + (-2316.) * (_repl15)) * (cosl1p2) +
+                        (-2316.) * ((_repl35) * (cosl1p2)) + (772.0000000000001) * (cosl1p3) +
+                        (-6947.999999999999) * ((_repl18) * (cosl1p3)) +
+                        (772.0000000000001 + (-6947.999999999999) * (_repl18) + (-4632.) * ((cosl1p2) * (cosl1p3))) *
+                            (cosl1p1)) *
+                       (l1) +
+                   (_repl26) *
+                       ((-18.) * (_repl19) + (-1776. + (-162.) * (_repl15)) * (_repl20) + (27.) * (_repl37) +
+                        (-108.) * (_repl39) + (27.) * (_repl45) +
+                        (624. + (-924.) * (_repl15) + (81.) * (_repl21)) * (cosl1p2) +
+                        ((27.) * (_repl19) + (-2664.) * (cosl1p3)) * (_repl18) + (312.) * (cosl1p3) +
+                        (-270.) * ((_repl31) * (cosl1p3)) + ((81.) * (cosl1p2) + (108.) * (cosl1p3)) * (_repl41) +
+                        ((135.) * (_repl19) + (-162.) * (_repl20) + (-924. + (198.) * (_repl15)) * (cosl1p2) +
+                         (-126.) * (cosl1p3) + (-27.) * ((_repl18) * (cosl1p3))) *
+                            (_repl35) +
+                        (312. + (-126.) * (_repl15) + (-2664. + (-27.) * (_repl15)) * (_repl18) + (108.) * (_repl21) +
+                         (-270.) * (_repl31) + ((234.) * (_repl19) + (-1992.) * (cosl1p3)) * (cosl1p2) +
+                         (-396.) * ((_repl20) * (cosl1p3))) *
+                            (cosl1p1) +
+                        (-18. + (135.) * (_repl15) + (27.) * (_repl18) + (234.) * ((cosl1p2) * (cosl1p3))) *
+                            (_repl38)) *
+                       (p)) *
+                  ((_repl49) *
+                   ((_repl9) *
+                    ((powr<-1>(_repl16 + _repl17 + (-2.) * ((cosl1p2) * ((l1) * (p))))) *
+                     ((powr<-1>(_repl16 + _repl17 +
+                                (l1) * ((-2.) * (cosl1p1) + (-2.) * (cosl1p2) + (-2.) * (cosl1p3)) * (p))) *
+                      ((powr<-1>((_repl1) * (_repl5) +
+                                 (_repl16 + _repl17 +
+                                  (l1) * ((-2.) * (cosl1p1) + (-2.) * (cosl1p2) + (-2.) * (cosl1p3)) * (p)) *
+                                     (_repl11))) *
+                       ((powr<-1>((_repl1) * (RB(_repl29, _repl16 + _repl17 + (-2.) * ((cosl1p2) * ((l1) * (p))))) +
+                                  (_repl16 + _repl17 + (-2.) * ((cosl1p2) * ((l1) * (p)))) *
+                                      (ZA(sqrt(_repl16 + _repl17 + (-2.) * ((cosl1p2) * ((l1) * (p)))))))) *
+                        ((ZA3((0.816496580927726) * (sqrt(_repl16 + _repl17 + (-1.) * ((cosl1p2) * ((l1) * (p))))))) *
+                         (ZA4((0.7071067811865475) *
+                              (sqrt(_repl16 + (2.) * (_repl17) +
+                                    (-1.) * (cosl1p1 + (2.) * (cosl1p2) + cosl1p3) * ((l1) * (p)))))))))))))) +
+             (1.653061224489796) *
+                 ((-0.3333333333333333) * ((_repl15) * (_repl16)) + (-0.5925925925925926) * (_repl17) +
+                  (1.) * ((_repl16) * (_repl21)) + (-2.) * ((_repl16) * (_repl31)) + (1.) * ((_repl16) * (_repl41)) +
+                  (_repl38) * ((1.) * ((cosl1p2) * (l1)) + (3.) * ((cosl1p3) * (l1)) + (-1.333333333333333) * (p)) *
+                      (l1) +
+                  (-0.6666666666666666) * ((_repl19) * ((l1) * (p))) +
+                  (0.4444444444444445) * ((cosl1p3) * ((l1) * (p))) +
+                  (_repl20) * ((-4.) * ((cosl1p3) * (l1)) + (2.) * (p)) * (l1) +
+                  ((1.) * ((_repl16) * (_repl19)) + (0.6666666666666666) * ((_repl16) * (cosl1p3)) +
+                   (0.2222222222222222) * ((_repl17) * (cosl1p3)) + (-0.4444444444444445) * ((l1) * (p)) +
+                   (0.3333333333333333) * ((_repl15) * ((l1) * (p)))) *
+                      (cosl1p2) +
+                  ((0.6666666666666666 + (-1.) * (_repl15)) * (_repl16) + (0.3333333333333333) * (_repl17) +
+                   (2.333333333333333) * ((cosl1p3) * ((l1) * (p)))) *
+                      (_repl18) +
+                  ((1.592592592592593) * (_repl17) +
+                   (-0.3333333333333333 + (2.) * (_repl15) + (-1.) * (_repl18) +
+                    (1.666666666666667) * ((cosl1p2) * (cosl1p3))) *
+                       (_repl16) +
+                   ((-1.888888888888889) * ((cosl1p2) * (p)) + (-2.111111111111111) * ((cosl1p3) * (p))) * (l1)) *
+                      (_repl35) +
+                  ((-4.) * ((_repl16) * (_repl20)) +
+                   ((0.6666666666666666 + (1.666666666666667) * (_repl15)) * (_repl16) +
+                    (1.925925925925926) * (_repl17)) *
+                       (cosl1p2) +
+                   (_repl18) * ((-3.333333333333333) * ((cosl1p3) * (l1)) + (0.7777777777777778) * (p)) * (l1) +
+                   ((-1.333333333333333 + (3.) * (_repl15)) * (_repl16) + (1.259259259259259) * (_repl17) +
+                    (0.5555555555555555) * ((cosl1p3) * ((l1) * (p)))) *
+                       (cosl1p3)) *
+                      (cosl1p1)) *
+                 ((_repl16) *
+                  ((_repl3) * (_repl4) + (_repl2) * (dtZc(k)) +
+                   ((-50.) * (_repl3) + (50.) * (Zc((1.02) * (k)))) * (_repl2)) *
+                  ((ZAcbc((0.816496580927726) * (sqrt(_repl16 + _repl17 + (-1.) * ((cosl1p1) * ((l1) * (p))))))) *
+                   ((ZAcbc((0.3333333333333333) * (sqrt((6.) * (_repl16) + (10.) * (_repl17) +
+                                                        (-6.) * ((2.) * (cosl1p1) + cosl1p2) * ((l1) * (p)))))) *
+                    ((ZAcbc((0.816496580927726) *
+                            (sqrt(_repl16 + _repl17 + (-1.) * (cosl1p1 + cosl1p2 + cosl1p3) * ((l1) * (p)))))) *
+                     ((ZAcbc((0.3333333333333333) *
+                             (sqrt((6.) * (_repl16) + (10.) * (_repl17) +
+                                   (-6.) * ((2.) * (cosl1p1) + (2.) * (cosl1p2) + cosl1p3) * ((l1) * (p)))))) *
+                      ((powr<-2>((_repl2) * (_repl3) + (_repl16) * (Zc(l1)))) *
+                       ((powr<-1>((_repl12) * (_repl3) +
+                                  (_repl16 + _repl17 + (-2.) * ((cosl1p1) * ((l1) * (p)))) *
+                                      (Zc(sqrt(_repl16 + _repl17 + (-2.) * ((cosl1p1) * ((l1) * (p)))))))) *
+                        ((powr<-1>((3.) * ((_repl10) * (_repl3)) +
+                                   ((3.) * (_repl16) + (4.) * (_repl17) + (-6.) * ((cosl1p1) * ((l1) * (p))) +
+                                    (-6.) * ((cosl1p2) * ((l1) * (p)))) *
+                                       (Zc(sqrt(_repl16 + (1.333333333333333) * (_repl17) +
+                                                (-2.) * (cosl1p1 + cosl1p2) * ((l1) * (p))))))) *
+                         (powr<-1>((_repl3) * (_repl5) +
+                                   (_repl16 + _repl17 +
+                                    (l1) * ((-2.) * (cosl1p1) + (-2.) * (cosl1p2) + (-2.) * (cosl1p3)) * (p)) *
+                                       (Zc(sqrt(_repl16 + _repl17 +
+                                                (-2.) * (cosl1p1 + cosl1p2 + cosl1p3) * ((l1) * (p)))))))))))))));
+    }
+
+    static KOKKOS_FORCEINLINE_FUNCTION auto
+    constant(const double &p, const double &k,
+             const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &ZA3,
+             const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &ZAcbc,
+             const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &ZA4,
+             const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &dtZc,
+             const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &Zc,
+             const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &dtZA,
+             const SplineInterpolator1D<double, LogarithmicCoordinates1D<double>, MemorySpace> &ZA)
+    {
+      using namespace DiFfRG;
+      using namespace DiFfRG::compute;
+      return 0.;
+    }
+
+  private:
+    static KOKKOS_FORCEINLINE_FUNCTION auto RB(const auto &k2, const auto &p2) { return Regulator::RB(k2, p2); }
+
+    static KOKKOS_FORCEINLINE_FUNCTION auto RF(const auto &k2, const auto &p2) { return Regulator::RF(k2, p2); }
+
+    static KOKKOS_FORCEINLINE_FUNCTION auto RBdot(const auto &k2, const auto &p2) { return Regulator::RBdot(k2, p2); }
+
+    static KOKKOS_FORCEINLINE_FUNCTION auto RFdot(const auto &k2, const auto &p2) { return Regulator::RFdot(k2, p2); }
+
+    static KOKKOS_FORCEINLINE_FUNCTION auto dq2RB(const auto &k2, const auto &p2) { return Regulator::dq2RB(k2, p2); }
+
+    static KOKKOS_FORCEINLINE_FUNCTION auto dq2RF(const auto &k2, const auto &p2) { return Regulator::dq2RF(k2, p2); }
+  };
+} // namespace DiFfRG
+using DiFfRG::ZA4_kernel;

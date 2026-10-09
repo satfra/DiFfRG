@@ -3,7 +3,6 @@
 #include <deal.II/base/logstream.h>
 #include <deal.II/base/timer.h>
 #include <deal.II/lac/block_vector.h>
-#include <deal.II/lac/vector_memory.h>
 
 // DiFfRG
 #include <DiFfRG/timestepping/solver/kinsol.hh>
@@ -22,6 +21,11 @@ namespace DiFfRG
     add_data.function_tolerance = abstol;
     add_data.maximum_non_linear_iterations = max_steps;
     add_data.no_init_setup = true;
+    // SUNDIALS 7.x defaults the maximum scaled Newton step to 1000*||u_scale||_2 when the initial
+    // guess is zero, which can be smaller than the actual Newton step and makes the line search
+    // clamp the step and fail with KIN_MXNEWT_5X_EXCEEDED. Disable the bound (a large value) so the
+    // full Newton step is taken; globalization is still provided by the line search itself.
+    add_data.maximum_newton_step = 1e10;
     kinsol = std::make_shared<SUNDIALS::KINSOL<VectorType>>(add_data);
   }
 
@@ -51,8 +55,37 @@ namespace DiFfRG
       return 0;
     };
 
-    kinsol->solve(iterate);
-    if (iterate.l2_norm() > abstol) kinsol->solve(iterate);
+    // Root-mean-square residual at the given iterate, and a matching convergence test against the
+    // requested absolute/relative tolerances.
+    auto residual_converged = [&](VectorType &it) {
+      VectorType res;
+      res.reinit(it);
+      this->residual(res, it);
+      residual_vector = res;
+      using std::max, std::sqrt;
+      const double rms = res.l2_norm() / sqrt(static_cast<double>(res.size()));
+      const double it_rms = it.l2_norm() / sqrt(static_cast<double>(it.size()));
+      return rms <= max(abstol, reltol * it_rms);
+    };
+
+    // SUNDIALS' linesearch strategy can report KIN_LINESEARCH_NONCONV (-5) or KIN_MAXITER_REACHED
+    // (-7) when Newton has effectively already reached the solution (e.g. a linear system solved in
+    // a single step, or a solve started from an already-converged iterate): the step becomes too
+    // small for the line search to make further progress. deal.II turns the negative return code
+    // into an exception. We accept the iterate when its residual confirms convergence (or when the
+    // user opted into ignore_nonconv) and re-throw genuine failures.
+    auto robust_solve = [&](VectorType &it) {
+      try {
+        kinsol->solve(it);
+      } catch (const dealii::ExceptionBase &) {
+        if (!ignore_nonconv && !residual_converged(it)) throw;
+      }
+    };
+
+    robust_solve(iterate);
+    // Only attempt a second Newton pass when the first did not actually converge -- re-solving from
+    // an already-converged iterate makes the line search stall (KIN_MAXITER_REACHED).
+    if (!ignore_nonconv && !residual_converged(iterate)) robust_solve(iterate);
     iterate_vector = iterate;
 
     timings_newton.push_back(timer.wall_time());
@@ -97,18 +130,15 @@ namespace DiFfRG
     const VectorType &u_prev = initial_vector;
     const VectorType &u = iterate_vector;
 
-    GrowingVectorMemory<VectorType> mem;
-    typename VectorMemory<VectorType>::Pointer tmp(mem);
-    tmp->reinit(u, true);
+    eest_tmp.reinit(u);
 
     using std::abs, std::max, std::sqrt;
-    tbb::parallel_for(tbb::blocked_range<unsigned int>(0, tmp->size()), [&](tbb::blocked_range<unsigned int> r) {
+    tbb::parallel_for(tbb::blocked_range<unsigned int>(0, eest_tmp.size()), [&](tbb::blocked_range<unsigned int> r) {
       for (unsigned int n = r.begin(); n < r.end(); ++n) {
-        (*tmp)[n] = abs(err[n]) / (abstol + max(abs(u_prev[n]), abs(u[n])) * reltol);
+        eest_tmp[n] = abs(err[n]) / (abstol + max(abs(u_prev[n]), abs(u[n])) * reltol);
       }
     });
-    return tmp->l2_norm() / sqrt(tmp->size());
-    return tmp->linfty_norm(); // tmp->l2_norm() / sqrt(tmp->size());
+    return eest_tmp.l2_norm() / sqrt(eest_tmp.size());
   }
 
   template <typename VectorType_> bool KINSOL<VectorType_>::check()

@@ -1,0 +1,34 @@
+# DiFfRG build test on Ubuntu 24.04 with CUDA (GPU on, no MPI).
+# Build from the repository root as context.
+#
+# No GPU is present during `docker build`, so Kokkos' native-arch detection
+# cannot run -- pin a CUDA architecture via the cuda_arch build-arg (default
+# AMPERE80 / compute 8.0). Override with --build-arg cuda_arch=ADA89 etc.
+# The test suite is compiled here but executed only when the image is run on a
+# GPU host (see containers/test_all.sh: Singularity --nv ... ctest). The
+# install prefix is left at the default ($HOME/.local/share/DiFfRG).
+FROM nvidia/cuda:12.8.1-devel-ubuntu24.04
+LABEL type=diffrg-build-test
+
+ARG threads=4
+ARG cuda_arch=AMPERE80
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Toolchain + system dependencies (auto-detected; bundled fallback otherwise).
+RUN apt-get -y update && apt-get -y install --no-install-recommends \
+        git cmake build-essential gfortran \
+        libopenblas-dev libgsl-dev \
+        libboost-all-dev libtbb-dev libhdf5-dev libsundials-dev \
+        doxygen graphviz python3 patch ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /DiFfRG
+COPY . /DiFfRG
+
+RUN cmake -S /DiFfRG -B /build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGPU=ON -DMPI=OFF -DDiFfRG_DOCUMENTATION=OFF \
+        -DKokkos_ARCH=${cuda_arch} -DKokkos_ARCH_LIST=${cuda_arch} \
+    && cmake --build /build -j ${threads} \
+    && cmake -DDiFfRG_TEST=ON /build/DiFfRG/src/DiFfRG-build \
+    && cmake --build /build/DiFfRG/src/DiFfRG-build -j ${threads}

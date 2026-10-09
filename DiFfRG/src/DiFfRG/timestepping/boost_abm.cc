@@ -1,4 +1,6 @@
 // standard library
+#include <algorithm>
+#include <cmath>
 #include <random>
 
 // external libraries
@@ -8,25 +10,41 @@
 #include <deal.II/lac/block_vector.h>
 
 // DiFfRG
+#include <DiFfRG/common/eigen.hh>
 #include <DiFfRG/common/types.hh>
 #include <DiFfRG/discretization/common/abstract_adaptor.hh>
 #include <DiFfRG/discretization/common/abstract_assembler.hh>
-#include <DiFfRG/discretization/data/data_output.hh>
+#include <DiFfRG/discretization/data/output_session.hh>
 #include <DiFfRG/timestepping/boost_abm.hh>
 
 namespace DiFfRG
 {
   using namespace dealii;
 
-  template <typename VectorType, typename SparseMatrixType, uint dim>
-  void
-  TimeStepperBoostABM<VectorType, SparseMatrixType, dim>::run(AbstractFlowingVariables<NumberType> *initial_condition,
-                                                              const double t_start, const double t_stop)
+  namespace
   {
-    this->data_out = this->get_data_out();
-    this->adaptor = this->get_adaptor();
+    /**
+     * @brief The largest step <= dt that divides [t_start, t_stop] into equal steps.
+     *
+     * ABM is a fixed-step multistep method, so the last step cannot simply be shortened. Stepping
+     * with dt itself would overshoot t_stop by up to one step whenever the interval is not a
+     * multiple of it, and run() relies on the state at t_stop being exactly that.
+     */
+    double uniform_step(const double t_start, const double t_stop, const double dt)
+    {
+      const double length = t_stop - t_start;
+      if (!(length > 0.)) return dt;
+      const double n_steps = std::max(1., std::ceil(length / dt - 1e-9));
+      return length / n_steps;
+    }
+  } // namespace
 
-    auto &full_data = initial_condition->data();
+  template <typename VectorType, typename SparseMatrixType, uint dim>
+  void TimeStepperBoostABM_impl<VectorType, SparseMatrixType, dim>::run_segment(
+      AbstractFlowingVariables<NumberType, VectorType> &initial_condition, const double t_start, const double t_stop)
+  {
+
+    auto &full_data = initial_condition.data();
     if constexpr (dim == 0)
       run_vars(full_data.block(1), t_start, t_stop);
     else {
@@ -38,10 +56,10 @@ namespace DiFfRG
   }
 
   template <typename VectorType, typename SparseMatrixType, uint dim>
-  void TimeStepperBoostABM<VectorType, SparseMatrixType, dim>::run(VectorType &initial_data, const double t_start,
-                                                                   const double t_stop)
+  void TimeStepperBoostABM_impl<VectorType, SparseMatrixType, dim>::run(VectorType &initial_data, const double t_start,
+                                                                        const double t_stop)
   {
-    const SparseMatrixType &mass_matrix = assembler->get_mass_matrix();
+    const SparseMatrixType &mass_matrix = assembler.get_mass_matrix();
     InverseSparseMatrixType inverse_mass_matrix;
     inverse_mass_matrix.initialize(mass_matrix);
 
@@ -73,22 +91,21 @@ namespace DiFfRG
           sol_save = alpha * output_vec[output_times.size() - 1] + (1. - alpha) * output_vec[output_times.size() - 2];
         }
 
-        console_out(t_save, "output", 3);
+        this->log.progress({.topic = progress_topics::output, .time = t_save, .minimum_verbosity = 3});
         eigen_to_dealii(sol_save, output_dealii);
 
-        assembler->set_time(t_save);
+        assembler.set_time(t_save);
 
-        assembler->attach_data_output(*data_out, output_dealii, Vector<double>(), dy_dealii);
-
-        data_out->flush(t_save);
+        data_out.write_frame(t_save, [&](auto &frame) {
+          assembler.attach_data_output(frame, output_dealii, Vector<double>(), dy_dealii);
+        });
       }
     };
 
     double stuck_t = 0.;
     uint stuck = 0;
     auto residual = [&](const Eigen::VectorXd &x, Eigen::VectorXd &dxdt, const double t) {
-      const auto now = std::chrono::high_resolution_clock::now();
-
+      CalcDtTimer calc_timer;
       if (is_close(t, stuck_t, expl.minimal_dt / 100.))
         stuck++;
       else {
@@ -101,19 +118,19 @@ namespace DiFfRG
 
       dy_dealii = 0;
 
-      assembler->set_time(t);
-      assembler->residual(dy_dealii, y_dealii, -1., 0.);
+      assembler.set_time(t);
+      assembler.residual(dy_dealii, y_dealii, -1., 0.);
       inverse_mass_matrix.solve(dy_dealii);
 
       if (!std::isfinite(dy_dealii.l2_norm()))
-        throw std::runtime_error("TimeStepperBoostRK::run_vars: dy is not finite!");
+        throw std::runtime_error("TimeStepperBoostRK_impl::run_vars: dy is not finite!");
 
       dealii_to_eigen(dy_dealii, dxdt);
 
-      const auto ms_passed =
-          std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - now)
-              .count();
-      console_out(t, "explicit residual", 1, ms_passed);
+      this->log.progress({.topic = progress_topics::explicit_residual,
+                          .time = t,
+                          .duration_ms = calc_timer.lap(),
+                          .minimum_verbosity = 1});
     };
 
     // Initialize initial condition
@@ -122,7 +139,7 @@ namespace DiFfRG
 
     using namespace boost::numeric::odeint;
     adams_bashforth_moulton<8, Eigen::VectorXd> abm;
-    double cur_dt = expl.dt;
+    const double cur_dt = uniform_step(t_start, t_stop, expl.dt);
     double step_time = t_start;
     output_step(y_eigen, step_time);
 
@@ -134,18 +151,21 @@ namespace DiFfRG
       output_step(y_eigen, step_time);
     }
 
+    this->log.info("TimeStepperBoostABM_impl::run: finished after {} steps", step);
+
     eigen_to_dealii(y_eigen, initial_data);
+    this->drain_output();
   }
 
   template <typename VectorType, typename SparseMatrixType, uint dim>
-  void TimeStepperBoostABM<VectorType, SparseMatrixType, dim>::run(BlockVectorType &initial_data, const double t_start,
-                                                                   const double t_stop)
+  void TimeStepperBoostABM_impl<VectorType, SparseMatrixType, dim>::run(BlockVectorType &initial_data,
+                                                                        const double t_start, const double t_stop)
   {
-    if (initial_data.n_blocks() != 2) throw std::runtime_error("TimeStepperBoostRK::run: y must have two blocks!");
+    if (initial_data.n_blocks() != 2) throw std::runtime_error("TimeStepperBoostRK_impl::run: y must have two blocks!");
     if (initial_data.block(1).size() == 0)
-      throw std::runtime_error("TimeStepperBoostRK::run: y contains no variables, use a different timestepper!");
+      throw std::runtime_error("TimeStepperBoostRK_impl::run: y contains no variables, use a different timestepper!");
 
-    const SparseMatrixType &mass_matrix = assembler->get_mass_matrix();
+    const SparseMatrixType &mass_matrix = assembler.get_mass_matrix();
     InverseSparseMatrixType inverse_mass_matrix;
     inverse_mass_matrix.initialize(mass_matrix);
 
@@ -177,22 +197,21 @@ namespace DiFfRG
           sol_save = alpha * output_vec[output_times.size() - 1] + (1. - alpha) * output_vec[output_times.size() - 2];
         }
 
-        console_out(t_save, "output", 3);
+        this->log.progress({.topic = progress_topics::output, .time = t_save, .minimum_verbosity = 3});
         eigen_to_dealii(sol_save, output_dealii);
 
-        assembler->set_time(t_save);
+        assembler.set_time(t_save);
 
-        assembler->attach_data_output(*data_out, output_dealii.block(0), output_dealii.block(1), dy_dealii.block(0));
-
-        data_out->flush(t_save);
+        data_out.write_frame(t_save, [&](auto &frame) {
+          assembler.attach_data_output(frame, output_dealii.block(0), output_dealii.block(1), dy_dealii.block(0));
+        });
       }
     };
 
     double stuck_t = 0.;
     uint stuck = 0;
     auto residual = [&](const Eigen::VectorXd &x, Eigen::VectorXd &dxdt, const double t) {
-      const auto now = std::chrono::high_resolution_clock::now();
-
+      CalcDtTimer calc_timer;
       if (is_close(t, stuck_t, expl.minimal_dt / 100.))
         stuck++;
       else {
@@ -204,21 +223,21 @@ namespace DiFfRG
       eigen_to_dealii(x, y_dealii);
 
       dy_dealii = 0;
-      assembler->set_time(t);
-      assembler->residual_variables(dy_dealii.block(1), y_dealii.block(1), y_dealii.block(0));
+      assembler.set_time(t);
+      assembler.residual_variables(dy_dealii.block(1), y_dealii.block(1), y_dealii.block(0));
       dy_dealii.block(1) *= -1;
-      assembler->residual(dy_dealii.block(0), y_dealii.block(0), -1., 0., y_dealii.block(1));
+      assembler.residual(dy_dealii.block(0), y_dealii.block(0), -1., 0., y_dealii.block(1));
       inverse_mass_matrix.solve(dy_dealii.block(0));
 
       if (!std::isfinite(dy_dealii.l2_norm()))
-        throw std::runtime_error("TimeStepperBoostRK::run_vars: dy is not finite!");
+        throw std::runtime_error("TimeStepperBoostRK_impl::run_vars: dy is not finite!");
 
       dealii_to_eigen(dy_dealii, dxdt);
 
-      const auto ms_passed =
-          std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - now)
-              .count();
-      console_out(t, "explicit residual", 1, ms_passed);
+      this->log.progress({.topic = progress_topics::explicit_residual,
+                          .time = t,
+                          .duration_ms = calc_timer.lap(),
+                          .minimum_verbosity = 1});
     };
 
     // Initialize initial condition
@@ -227,7 +246,7 @@ namespace DiFfRG
 
     using namespace boost::numeric::odeint;
     adams_bashforth_moulton<8, Eigen::VectorXd> abm;
-    double cur_dt = expl.dt;
+    const double cur_dt = uniform_step(t_start, t_stop, expl.dt);
     double step_time = t_start;
     output_step(y_eigen, step_time);
 
@@ -239,15 +258,18 @@ namespace DiFfRG
       output_step(y_eigen, step_time);
     }
 
+    this->log.info("TimeStepperBoostABM_impl::run: finished after {} steps", step);
+
     eigen_to_dealii(y_eigen, initial_data);
+    this->drain_output();
   }
 
   template <typename VectorType, typename SparseMatrixType, uint dim>
-  void TimeStepperBoostABM<VectorType, SparseMatrixType, dim>::run_vars(VectorType &initial_data, const double t_start,
-                                                                        const double t_stop)
+  void TimeStepperBoostABM_impl<VectorType, SparseMatrixType, dim>::run_vars(VectorType &initial_data,
+                                                                             const double t_start, const double t_stop)
   {
     if (initial_data.size() == 0)
-      throw std::runtime_error("TimeStepperRK::run: y contains no variables, use a different timestepper!");
+      throw std::runtime_error("TimeStepperRK_impl::run: y contains no variables, use a different timestepper!");
 
     // At output_dt intervals this function saves intermediate solutions
     dealii::Vector<double> output_dealii(initial_data.size());
@@ -273,13 +295,13 @@ namespace DiFfRG
           sol_save = alpha * output_vec[output_times.size() - 1] + (1. - alpha) * output_vec[output_times.size() - 2];
         }
 
-        console_out(t_save, "output", 3);
+        this->log.progress({.topic = progress_topics::output, .time = t_save, .minimum_verbosity = 3});
         eigen_to_dealii(sol_save, output_dealii);
 
-        assembler->set_time(t_save);
+        assembler.set_time(t_save);
 
-        assembler->attach_data_output(*data_out, Vector<double>(), output_dealii);
-        data_out->flush(t_save);
+        data_out.write_frame(
+            t_save, [&](auto &frame) { assembler.attach_data_output(frame, Vector<double>(), output_dealii); });
       }
     };
 
@@ -294,8 +316,7 @@ namespace DiFfRG
     double stuck_t = 0.;
     uint stuck = 0;
     auto residual = [&](const Eigen::VectorXd &x, Eigen::VectorXd &dxdt, const double t) {
-      const auto now = std::chrono::high_resolution_clock::now();
-
+      CalcDtTimer calc_timer;
       if (is_close(t, stuck_t, expl.minimal_dt / 100.))
         stuck++;
       else {
@@ -308,24 +329,24 @@ namespace DiFfRG
 
       dy_dealii = 0;
 
-      assembler->set_time(t);
-      assembler->residual_variables(dy_dealii, y_dealii, Vector<double>());
+      assembler.set_time(t);
+      assembler.residual_variables(dy_dealii, y_dealii, Vector<double>());
 
       if (!std::isfinite(dy_dealii.l2_norm()))
-        throw std::runtime_error("TimeStepperBoostABM::run_vars: dy is not finite!");
+        throw std::runtime_error("TimeStepperBoostABM_impl::run_vars: dy is not finite!");
 
       dealii_to_eigen(dy_dealii, dxdt);
       dxdt *= -1;
 
-      const auto ms_passed =
-          std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - now)
-              .count();
-      console_out(t, "explicit residual", 1, ms_passed);
+      this->log.progress({.topic = progress_topics::explicit_residual,
+                          .time = t,
+                          .duration_ms = calc_timer.lap(),
+                          .minimum_verbosity = 1});
     };
 
     using namespace boost::numeric::odeint;
     adams_bashforth_moulton<8, Eigen::VectorXd> abm;
-    double cur_dt = expl.dt;
+    const double cur_dt = uniform_step(t_start, t_stop, expl.dt);
     double step_time = t_start;
     output_step(y_eigen, step_time);
 
@@ -337,18 +358,19 @@ namespace DiFfRG
       output_step(y_eigen, step_time);
     }
 
-    spdlog::get("log")->info("TimeStepperBoostABM::run_vars: finished after {} steps", step);
+    this->log.info("TimeStepperBoostABM_impl::run_vars: finished after {} steps", step);
 
     eigen_to_dealii(y_eigen, initial_data);
+    this->drain_output();
   }
 } // namespace DiFfRG
 
-template class DiFfRG::TimeStepperBoostABM<dealii::Vector<double>, dealii::SparseMatrix<double>, 0>;
-template class DiFfRG::TimeStepperBoostABM<dealii::Vector<double>, dealii::SparseMatrix<double>, 1>;
-template class DiFfRG::TimeStepperBoostABM<dealii::Vector<double>, dealii::SparseMatrix<double>, 2>;
-template class DiFfRG::TimeStepperBoostABM<dealii::Vector<double>, dealii::SparseMatrix<double>, 3>;
+template class DiFfRG::TimeStepperBoostABM_impl<dealii::Vector<double>, dealii::SparseMatrix<double>, 0>;
+template class DiFfRG::TimeStepperBoostABM_impl<dealii::Vector<double>, dealii::SparseMatrix<double>, 1>;
+template class DiFfRG::TimeStepperBoostABM_impl<dealii::Vector<double>, dealii::SparseMatrix<double>, 2>;
+template class DiFfRG::TimeStepperBoostABM_impl<dealii::Vector<double>, dealii::SparseMatrix<double>, 3>;
 
-template class DiFfRG::TimeStepperBoostABM<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 0>;
-template class DiFfRG::TimeStepperBoostABM<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 1>;
-template class DiFfRG::TimeStepperBoostABM<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 2>;
-template class DiFfRG::TimeStepperBoostABM<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 3>;
+template class DiFfRG::TimeStepperBoostABM_impl<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 0>;
+template class DiFfRG::TimeStepperBoostABM_impl<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 1>;
+template class DiFfRG::TimeStepperBoostABM_impl<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 2>;
+template class DiFfRG::TimeStepperBoostABM_impl<dealii::Vector<double>, dealii::BlockSparseMatrix<double>, 3>;

@@ -4,13 +4,20 @@
 set(DiFfRG_BASE_DIR @CMAKE_INSTALL_PREFIX@)
 set(DiFfRG_INCLUDE_DIR @CMAKE_INSTALL_PREFIX@/include)
 set(DiFfRG_CMAKE_DIR @CMAKE_INSTALL_PREFIX@/cmake)
+set(BUNDLED_DIR @CMAKE_INSTALL_PREFIX@/bundled/)
 
 # Propagate the usage of CUDA from the package to an application
 set(DiFfRG_USE_CUDA @USE_CUDA@)
+set(DiFfRG_MPI @MPI@)
 
 # Propagate build flags
 set(DiFfRG_CXX_FLAGS "@CMAKE_CXX_FLAGS@")
 set(DiFfRG_CUDA_FLAGS "@CMAKE_CUDA_FLAGS@")
+
+# The CUDA compute capabilities libDiFfRG itself was compiled for. An
+# application inherits them unless it sets DiFfRG_CUDA_ARCH, so the two halves
+# of a build always target the same GPUs without probing the machine again.
+set(DiFfRG_CUDA_ARCH_LIBRARY "@DiFfRG_CUDA_ARCH_RESOLVED@")
 
 # Set up the overall build system
 include(${DiFfRG_CMAKE_DIR}/setup_build_system.cmake)

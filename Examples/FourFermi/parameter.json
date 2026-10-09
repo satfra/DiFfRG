@@ -32,8 +32,7 @@
     "p_grid_bias": 8.0,
 
     "fe_order": 3,
-    "threads": 8,
-    "batch_size": 64,
+    "threads": 0,
     "overintegration": 0,
     "output_subdivisions": 2,
     "grid": {
@@ -70,7 +69,7 @@
   },
   "output": {
     "live_plot": false,
-    "verbosity": 1,
+    "verbosity": 0,
     "folder": "./",
     "name": "output"
   }

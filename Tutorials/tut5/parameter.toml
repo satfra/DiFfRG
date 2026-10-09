@@ -1,0 +1,75 @@
+# Tutorial 5: extractors, and reading the solution away from the EoM.
+#
+# O(N) in d = 3 with a Litim regulator. The couplings sit close to the first-order transition,
+# where u = d_rho V develops a kink at small rho while the EoM stays at the origin.
+
+[physical]
+Lambda = 1.0
+N = 2.0
+lambda2 = 0.04857
+lambda4 = -0.5
+lambda6 = 1.0
+
+# Knobs of the kink detector in model.hh, all counted in cells.
+[shock]
+# How far the slope step must stand out from the median step in its neighbourhood.
+contrast = 3.0
+# What fraction of the step has to be realised across the transition zone itself. The test that
+# separates real kinks (~1.0) from the solver's smooth shoulders (0.3-0.4).
+locality = 0.7
+# Cells skipped either side of the candidate before the medians are taken, so a kink smeared over
+# a few cells does not contaminate the levels it is measured between.
+gap = 2
+# Cells entering each median, and the half-width of the local-maximum test.
+width = 12
+# Half-width of the neighbourhood the contrast test compares against.
+window = 100
+# Candidates this close to rho = 0 are dropped.
+edge_cells = 5
+# How far above the kink the extractors are read.
+offset_cells = 4
+
+[discretization]
+# The Kurganov-Tadmor assembler is a finite-volume scheme: one dof per cell.
+fe_order = 0
+threads = 0
+overintegration = 0
+output_subdivisions = 1
+EoM_abs_tol = 1e-12
+EoM_max_iter = 100
+
+[discretization.grid]
+# The kink sits at rho ~ 5e-3, so the first block has to resolve it comfortably; the rest of the
+# domain only has to carry the potential's shape and can be much coarser. The detector below relies
+# on the spacing being uniform within a block -- a block boundary is a step in d_rho u too.
+x_grid = "0:2e-5:0.02, 0.02:5e-4:0.2, 0.2:5e-3:1.0"
+y_grid = "0:1:1"
+z_grid = "0:1:1"
+refine = 0
+
+[timestepping]
+final_time = 5.0
+output_dt = 0.1
+
+# IDA controls the field-space sector adaptively ...
+[timestepping.implicit]
+dt = 1e-6
+minimal_dt = 1e-9
+maximal_dt = 1e-1
+abs_tol = 1e-12
+# The kink position is set by this tolerance, not by the grid: at 1e-7 it still drifts by several
+# percent between grids, at 1e-8 it is stable. Costs roughly 1.5x the runtime.
+rel_tol = 1e-8
+
+# ... while the variable A is stepped explicitly at a fixed step.
+[timestepping.explicit]
+dt = 0.05
+minimal_dt = 1e-6
+maximal_dt = 1e-1
+abs_tol = 1e-10
+rel_tol = 1e-8
+
+[output]
+verbosity = 1
+folder = "./"
+name = "output"

@@ -1,11 +1,11 @@
-cmake_minimum_required(VERSION 3.26.4)
+cmake_minimum_required(VERSION 3.27.0)
 
 project(tut2)
 
-find_package(DiFfRG REQUIRED HINTS $ENV{HOME}/.local/share/DiFfRG)
+find_package(DiFfRG REQUIRED HINTS $ENV{HOME}/.local/share/DiFfRG/)
 
 add_executable(tut2 tut2.cc)
-setup_application(tut2)
+target_link_libraries(tut2 PRIVATE DiFfRG::DiFfRG)
 
 execute_process(
   COMMAND

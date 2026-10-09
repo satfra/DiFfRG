@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+wolframscript_cmd=(wolframscript)
+
+if [[ -n "${WOLFRAMSCRIPT_ENTITLEMENTID:-}" ]]; then
+  wolframscript_cmd+=(-entitlement "$WOLFRAMSCRIPT_ENTITLEMENTID")
+fi
+
+find_wolfram_kernel() {
+  local candidates=()
+  local uname_s
+
+  uname_s="$(uname -s)"
+
+  if [[ "$uname_s" == "Darwin" ]]; then
+    candidates+=(
+      "/Applications/Wolfram.app/Contents/MacOS/WolframKernel"
+      "/Applications/Mathematica.app/Contents/MacOS/WolframKernel"
+    )
+
+    local app_kernel
+    while IFS= read -r app_kernel; do
+      candidates+=("$app_kernel")
+    done < <(find /Applications -maxdepth 4 -path "*/Contents/MacOS/WolframKernel" -type f 2>/dev/null | sort -Vr)
+  else
+    candidates+=(
+      "/usr/local/Wolfram/WolframEngine/14.3/Executables/WolframKernel"
+      "/usr/local/Wolfram/WolframEngine/14.2/Executables/WolframKernel"
+      "/usr/local/Wolfram/WolframEngine/14.1/Executables/WolframKernel"
+      "/usr/local/Wolfram/WolframEngine/14.0/Executables/WolframKernel"
+      "/usr/local/Wolfram/Mathematica/14.3/Executables/WolframKernel"
+      "/usr/local/Wolfram/Mathematica/14.2/Executables/WolframKernel"
+      "/usr/local/Wolfram/Mathematica/14.1/Executables/WolframKernel"
+      "/usr/local/Wolfram/Mathematica/14.0/Executables/WolframKernel"
+    )
+
+    local linux_kernel
+    while IFS= read -r linux_kernel; do
+      candidates+=("$linux_kernel")
+    done < <(find /usr/local/Wolfram /opt/Wolfram -path "*/Executables/WolframKernel" -type f 2>/dev/null | sort -Vr)
+  fi
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+run_probe() {
+  local output_file pid elapsed status
+  output_file="${TMPDIR:-/tmp}/aump-wolframscript-probe-$$.txt"
+
+  # shellcheck disable=SC2016
+  "${wolframscript_cmd[@]}" -code '$VersionNumber' >"$output_file" 2>&1 &
+  pid="$!"
+  elapsed=0
+
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( elapsed >= 10 )); then
+      kill "$pid" 2>/dev/null || true
+      sleep 1
+      if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null || true
+      fi
+      wait "$pid" 2>/dev/null || true
+      probe_output="$(cat "$output_file" 2>/dev/null || true)"
+      rm -f "$output_file"
+      probe_output="${probe_output}"$'\n'"AUMP: wolframscript preflight timed out after 10 seconds."
+      return 124
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+
+  wait "$pid"
+  status="$?"
+  probe_output="$(cat "$output_file" 2>/dev/null || true)"
+  rm -f "$output_file"
+  return "$status"
+}
+
+if ! command -v wolframscript >/dev/null 2>&1; then
+  echo "AUMP: wolframscript was not found on PATH." >&2
+  exit 127
+fi
+
+if ! run_probe; then
+  if [[ -z "${WOLFRAMSCRIPT_ENTITLEMENTID:-}" && -z "${WOLFRAMSCRIPT_KERNELPATH:-}" && -z "${WolframKernel:-}" ]]; then
+    if discovered_kernel="$(find_wolfram_kernel)"; then
+      export WOLFRAMSCRIPT_KERNELPATH="$discovered_kernel"
+      if run_probe; then
+        exec "${wolframscript_cmd[@]}" -script "$script_dir/Runner.wls" "$@"
+      fi
+    fi
+  fi
+
+  echo "AUMP: wolframscript is installed, but no Wolfram kernel is configured." >&2
+  echo "Set WOLFRAMSCRIPT_KERNELPATH or WolframKernel to the WolframKernel executable." >&2
+  if [[ -n "${discovered_kernel:-}" ]]; then
+    echo "AUMP: tried discovered kernel: $discovered_kernel" >&2
+  fi
+  echo "AUMP: common macOS and Linux install locations were checked." >&2
+  if [[ -n "$probe_output" ]]; then
+    echo "$probe_output" >&2
+  fi
+  exit 127
+fi
+
+exec "${wolframscript_cmd[@]}" -script "$script_dir/Runner.wls" "$@"

@@ -1,0 +1,118 @@
+--- a/include/deal.II/sundials/ida.h
++++ b/include/deal.II/sundials/ida.h
+@@ -611,6 +611,28 @@
+      */
+     ~IDA();
+ 
++    struct Statistics
++    {
++      bool valid = false;
++      long int num_steps = 0;
++      long int num_residual_evaluations = 0;
++      long int num_linear_solver_setups = 0;
++      long int num_error_test_failures = 0;
++      long int num_nonlinear_iterations = 0;
++      long int num_nonlinear_convergence_failures = 0;
++      long int num_step_solve_failures = 0;
++      double last_step_size = 0.;
++      double current_step_size = 0.;
++      double current_time = 0.;
++    };
++
++    Statistics
++    get_statistics() const;
++
++    bool
++    get_error_test_vectors(VectorType &estimated_local_errors,
++                           VectorType &error_weights) const;
++
+     /**
+      * Integrate differential-algebraic equations. This function returns the
+      * final number of computed steps.
+--- a/source/sundials/ida.cc
++++ b/source/sundials/ida.cc
+@@ -39,6 +39,7 @@
+ 
+ #  include <iomanip>
+ #  include <iostream>
++#  include <limits>
+ 
+ DEAL_II_NAMESPACE_OPEN
+ 
+@@ -165,6 +166,66 @@
+ #  endif
+   }
+ 
++  template <typename VectorType>
++  typename IDA<VectorType>::Statistics
++  IDA<VectorType>::get_statistics() const
++  {
++    Statistics statistics;
++    if (ida_mem == nullptr)
++      return statistics;
++
++    statistics.valid = true;
++    int status = IDAGetNumSteps(ida_mem, &statistics.num_steps);
++    statistics.valid = statistics.valid && status >= 0;
++    status = IDAGetNumResEvals(ida_mem, &statistics.num_residual_evaluations);
++    statistics.valid = statistics.valid && status >= 0;
++    status = IDAGetNumLinSolvSetups(ida_mem, &statistics.num_linear_solver_setups);
++    statistics.valid = statistics.valid && status >= 0;
++    status = IDAGetNumErrTestFails(ida_mem, &statistics.num_error_test_failures);
++    statistics.valid = statistics.valid && status >= 0;
++    status = IDAGetNumNonlinSolvIters(ida_mem, &statistics.num_nonlinear_iterations);
++    statistics.valid = statistics.valid && status >= 0;
++    status = IDAGetNumNonlinSolvConvFails(
++      ida_mem, &statistics.num_nonlinear_convergence_failures);
++    statistics.valid = statistics.valid && status >= 0;
++    status =
++      IDAGetNumStepSolveFails(ida_mem, &statistics.num_step_solve_failures);
++    statistics.valid = statistics.valid && status >= 0;
++    status = IDAGetLastStep(ida_mem, &statistics.last_step_size);
++    statistics.valid = statistics.valid && status >= 0;
++    status = IDAGetCurrentStep(ida_mem, &statistics.current_step_size);
++    statistics.valid = statistics.valid && status >= 0;
++    status = IDAGetCurrentTime(ida_mem, &statistics.current_time);
++    statistics.valid = statistics.valid && status >= 0;
++
++    return statistics;
++  }
++
++  template <typename VectorType>
++  bool
++  IDA<VectorType>::get_error_test_vectors(VectorType &estimated_local_errors,
++                                          VectorType &error_weights) const
++  {
++    if (ida_mem == nullptr)
++      return false;
++
++#  if DEAL_II_SUNDIALS_VERSION_GTE(6, 0, 0)
++    auto estimated_local_errors_view =
++      internal::make_nvector_view(estimated_local_errors, ida_ctx);
++    auto error_weights_view = internal::make_nvector_view(error_weights, ida_ctx);
++#  else
++    auto estimated_local_errors_view =
++      internal::make_nvector_view(estimated_local_errors);
++    auto error_weights_view = internal::make_nvector_view(error_weights);
++#  endif
++
++    int status = IDAGetEstLocalErrors(ida_mem, estimated_local_errors_view);
++    if (status < 0)
++      return false;
++    status = IDAGetErrWeights(ida_mem, error_weights_view);
++    return status >= 0;
++  }
++
+ 
+ 
+   template <typename VectorType>
+@@ -325,7 +361,8 @@
+     status = IDASetSuppressAlg(ida_mem, data.ignore_algebraic_terms_for_errors);
+     AssertIDA(status);
+ 
+-    //  status = IDASetMaxNumSteps(ida_mem, max_steps);
++    status = IDASetMaxNumSteps(ida_mem, std::numeric_limits<long int>::max());
++    AssertIDA(status);
+     status = IDASetStopTime(ida_mem, data.final_time);
+     AssertIDA(status);
+ 

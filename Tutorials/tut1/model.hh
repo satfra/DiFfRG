@@ -5,7 +5,7 @@
 using namespace DiFfRG;
 
 struct Parameters {
-  Parameters(const JSONValue &value)
+  Parameters(const ConfigTree &value)
   {
     try {
       a = value.get_double("/physical/a");
@@ -37,7 +37,7 @@ private:
 public:
   static constexpr uint dim = 1;
 
-  Tut1(const JSONValue &json) : def::fRG(json.get_double("/physical/Lambda")), prm(json) {}
+  Tut1(const ConfigTree &json) : def::fRG(json.get_double("/physical/Lambda")), prm(json) {}
 
   template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
   {

@@ -1,0 +1,34 @@
+[physical]
+Lambda = 0.65
+N = 2
+m2 = -0.1
+lambda = 71.6
+T = 0.05
+
+[integration]
+x_order = 32
+x_extent_tolerance = 1e-4
+jacobian_quadrature_factor = 0.5
+
+[discretization.grid]
+x_grid = "-5.8e-4:1.16e-3:1.7458e-1"
+refine = 0
+
+[timestepping]
+final_time = 4
+output_dt = 0.1
+
+[timestepping.implicit]
+dt = 1e-3
+minimal_dt = 1e-4
+maximal_dt = 0.1
+abs_tol = 1e-13
+rel_tol = 1e-7
+max_steps = 5e6
+
+[output]
+vtk = true
+hdf5 = true
+verbosity = 1
+folder = "./"
+name = "output_sigma"

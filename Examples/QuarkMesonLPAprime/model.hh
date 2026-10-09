@@ -11,7 +11,7 @@ using namespace dealii;
 using namespace DiFfRG;
 
 struct Parameters {
-  Parameters(const JSONValue &value)
+  Parameters(const ConfigTree &value)
   {
     try {
       Lambda = value.get_double("/physical/Lambda");
@@ -68,7 +68,7 @@ public:
 protected:
   const Parameters prm;
 
-  mutable QuarkMesonFlowEquations flow_equations;
+  mutable LPA_QM_flows flow_equations;
 
   mutable double cSigma;
 
@@ -76,10 +76,10 @@ protected:
   // initialization
   // ----------------------------------------------------------------------------------------------------
 public:
-  QuarkMesonLPAprime(const JSONValue &json) : def::fRG(json.get_double("/physical/Lambda")), prm(json), flow_equations(json)
+  QuarkMesonLPAprime(const ConfigTree &json) : def::fRG(json.get_double("/physical/Lambda")), prm(json), flow_equations(json)
   {
     flow_equations.set_k(Lambda);
-    flow_equations.print_parameters("log");
+    //flow_equations.print_parameters("log");
 
     // this->components().add_dependency(1, 0, 0, 0);
     // this->components().add_dependency(1, 1, 0, 0);
@@ -143,21 +143,13 @@ public:
     const auto d3V = extractors[idxe("d3V")];
 
     const double p0f = std::max(1e-3, M_PI * prm.T * std::exp(-k / (M_PI * prm.T)));
-
-    const auto arguments = std::tie(prm.Nc, prm.Nf, prm.T, prm.muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
+    const double zero = 0.0001;
+    const auto arguments = device::tie(k, zero, p0f,prm.Nf, prm.Nc, prm.T, prm.muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
 
     residual[idxv("ZQ")] = -etaQ * ZQ;
     residual[idxv("ZPhi")] = -etaPhi * ZPhi;
 
-    std::apply(
-        [&](auto &&...args) {
-          std::vector<std::future<double>> hPhi_futures;
-
-          hPhi_futures.emplace_back(std::move(flow_equations.hPhi0_integrator.request<double>(k, p0f, 1e-5, args...)));
-
-          residual[idxv("hPhi")] = hPhi_futures[0].get();
-        },
-        arguments);
+    flow_equations.hPhi0.get(residual[idxv("hPhi")], arguments);
 
     cSigma = std::pow(ZPhi, -0.5) * prm.cSigma;
   }
@@ -186,7 +178,9 @@ public:
 
     const double p0f = std::max(1e-3, M_PI * prm.T * std::exp(-k / (M_PI * prm.T)));
 
-    const auto arguments = std::tie(prm.Nc, prm.Nf, prm.T, prm.muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
+    const double zero = 0.0001;
+
+    const auto arguments = device::tie(k, zero, p0f,prm.Nf, prm.Nc, prm.T, prm.muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
 
     // iterate the etas until convergence
     {
@@ -197,12 +191,8 @@ public:
         double new_etaQ = 0.;
         double new_etaPhi = 0.;
 
-        std::apply(
-            [&](auto &&...args) {
-              new_etaQ = flow_equations.etaQ_integrator.get<double>(k, p0f, 1e-4, args...);
-              new_etaPhi = flow_equations.etaPhi_integrator.get<double>(k, p0f, 1e-4, args...);
-            },
-            arguments);
+        flow_equations.etaQ.get(new_etaQ, arguments);
+        flow_equations.etaPhi.get(new_etaPhi, arguments);
 
         eps = 0.0;
         eps = std::max(eps, std::abs(double((new_etaQ - etaQ) / new_etaQ)));
@@ -228,6 +218,7 @@ public:
 
     const auto &fe_functions = get<"fe_functions">(sol);
     const auto &fe_derivatives = get<"fe_derivatives">(sol);
+    const auto &fe_hessians = get<"fe_hessians">(sol);
     const auto &variables = get<"variables">(sol);
     const auto &extractors = get<"extractors">(sol);
 
@@ -237,13 +228,14 @@ public:
     const auto hPhi = (variables[idxv("hPhi")]);
     const auto d1V = fe_functions[idxf("u")];
     const auto d2V = fe_derivatives[idxf("u")][0];
-    const auto d3V = extractors[idxe("d3V")];
+    const auto d3V = fe_hessians[idxf("u")][0][0];
 
     const double p0f = std::max(1e-3, M_PI * prm.T * std::exp(-k / (M_PI * prm.T)));
+    const double zero = 0.0001;
 
-    const auto arguments = std::tie(prm.Nc, prm.Nf, prm.T, prm.muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
+    const auto arguments = device::tie(k, zero, p0f,prm.Nf, prm.Nc, prm.T, prm.muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
 
-    std::apply([&](auto &&...args) { flux[idxf("u")][mesonic] = flow_equations.V_integrator.get<NT>(k, p0f, 0., args...); }, arguments);
+    flow_equations.V.get(flux[idxf("u")][mesonic], arguments);
 
     if (!std::isfinite((double)flux[idxf("u")][mesonic])) {
       spdlog::error("flux is not finite");
@@ -287,8 +279,32 @@ public:
     return {{d1V - cSigma / (sigma + 1e-14)}};
   }
 
+  template <int dim, typename Vector>
+  std::array<double, 1> raw_potential_gradient(const Point<dim> &, const Vector &u_i) const
+  {
+    return {{u_i[idxf("u")]}};
+  }
+
   mutable double last_EoM = 0.;
   mutable bool lock_EoM = false;
+
+  // The EoM lock above is history: once set, it stays set, and nothing in the state or the RG time
+  // says whether it was. These two let a flow restarted from a snapshot (/restart/file) continue
+  // with the lock as it was. cSigma is recomputed in dt_variables, but only once the first residual
+  // of the restarted run has been assembled, so it travels along as well.
+  void save_state(DiFfRG::ModelState &state) const
+  {
+    state.set("last_EoM", last_EoM);
+    state.set("lock_EoM", lock_EoM);
+    state.set("cSigma", cSigma);
+  }
+
+  void load_state(const DiFfRG::ModelState &state)
+  {
+    last_EoM = state.get<double>("last_EoM");
+    lock_EoM = state.get<bool>("lock_EoM");
+    cSigma = state.get<double>("cSigma");
+  }
 
   template <int dim, typename Vector> Point<dim> EoM_postprocess(const Point<dim> &EoM, const Vector &) const
   {
@@ -327,7 +343,7 @@ public:
     const double mPion = m2Pion > 0. ? std::sqrt(m2Pion) : 0.;
     const double mSigma = m2Sigma > 0. ? std::sqrt(m2Sigma) : 0.;
 
-    auto &out_file = output.csv_file(filename);
+    auto out_file = output.table(filename);
     out_file.set_Lambda(Lambda);
 
     out_file.value("sigma [GeV]", sigma);
@@ -349,6 +365,7 @@ public:
   {
     // chiral EoM
     helper(
+        "chiral",
         [&](const auto &, const auto &u_i) {
           const auto d1V = u_i[idxf("u")];
           return std::array<double, 1>{{d1V}};
@@ -356,6 +373,7 @@ public:
         [&](auto &output, const auto &x, const auto &sol) { this->readouts(output, x, sol, "data_chiral.csv", 0); });
     // physical EoM
     helper(
+        "physical",
         [&](const auto &x, const auto &u_i) {
           const auto sigma = std::sqrt(2. * x[mesonic]);
           const auto d1V = u_i[idxf("u")];

@@ -1,0 +1,9 @@
+# Python toolchain for building the unified DiFfRG documentation site.
+# NOTE: doxysphinx supports Python 3.9–3.12 only; build the docs with such an
+# interpreter (CI pins 3.12; locally a 3.11/3.12 venv works).
+sphinx>=7,<9
+pydata-sphinx-theme>=0.15
+myst-parser>=2
+sphinx-autoapi>=3
+sphinx-design>=0.5
+doxysphinx>=3.3

@@ -1,9 +1,8 @@
+[![Tests](https://img.shields.io/endpoint?style=for-the-badge&url=https://gist.githubusercontent.com/satfra/336ebc0aaa7dc9a0e71ca01dd4361a12/raw/diffrg-tests.json)](https://github.com/satfra/DiFfRG_current/actions/workflows/ci.yml)
 [![arXiv](https://img.shields.io/badge/arXiv-2412.13043-b31b1b.svg?style=for-the-badge)](https://arxiv.org/abs/2412.13043)
-[![Doxygen](https://img.shields.io/badge/doxygen-2C4AA8?style=for-the-badge&logo=c%2B%2B&logoColor=white)](https://satfra.github.io/DiFfRG/cpp/index.html)
-[![Wolfram](https://img.shields.io/badge/wolfram_doc-cf1c10?style=for-the-badge&logo=wolfram)](https://satfra.github.io/DiFfRG/wolfram/html/guide/DiFfRG.html)
-[![Python](https://img.shields.io/badge/python_doc-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)](https://satfra.github.io/DiFfRG/python/index.html)
+[![Documentation](https://img.shields.io/badge/documentation-2C4AA8?style=for-the-badge&logo=readthedocs&logoColor=white)](https://satfra.github.io/DiFfRG_current/)
 
-<h3>[This is the current stable version of DiFfRG. For the most up-to date version, please visit [this repository](https://github.com/satfra/DiFfRG_current)</h3>
+<h3>[This is the development repository for DiFfRG. For the current stable version, please visit [the main repository](https://github.com/satfra/DiFfRG)</h3>
 
 # DiFfRG - A Discretization Framework for functional Renormalization Group flows
 
@@ -19,11 +18,11 @@ For spatial discretizations, i.e. discretizations of field space mostly used for
 The FEM methods included in DiFfRG are built upon the [deal.ii](https://www.dealii.org/) finite element library, which is highly parallelized and allows for great performance and flexibility.
 PDEs consisting of RG-time dependent equations, as well as stationary equations can be solved together during the flow, allowing for techniques like flowing fields in a very accessible way.
 
-Both explicit and implicit timestepping methods are available and allow thus for efficient RG-time integration in the symmetric and symmetry-broken regime.
+Both explicit and implicit time-stepping methods are available and allow thus for efficient RG-time integration in the symmetric and symmetry-broken regime.
 
 We also include a set of tools for the evaluation of integrals and discretization of momentum dependencies.
 
-For an overview, please see the [accompanying paper](https://arxiv.org/abs/2412.13043), the ***[tutorial page](https://satfra.github.io/DiFfRG/cpp/TutorialTOC.html)*** in the [documentation](https://satfra.github.io/DiFfRG/cpp/index.html) and the examples in `Examples/`. 
+For an overview, please see the [accompanying paper](https://arxiv.org/abs/2412.13043), the ***[tutorials](https://satfra.github.io/DiFfRG/tutorials/index.html)*** in the [documentation](https://satfra.github.io/DiFfRG/) and the examples in `Examples/`. 
 
 This library has been developed within the [fQCD Collaboration](https://fQCD-Collaboration.github.io).
 
@@ -33,46 +32,53 @@ If you use DiFfRG in your scientific work, please cite the corresponding paper:
 ```
 @article{Sattler:2024ozv,
     author = "Sattler, Franz R. and Pawlowski, Jan M.",
-    title = "{DiFfRG: A Discretisation Framework for functional Renormalisation Group flows}",
+    title = "{DiFfRG: A discretisation framework for functional renormalisation group flows}",
     eprint = "2412.13043",
     archivePrefix = "arXiv",
     primaryClass = "hep-ph",
-    month = "12",
-    year = "2024"
+    doi = "10.1016/j.cpc.2026.110262",
+    journal = "Comput. Phys. Commun.",
+    volume = "327",
+    pages = "110262",
+    year = "2026"
 }
 ```
+
+## TL;DR: How to install DiFfRG
+
+From a shell, run
+```bash
+bash <(curl -s -L https://github.com/satfra/DiFfRG_current/raw/refs/heads/main/install_diffrg.sh)
+```
+A short install wizard walks through the typical choices — pre-built dependency bundle or from source, where to install and build, toggle features (MPI, GPU, ...), copy the examples and tutorials — then performs the installation.
 
 ## Requirements
 
 To compile and run this project, there are very few requirements which you can easily install using your package manager on Linux or MacOS:
 
 - [git](https://git-scm.com/) for external requirements and to clone this repository.
-- [CMake](https://www.cmake.org/) for the build systems of DiFfRG, deal.ii and other libraries.
-- [GNU Make](https://www.gnu.org/software/make/) or another generator of your choice.
-- A compiler supporting at least the C++20 standard. This project is only tested using the [GCC](https://gcc.gnu.org/) compiler suite, as well as with `AppleClang`, but in principle, ICC or standard Clang should also work.
-- LAPACK and BLAS in some form, e.g. [OpenBlas](https://www.openblas.net/).
-- The GNU Scientific Library [GSL](https://www.gnu.org/software/gsl/). If not found by DiFfRG, it will try to install it by itself.
-- [Doxygen](https://www.doxygen.org/) and [graphviz](https://www.graphviz.org/download/) to build the documentation.
+- [CMake](https://www.cmake.org/) for the build systems of DiFfRG, deal.ii and other libraries and [GNU Make](https://www.gnu.org/software/make/) or another generator of your choice.
+- A compiler supporting at least the C++20 standard, including a Fortran compiler (e.g. `gfortran`). This project has been tested with [GCC](https://gcc.gnu.org/), `AppleClang`, and `Clang`.
+- LAPACK and BLAS in some form, e.g. [OpenBLAS](https://www.openblas.net/). Alternatively, pass `-DBUILD_OpenBLAS=ON` to have DiFfRG build OpenBLAS.
+- The GNU Scientific Library [GSL](https://www.gnu.org/software/gsl/).
 
-The following requirements are optional:
-- A Fortran compiler (e.g. `gfortran`). It is *recommended* but not required: it makes deal.II's LAPACK detection robust.
-- [Boost](https://www.boost.org/) (>= 1.80). A compatible system Boost is used automatically if found; otherwise it is built from source (see [Setup](#setup) for how to control this). If the system boost is not compatible, DiFfRG will build the bundled one automatically.
-- [oneTBB](https://github.com/uxlfoundation/oneTBB) (>= 2021) and [SUNDIALS](https://computing.llnl.gov/projects/sundials) (>= 5.4.0). Like Boost, a compatible system copy is used automatically if found, otherwise it is built from source (see [Setup](#setup)).
-- [Python](https://www.python.org/) is used in the library for visualization purposes. Furthermore, adaptive phase diagram calculation is implemented as a python routine.
-- [ParaView](https://www.paraview.org/), a program to visualize and post-process the vtk data saved by DiFfRG when treating FEM discretizations.
+The following are optional:
+
 - [CUDA](https://developer.nvidia.com/cuda-toolkit) for integration routines on the GPU, which gives a huge speedup for the calculation of fully momentum dependent flow equations (10 - 100x). In case you wish to use CUDA, make sure you have a compiler available on your system compatible with your version of `nvcc`, e.g. `g++`<=13.2 for CUDA 12.5
+- [Doxygen](https://www.doxygen.org/) and [graphviz](https://www.graphviz.org/download/) to build the documentation.
 
 All other requirements are bundled and automatically built with DiFfRG.
 The framework has been tested with the following systems:
 
 #### Arch Linux
 ```bash
-$ pacman -S git cmake gcc blas-openblas blas64-openblas paraview python doxygen graphviz gsl
+$ pacman -S git cmake gcc gcc-fortran blas-openblas paraview python doxygen graphviz gsl
 ```
-For a CUDA-enabled build, additionally install
+For a CUDA-enabled build, additionally 
 ```bash
 $ pacman -S cuda
 ```
+
 
 #### Rocky Linux
 ```bash
@@ -85,128 +91,97 @@ The second line is necessary to switch into a shell where `g++-12` is available
 #### Ubuntu
 ```bash
 $ apt-get update
-$ apt-get install git cmake libopenblas-dev paraview build-essential python3 doxygen libeigen3-dev graphviz libgsl-dev
+$ apt-get install git cmake gfortran libopenblas-dev paraview build-essential python3 doxygen graphviz libgsl-dev
 ```
 For a CUDA-enabled build, additionally 
 ```bash
 $ apt-get install cuda
 ```
 
-#### MacOS
+#### macOS
 First, install xcode and homebrew, then run
 ```bash
-$ brew install cmake doxygen paraview eigen graphviz gsl
+$ brew install cmake gcc doxygen paraview graphviz gsl python3 bash
 ```
+
+*Note: you have to install a newer GNU version of bash, since by default, only version 3.2 is installed, and for installation, PETSc requires a newer version*
 
 #### Windows
 
 If using Windows, instead of running the project directly, it is recommended to use [WSL](https://learn.microsoft.com/en-us/windows/wsl/setup/environment) and then go through the installation as if on Linux (e.g. Arch or Ubuntu).
 
-#### Docker and other container runtime environments
+## Installation
 
-Although a native install should be unproblematic in most cases, the setup with CUDA functionality may be daunting. Especially on high-performance clusters, and also depending on the packages available for  chosen distribution, it may be much easier to work with the framework inside a container.
+### Interactive installer (recommended)
 
-The specific choice of runtime environment is up to the user, however we provide a small build script to create docker container in which DiFfRG will be built.
-To do this, you will need `docker`, `docker-buildx` and the [NVIDIA container toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html#) in case you wish to create a CUDA-compatible image.
-
-For a CUDA-enabled build, run
-```build
-$ bash setup_docker.sh -c 12.5.1 -j8
-```
-in the above, you may want to replace the version `12.5.1` with another version you can find on [docker hub at nvidia/cuda ](https://hub.docker.com/r/nvidia/cuda/tags).
-Alternatively, for a CUDA-less build, run simply
-```build
-$ bash setup_docker.sh -j8
-```
-
-If using other environments, e.g. [ENROOT](https://github.com/NVIDIA/enroot), the preferred approach is simply to build an image on top of the [CUDA images by NVIDIA](https://hub.docker.com/r/nvidia/cuda/tags). Optimal compatibility is given using `nvidia/cuda:12.5.1-devel-rockylinux`. Proceed with the installation setup for  Rocky Linux above.
-
-For example, with ENROOT a DiFfRG image can be built by following these steps:
+From the shell, run
 ```bash
-$ enroot import docker://nvidia/cuda:12.5.1-devel-rockylinux9
-$ enroot create --name DiFfRG nvidia+cuda+12.5.1-devel-rockylinux9.sqsh
-$ enroot start --root --rw -m ./:/DiFfRG_source DiFfRG bash
+bash <(curl -s -L https://github.com/satfra/DiFfRG_current/raw/refs/heads/main/install_diffrg.sh)
 ```
-Afterwards, one proceeds with the above Rocky Linux setup.
+A short wizard walks through the typical choices — pre-built dependency bundle or full self-build, install prefix, build folder, features (MPI, GPU, ...), and an optional copy of the examples and tutorials — then performs the complete installation. Every question also has a command-line flag (`--help`) for scripted use.
 
-## Setup
+The **pre-built dependency bundle** downloads deal.II, Kokkos, Boost, TBB, SUNDIALS, HDF5 and friends as a ~50 MB binary from [GitHub Releases](https://github.com/satfra/DiFfRG_current/releases) instead of compiling them for hours; only the DiFfRG library itself is compiled locally (minutes). Bundles come in a CPU-only and a CUDA variant (the wizard offers the latter when it finds an NVIDIA GPU), each with or without MPI (Open MPI, with PETSc and MUMPS; needs the distro's Open MPI development package), and need Linux x86_64 with AVX2 (any consumer CPU from ~2013 on) and glibc ≥ 2.34. For other MPIs (Intel MPI, Cray MPICH, ... — typical on clusters), other CPUs, or other platforms the wizard's self-build path covers the full feature set.
 
-If all requirements are met, you can clone the git to a directory of your choice,
+### From source
+
+The wizard's self-build path compiles the full dependency superbuild with your choice of features:
 ```bash
-$ git clone https://github.com/satfra/DiFfRG.git
+bash <(curl -s -L https://github.com/satfra/DiFfRG_current/raw/refs/heads/main/install_diffrg.sh) --mode source
 ```
-and start the build after switching to the git directory.
+Add e.g. `--mpi --gpu --threads 6 --prefix ${HOME}/.local/share/DiFfRG --yes` for a non-interactive run (`--help` lists all options). Experts can drive the superbuild directly with CMake — see *Manual installation* below.
+
+On a GPU machine the wizard also asks which NVIDIA architectures to compile for, defaulting to the GPUs it finds (`--cuda-arch "8.0;9.0"` for a scripted run). This matters: CUDA code compiled for the wrong architecture either refuses to start or is JIT-compiled by the driver on every launch, which DiFfRG's large flow kernels cannot afford. See [Choosing the GPU architecture](https://satfra.github.io/DiFfRG_current/getting_started/installation.html) for the details.
+
+### CMake
+
+You can download a script to install DiFfRG locally directly from a CMake file by putting into your `CMakeLists.txt` the lines
+```CMake
+file(DOWNLOAD
+  https://github.com/satfra/DiFfRG_current/raw/refs/heads/main/DiFfRG/cmake/InstallDiFfRG.cmake
+  ${CURRENT_BINARY_DIR}/cmake/InstallDiFfRG.cmake)
+include(${CURRENT_BINARY_DIR}/cmake/InstallDiFfRG.cmake)
+```
+This will fetch a script, which will automatically download and install DiFfRG and all of its dependencies to `$HOME/.local/share/DiFfRG`.
+If you wish to change this directory, or some other default values, you can set the following optional variables:
+```CMake
+set(DiFfRG_INSTALL_DIR $ENV{HOME}/.local/share/DiFfRG/)
+set(DiFfRG_BUILD_DIR $ENV{HOME}/.local/share/DiFfRG/build/)
+set(DiFfRG_SOURCE_DIR $ENV{HOME}/.local/share/DiFfRG/src/)
+set(TRY_DiFfRG_VERSION main)
+set(PARALLEL_JOBS 8)
+```
+
+### Manual installation
+
+You can also manually clone DiFfRG to a directory of your choice
+```bash
+$ git clone https://github.com/satfra/DiFfRG_current.git
+```
+Then, create a build directory and run cmake
 ```bash
 $ cd DiFfRG
-$ bash -i  build.sh -j8 -i ~/.local/share/DiFfRG
+$ mkdir build
+$ cd build
+$ cmake ../ -DCMAKE_INSTALL_PREFIX=$HOME/.local/share/DiFfRG/ -DCMAKE_BUILD_TYPE=Release
+$ cmake --build ./ -- -j8
 ```
-The `build.sh` bash script will build and setup the DiFfRG project and all its requirements. This can take up to half an hour as the deal.ii library is quite large.
-This script has the following options:
--  `-f`              Perform a full build and install of everything without confirmations.
--  `-c`              Use CUDA when building the DiFfRG library.
--  `-i <directory>`  Set the installation directory for the library.
--  `-j <threads>`    Set the number of threads passed to the build.
--  `-b <directory>`  Use the Boost installation at this prefix instead of building one.
--  `-t <directory>`  Use the TBB installation at this prefix instead of building one.
--  `-s <directory>`  Use the SUNDIALS installation at this prefix instead of building one.
--  `--help`          Display this information.
+By default, the library will install itself to `$HOME/.local/share/DiFfRG`, but you can control the destination by pointing `CMAKE_INSTALL_PREFIX` to a directory of your choice.
 
-Depending on your amount of CPU cores, you should adjust the `-j` parameter which indicates the number of threads used in the build process. Note that choosing this too large may lead to extreme RAM usage, so tread carefully - DiFfRG will try to auto-detect an appropriate value if `-j` is not set.
+### Verifying your installation
 
-As soon as the build has finished, you can find a full install of the library in the directory passed to `-i`; the default is `~/.local/share/DiFfRG`.
-
-If you have changes to the library code, you can update the library by running
+After installation, you can verify that all dependencies are correctly found:
 ```bash
-$ bash -i update_DiFfRG.sh -c -j8 -i ~/.local/share/DiFfRG
+$ cmake -DBUNDLED_DIR=$HOME/.local/share/DiFfRG/bundled -P $HOME/.local/share/DiFfRG/cmake/verify_install.cmake
 ```
-where once again the `-j` parameter should be adjusted to your amount of CPU cores.
-The `update_DiFfRG.sh` script takes the following optional arguments:
-- `-c`               Use CUDA when building the DiFfRG library.
-- `-i <directory>`   Set the installation directory for the library.
-- `-j <threads>`     Set the number of threads passed to the build.
-- `-m`               Install the Mathematica package locally.
-- `--help`           Display this information.
-
-
-### Choosing the compiler
-
-The compiler is selected through the standard `CC`/`CXX` (and, optionally, `FC`) environment variables, which are propagated to DiFfRG and every bundled dependency:
-```bash
-$ CXX=clang++ CC=clang bash -i build.sh -j8 -i ~/.local/share/DiFfRG
-```
-You can also set these in the `config` file (see the commented `export CC=…`/`export CXX=…` lines there). Because CMake caches the compiler on the first configure, switching compilers afterwards requires a clean build tree (run `clear_all.sh`).
-
-### Bundled dependencies: Boost, TBB and SUNDIALS
-
-By default a compatible system copy of each is used if found, otherwise it is built from source:
-- **Boost** ≥ 1.80 (used by deal.II and DiFfRG; only adopted if deal.II can consume it — see note below),
-- **TBB** ≥ 2021 (used by deal.II and DiFfRG),
-- **SUNDIALS** ≥ 5.4.0 (used by deal.II only).
-
-Each can be controlled independently, e.g.:
-```bash
-# Use a specific prefix for one or more dependencies:
-$ bash -i build.sh -j8 -b /usr -t /usr -s /opt/sundials -i ~/.local/share/DiFfRG
-#   (equivalently: cmake ... -DBOOST_DIR=/usr -DTBB_DIR=/usr -DSUNDIALS_DIR=/opt/sundials)
-# Force building a bundled, pinned dependency (ignore any system copy):
-$ BUILD_BOOST=1 BUILD_TBB=1 BUILD_SUNDIALS=1 bash -i build.sh -j8 -i ~/.local/share/DiFfRG
-#   (equivalently: cmake ... -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_SUNDIALS=ON)
-```
-Note on Boost: deal.II uses the legacy module-mode `FindBoost`, which needs *compiled* Boost component
-libraries including `boost_system`. Very recent Boost releases ship `Boost.System` header-only and
-cannot be consumed by deal.II here, so the bundled Boost is built automatically (and an incompatible
-`-b` prefix is a hard error). TBB and SUNDIALS have no such restriction. oneTBB and SUNDIALS each build
-in only ~1–2 minutes, so the savings from a system copy are modest — the main benefit is reusing
-existing/HPC-module installs.
-
+This prints a pass/fail table for each dependency, helping diagnose any issues.
 
 ## Getting started with simulating fRG flows
 
-For an overview, please see the ***[tutorial page](https://satfra.github.io/DiFfRG/cpp/TutorialTOC.html)*** in the [documentation](https://satfra.github.io/DiFfRG/cpp/index.html). A local documentation is also always built automatically when running the setup script, but can also be built manually by running
+For an overview, please see the ***[tutorials](https://satfra.github.io/DiFfRG/tutorials/index.html)*** in the [documentation](https://satfra.github.io/DiFfRG/). A local copy of the documentation is also built automatically when running the setup script, but can also be built manually by running
 ```bash
 $ make documentation
 ```
-inside the `DiFfRG_build` directory. You can find then a code reference in the top directory.
+inside the `DiFfRG_build` directory (this requires the Python documentation toolchain, see `DiFfRG/documentation/requirements.txt`). You can then find the rendered site in the install directory.
 
 All backend code is contained in the DiFfRG directory.
 
@@ -216,9 +191,13 @@ Several simulations are defined in the Applications directory, which can be used
 
 ## Logfiles and install issues
 
-During building and installing DiFfRG, logs are created at every step. You may find them in `logs/`; the per-dependency build logs are kept inside the build tree under `DiFfRG_build/<dependency>/src/<dependency>-stamp/`.
+If DiFfRG fails to build on your machine, first check the appropriate logs. You find the main log at `~/.local/share/DiFfRG/build/DiFfRG.log` if you are using the CMake install. Otherwise, you can redirect the output of the build, e.g.
+```bash
+cmake --build ./ -- -j8 | tee DiFfRG.log
+```
+and analyze the result.
 
-If DiFfRG fails to build on your machine, first check the appropriate logfile. If DiFfRG proves to be incompatible with your machine, please open an Issue on GitHub [here](https://github.com/satfra/DiFfRG/issues), or alternatively send an email to the author (see the [publication](https://arxiv.org/abs/2412.13043)).
+If DiFfRG proves to be incompatible with your machine, please open an Issue on GitHub [here](https://github.com/satfra/DiFfRG/issues), or, alternatively, send an email to the author (see the [publication](https://arxiv.org/abs/2412.13043)).
 
 
 ## Contributing
@@ -230,7 +209,7 @@ Thanks to the collaborative nature of GitHub, you can simply fork the project an
 
 ## Configuration files
 
-A DiFfRG simulation requires you to provide a valid `parameters.json` file in the execution path, or alternatively provide another JSON-file using the `-p` flag (see below).
+A DiFfRG simulation requires you to provide a valid `parameters.json` or `parameters.toml` file in the execution path, or alternatively provide another JSON/TOML-file using the `-p` flag (see below).
 
 To generate a "stock" `parameters.json` in the current folder, you can call any DiFfRG application as
 ```bash
@@ -253,6 +232,11 @@ or from the CLI,
 ```bash
 $ ./my_simulation -si /output/verbosity=1
 ```
+Levels 1--4 use compact, aggregated progress output: the console is updated at most once per second for each topic,
+and the run log receives the same aggregate every second. Level 2 adds Jacobian, linear-solver, and
+solver-specific diagnostics; level 3 adds factorization and output timings. Level 4 remains rate-limited. Level 5 is
+the explicit debugging mode: every progress event is printed and may substantially slow a run. Progress records are
+kept to 100 columns, with detailed diagnostics on at most one continuation line.
 
 
 ## Modifying parameters from the CLI
@@ -278,7 +262,7 @@ $ ./my_simulation -sd /physical/Lambda=1.0
 
 In general, the `IDA` timestepper from the `SUNDIALS`-suite has proven to be the optimal choice for any fRG-flow with convexity restoration. Additionally, this solver allows for out-of-the-box solving of additional algebraic systems, which is handy for more complicated fRG setups.
 
-If solving purely variable-dependent systems, one of the `Boost` time steppers, `Boost_RK45`, `Boost_RK78` or `Boost_ABM`. The latter is especially excellent for extremely large systems which have no extremely fast dynamics, but lacks adaptive timestepping. In practice, choosing `Boost_ABM` over one of the RK steppers may speed up a Yang-Mills simulation with full momentum dependences by more than a factor of 10.
+If solving purely variable-dependent systems, one of the `Boost` time steppers, `Boost_RK45`, `Boost_RK78` or `Boost_ABM`. The latter is especially excellent for extremely large systems which have no extremely fast dynamics, but lacks adaptive timestepping. In practice, choosing `Boost_ABM` over one of the RK steppers may speed up a Yang-Mills simulation with full momentum dependences by more than a factor of 10 while maintaining accuracy perfectly.
 
 For systems with both spatial discretisations and variables, consider one of the implicit-explicit mixtures, `SUNDIALS_IDA_Boost_RK45`,  `SUNDIALS_IDA_Boost_RK78` or `SUNDIALS_IDA_Boost_ABM`.
 
@@ -286,14 +270,13 @@ For systems with both spatial discretisations and variables, consider one of the
 
 The following third-party libraries are utilised by DiFfRG. They are automatically built and installed DiFfRG during the build process.
 
-- The main backend for field-space discretization is [deal.II](https://www.dealii.org/), which provides the entire FEM-machinery as well as many other utility components.
+- The main backend for field-space discretization is [deal.II](https://www.dealii.org/), which provides the entire FE/FV-machinery as well as many other utility components.
 - For performant and convenient calculation of Jacobian matrices we use the [autodiff](https://github.com/autodiff/autodiff) library, which implements automatic forward and backwards differentiation in C++ and also in CUDA.
+- [Kokkos](https://github.com/kokkos/kokkos), a performance portability framework for shared-memory parallelization on GPU and CPU. We use it for the integration routines for flow equations.
 - Time integration relies heavily on the [SUNDIALS](https://computing.llnl.gov/projects/sundials) suite, specifically on the IDAs solver.
-- [Rapidcsv](https://github.com/d99kris/rapidcsv) for quick processing of .csv files.
-- [Catch2](https://github.com/catchorg/Catch2) for unit testing.
-- [RMM](https://github.com/rapidsai/rmm), a memory manager for CUDA, which is used for GPU-accelerated loop integrations.
-- [QMC](https://github.com/mppmu/qmc) for adaptive Quasi-Monte-Carlo integration.
-- [spdlog](https://github.com/gabime/spdlog) for logging.
-- [Doxygen Awesome](https://github.com/jothepro/doxygen-awesome-css) for a modern doxygen theme.
 - [Boost](https://www.boost.org/) provides explicit time-stepping and various math algorithms.
-- [Eigen](https://eigen.tuxfamily.org/) for some linear-algebra related tasks.
+- [Catch2](https://github.com/catchorg/Catch2) for unit testing.
+- [spdlog](https://github.com/gabime/spdlog) for logging.
+- [Boost](https://www.boost.org/) provides explicit time-stepping and various math algorithms.
+- [Eigen](https://eigen.tuxfamily.org/) for linear-algebra related tasks.
+- [HDF5](https://www.hdfgroup.org/solutions/hdf5/) for hierarchical data format storage and I/O operations.

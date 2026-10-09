@@ -1,34 +1,39 @@
 #pragma once
 
-#include "flows/flows.hh"
-#include <DiFfRG/model/model.hh>
-#include <DiFfRG/physics/utils.hh>
-#include <cmath>
-
-using namespace dealii;
+#include <DiFfRG/DiFfRG.hh>
 using namespace DiFfRG;
 
+#include "flows/flows.hh"
+
+#include <flow_abort.hh>
+
 struct Parameters {
-  Parameters(const JSONValue &json)
+  Parameters(const ConfigTree &config)
   {
     try {
-      Lambda = json.get_double("/physical/Lambda");
+      Lambda = config.get_double("/physical/Lambda");
 
-      alphaA3 = json.get_double("/physical/alphaA3");
-      alphaA4 = json.get_double("/physical/alphaA4");
-      alphaAcbc = json.get_double("/physical/alphaAcbc");
+      alphaA3 = config.get_double("/physical/alphaA3");
+      alphaA4 = config.get_double("/physical/alphaA4");
+      alphaAcbc = config.get_double("/physical/alphaAcbc");
 
-      tilt_A3 = json.get_double("/physical/tilt_A3");
-      tilt_A4 = json.get_double("/physical/tilt_A4");
-      tilt_Acbc = json.get_double("/physical/tilt_Acbc");
+      tilt_A3 = config.get_double("/physical/tilt_A3");
+      tilt_A4 = config.get_double("/physical/tilt_A4");
+      tilt_Acbc = config.get_double("/physical/tilt_Acbc");
 
-      m2A = json.get_double("/physical/m2A");
+      m2A = config.get_double("/physical/m2A");
 
-      p_grid_min = json.get_double("/discretization/p_grid_min");
-      p_grid_max = json.get_double("/discretization/p_grid_max");
-      p_grid_bias = json.get_double("/discretization/p_grid_bias");
+      p_grid_min = config.get_double("/discretization/p_grid_min");
+      p_grid_max = config.get_double("/discretization/p_grid_max");
+      p_grid_center = config.get_double("/discretization/p_grid_center");
+      p_grid_focus = config.get_double("/discretization/p_grid_focus");
+
+      eta_iter_max = config.get_int("/physical/eta_iter_max");
+      eta_tol = config.get_double("/physical/eta_tol");
+
     } catch (std::exception &e) {
-      std::cout << "Error in reading parameters: " << e.what() << std::endl;
+      std::cerr << "Error in reading parameters: " << e.what() << std::endl;
+      throw;
     }
   }
 
@@ -37,16 +42,21 @@ struct Parameters {
   double tilt_A3, tilt_A4, tilt_Acbc;
   double m2A;
 
-  double p_grid_min, p_grid_max, p_grid_bias;
+  int eta_iter_max;
+  double eta_tol;
+
+  // Momentum grid: logarithmic, but with the points clustered around p_grid_center so that the
+  // ~1 GeV structure of the dressings is resolved rather than smeared over two or three cells.
+  // p_grid_focus = 0 recovers a plain logarithmic grid.
+  double p_grid_min, p_grid_max, p_grid_center, p_grid_focus;
 };
 
 // Size of the momentum grid
 static constexpr uint p_grid_size = 96;
-// As for components, we have one FE function (u) and several extractors.
+// Everything is a Variable on the momentum grid: the gauge vertex dressings and the propagator
+// dressings. No FE functions, no extractors.
 using VariableDesc =
-    VariableDescriptor<Scalar<"m2A">,
-
-                       FunctionND<"ZA3", p_grid_size>, FunctionND<"ZAcbc", p_grid_size>, FunctionND<"ZA4", p_grid_size>,
+    VariableDescriptor<FunctionND<"ZA3", p_grid_size>, FunctionND<"ZAcbc", p_grid_size>, FunctionND<"ZA4", p_grid_size>,
 
                        FunctionND<"ZA", p_grid_size>, FunctionND<"Zc", p_grid_size>>;
 using Components = ComponentDescriptor<FEFunctionDescriptor<>, VariableDesc, ExtractorDescriptor<>>;
@@ -54,8 +64,8 @@ using Components = ComponentDescriptor<FEFunctionDescriptor<>, VariableDesc, Ext
 constexpr auto idxv = VariableDesc{};
 
 /**
- * @brief This class implements the numerical model for the quark-meson model at finite temperature and chemical
- * potential.
+ * @brief SU(3) Yang-Mills in a vertex expansion, with every vertex evaluated on the symmetric
+ * point so that each dressing lives on one momentum grid.
  */
 class YangMills : public def::AbstractModel<YangMills, Components>,
                   public def::fRG,        // this handles the fRG time
@@ -63,41 +73,37 @@ class YangMills : public def::AbstractModel<YangMills, Components>,
 {
   const Parameters prm;
 
-  using Coordinates1D = LogarithmicCoordinates1D<float>;
+  using Coordinates1D = FocusedLogCoordinates1D<double>;
   const Coordinates1D coordinates1D;
 
-  const std::vector<float> grid1D;
+  mutable YangMillsFlows flow_equations;
 
-  mutable YangMillsFlowEquations flow_equations;
-
-  mutable TexLinearInterpolator1D<double, Coordinates1D> dtZc, dtZA, ZA, Zc;
-  mutable TexLinearInterpolator1D<double, Coordinates1D> ZA4, ZAcbc, ZA3;
+  mutable SplineInterpolator1D<double, Coordinates1D> dtZc, dtZA, ZA, Zc;
+  mutable SplineInterpolator1D<double, Coordinates1D> ZA4, ZAcbc, ZA3;
 
 public:
-  YangMills(const JSONValue &json)
-      : def::fRG(json.get_double("/physical/Lambda")), prm(json),
-        coordinates1D(p_grid_size, prm.p_grid_min, prm.p_grid_max, prm.p_grid_bias), grid1D(make_grid(coordinates1D)),
-        flow_equations(json), dtZc(coordinates1D), dtZA(coordinates1D), ZA(coordinates1D),
-        Zc(coordinates1D),                                           // propagators
-        ZA4(coordinates1D), ZAcbc(coordinates1D), ZA3(coordinates1D) // couplings
+  YangMills(const ConfigTree &config)
+      : def::fRG(config.get_double("/physical/Lambda")), prm(config),
+        coordinates1D(p_grid_size, prm.p_grid_min, prm.p_grid_max, prm.p_grid_center, prm.p_grid_focus),
+        flow_equations(config),
+        dtZc(coordinates1D), dtZA(coordinates1D), ZA(coordinates1D), Zc(coordinates1D), // propagators
+        ZA4(coordinates1D), ZAcbc(coordinates1D), ZA3(coordinates1D)                    // couplings
   {
     flow_equations.set_k(prm.Lambda);
-    flow_equations.print_parameters("log");
+    k = std::exp(-t) * Lambda;
   }
 
   template <typename Vector> void initial_condition_variables(Vector &values) const
   {
     for (uint i = 0; i < p_grid_size; ++i) {
-      values[idxv("ZA4") + i] = 4. * M_PI * prm.alphaA4 + prm.tilt_A4 * std::log(grid1D[i] / prm.p_grid_max);
-      values[idxv("ZA3") + i] = std::sqrt(4. * M_PI * prm.alphaA3) + prm.tilt_A3 * std::log(grid1D[i] / prm.p_grid_max);
-      values[idxv("ZAcbc") + i] =
-          std::sqrt(4. * M_PI * prm.alphaAcbc) + prm.tilt_Acbc * std::log(grid1D[i] / prm.p_grid_max);
+      const double p = coordinates1D.forward(i);
+      values[idxv("ZA4") + i] = 4. * M_PI * prm.alphaA4 + prm.tilt_A4 * std::log(p / prm.p_grid_max);
+      values[idxv("ZA3") + i] = std::sqrt(4. * M_PI * prm.alphaA3) + prm.tilt_A3 * std::log(p / prm.p_grid_max);
+      values[idxv("ZAcbc") + i] = std::sqrt(4. * M_PI * prm.alphaAcbc) + prm.tilt_Acbc * std::log(p / prm.p_grid_max);
 
-      values[idxv("ZA") + i] = (powr<2>(grid1D[i]) + prm.m2A) / powr<2>(grid1D[i]);
+      values[idxv("ZA") + i] = (powr<2>(p) + prm.m2A) / powr<2>(p);
       values[idxv("Zc") + i] = 1.;
     }
-    // glue mass
-    values[idxv("m2A")] = prm.m2A;
   }
 
   void set_time(double t_)
@@ -111,7 +117,22 @@ public:
   {
     const auto &variables = get<"variables">(data);
 
-    const auto m2A = variables[idxv("m2A")];
+    // Early abort, on the INCOMING state and before any kernel is launched. The placement is the
+    // whole safety argument, not a convenience: Variables::Assembler::residual_variables calls
+    // dt_variables() and only then fences, so throwing after a .map() would unwind past buffers
+    // with kernels still in flight. Here nothing has been launched in this call and the previous
+    // call already fenced.
+    //
+    // The criterion is shared with the tuner's post-hoc trajectory scan, so a probe is classified
+    // the same way however it was stopped, and the RG time travels out inside the exception --
+    // which is precisely the residual the divergent-branch fit consumes.
+    {
+      const double m2A_t = variables.data()[idxv("ZA")] * powr<2>(prm.p_grid_min) - powr<2>(prm.p_grid_min);
+      double zc_min = std::numeric_limits<double>::infinity();
+      for (uint i = 0; i < p_grid_size; ++i)
+        zc_min = std::min(zc_min, variables.data()[idxv("Zc") + i]);
+      if (flow_has_run_away(m2A_t, prm.m2A, zc_min)) throw FlowAbort(t);
+    }
 
     ZA3.update(&variables.data()[idxv("ZA3")]);
     ZAcbc.update(&variables.data()[idxv("ZAcbc")]);
@@ -121,115 +142,72 @@ public:
     Zc.update(&variables.data()[idxv("Zc")]);
 
     // set up arguments for the integrators
-    const auto arguments = std::tie(ZA3, ZAcbc, ZA4, dtZc, Zc, dtZA, ZA, m2A);
+    const auto arguments = device::tie(k, ZA3, ZAcbc, ZA4, dtZc, Zc, dtZA, ZA);
 
-    // copy the propagators for comparison
-    std::vector<double> old_dtZA(p_grid_size);
-    std::vector<double> old_dtZc(p_grid_size);
-
-    // start by solving the equations for propagators
+    // Self-consistent solve for the propagator anomalous dimensions: dtZA and dtZc appear inside
+    // their own regulator insertions, so the previous iterate is kept to measure convergence.
+    std::vector<double> old_dtZA(p_grid_size), old_dtZc(p_grid_size);
     bool eta_converged = false;
-    uint n_iter = 0;
+    int n_iter = 0;
     while (!eta_converged) {
-      // copy
       for (uint i = 0; i < p_grid_size; ++i) {
         old_dtZA[i] = dtZA[i];
         old_dtZc[i] = dtZc[i];
       }
 
-      auto futures_dtZA = request_data<double>(flow_equations.ZA_integrator, grid1D, k, arguments);
-      auto futures_dtZc = request_data<double>(flow_equations.Zc_integrator, grid1D, k, arguments);
+      // ZA and Zc do not read each other's result, so issue both before waiting for either.
+      {
+        DeferredMaps defer;
+        flow_equations.ZA.map(&residual[idxv("ZA")], coordinates1D, arguments);
+        flow_equations.Zc.map(&residual[idxv("Zc")], coordinates1D, arguments);
+      } // both land here
 
-      for (uint i = 0; i < p_grid_size; ++i) {
-        residual[idxv("ZA") + i] = (*futures_dtZA)[i].get();
-        residual[idxv("Zc") + i] = (*futures_dtZc)[i].get();
-        dtZA[i] = residual[idxv("ZA") + i];
-        dtZc[i] = residual[idxv("Zc") + i];
-      }
-      dtZA.update();
-      dtZc.update();
+      dtZA.update(&residual[idxv("ZA")]);
+      dtZc.update(&residual[idxv("Zc")]);
 
-      // check distance
       double dist = 0.;
       for (uint i = 0; i < p_grid_size; ++i) {
         dist = std::max(dist, std::abs(dtZA[i] - old_dtZA[i]) / std::abs(dtZA[i]));
         dist = std::max(dist, std::abs(dtZc[i] - old_dtZc[i]) / std::abs(dtZc[i]));
       }
-      if (dist < 1e-4 || n_iter > 10) eta_converged = true;
       n_iter++;
-    }
-    std::cout << "Converged after " << n_iter << " iterations." << std::endl;
-
-    // call all other integrators
-    auto futures_ZA3 = request_data<double>(flow_equations.ZA3_integrator, grid1D, k, arguments);
-    auto futures_ZAcbc = request_data<double>(flow_equations.ZAcbc_integrator, grid1D, k, arguments);
-    auto futures_ZA4 = request_data<double>(flow_equations.ZA4_integrator, grid1D, k, arguments);
-
-    // get all results and write them to residual
-    update_data(futures_ZA3, &residual[idxv("ZA3")]);
-    update_data(futures_ZAcbc, &residual[idxv("ZAcbc")]);
-    update_data(futures_ZA4, &residual[idxv("ZA4")]);
-
-    for (uint i = 0; i < p_grid_size; ++i) {
-      residual[idxv("ZA") + i] = dtZA.data()[i];
-      residual[idxv("Zc") + i] = dtZc.data()[i];
+      if (dist < prm.eta_tol || n_iter >= prm.eta_iter_max) eta_converged = true;
     }
 
-    std::apply(
-        [&](const auto &...args) { residual[idxv("m2A")] = flow_equations.m2A_integrator.get<double>(k, 0., args...); },
-        arguments);
+    // The vertices are mutually independent and nothing here reads them back, so the host issues
+    // all three and only then waits.
+    {
+      DeferredMaps defer;
+      flow_equations.ZA4.map(&residual[idxv("ZA4")], coordinates1D, arguments);
+      flow_equations.ZAcbc.map(&residual[idxv("ZAcbc")], coordinates1D, arguments);
+      flow_equations.ZA3.map(&residual[idxv("ZA3")], coordinates1D, arguments);
+    }
   }
 
   template <int dim, typename DataOut, typename Solutions>
   void readouts(DataOut &output, const Point<dim> &, const Solutions &sol) const
   {
     const auto &variables = get<"variables">(sol);
-    const auto m2A = variables[idxv("m2A")];
+    auto hdf = output.hdf5();
 
-    this->Zc.update(&variables.data()[idxv("Zc")]);
+    // No health check here: whether a flow is usable is the driver's decision, taken once on the
+    // finished trajectory. Throwing from a readout would abort the run at an arbitrary output
+    // step and leave the tuner with a truncated file instead of a classified probe.
+    hdf.map("ZA", coordinates1D, &(variables.data()[idxv("ZA")]));
+    hdf.map("Zc", coordinates1D, &(variables.data()[idxv("Zc")]));
 
-    auto &out_file = output.csv_file("data.csv");
-    out_file.set_Lambda(Lambda);
-    out_file.value("m2A", m2A);
+    hdf.map("dtZA", dtZA);
+    hdf.map("dtZc", dtZc);
 
-    const auto *ZA = &variables.data()[idxv("ZA")];
-    const auto *Zc = &variables.data()[idxv("Zc")];
-    std::vector<std::vector<double>> Zs_data(grid1D.size(), std::vector<double>(5, 0.));
-    for (uint i = 0; i < p_grid_size; ++i) {
-      Zs_data[i][0] = k;
-      Zs_data[i][1] = grid1D[i];
-      Zs_data[i][2] = ZA[i];
-      Zs_data[i][3] = (ZA[i]); // * powr<2>(grid1D[i]) + m2A) / powr<2>(grid1D[i]);
-      Zs_data[i][4] = Zc[i];
-    }
+    hdf.map("ZAcbc", coordinates1D, &(variables.data()[idxv("ZAcbc")]));
+    hdf.map("ZA3", coordinates1D, &(variables.data()[idxv("ZA3")]));
+    hdf.map("ZA4", coordinates1D, &(variables.data()[idxv("ZA4")]));
 
-    const auto *ZA3 = &variables.data()[idxv("ZA3")];
-    const auto *ZAcbc = &variables.data()[idxv("ZAcbc")];
-    const auto *ZA4 = &variables.data()[idxv("ZA4")];
-    std::vector<std::vector<double>> strong_couplings_data(grid1D.size(), std::vector<double>(8, 0.));
-    for (uint i = 0; i < p_grid_size; ++i) {
-      const double ZA_p = (ZA[i]); // * powr<2>(grid1D[i]) + m2A) / powr<2>(grid1D[i]);
-      const double Zc_p = Zc[i];
-      strong_couplings_data[i][0] = k;
-      strong_couplings_data[i][1] = grid1D[i];
-      strong_couplings_data[i][2] = powr<2>(ZAcbc[i]) / (4. * M_PI * ZA_p * powr<2>(Zc_p));
-      strong_couplings_data[i][3] = powr<2>(ZA3[i]) / (4. * M_PI * powr<3>(ZA_p));
-      strong_couplings_data[i][4] = ZA4[i] / (4. * M_PI * powr<2>(ZA_p));
-      strong_couplings_data[i][5] = ZAcbc[i];
-      strong_couplings_data[i][6] = ZA3[i];
-      strong_couplings_data[i][7] = ZA4[i];
-    }
-
-    if (is_close(t, 0.)) {
-      const std::vector<std::string> strong_couplings_header =
-          std::vector<std::string>{"k [GeV]", "p [GeV]", "alphaAcbc", "alphaA3", "alphaA4", "ZAcbc", "ZA3", "ZA4"};
-      const std::vector<std::string> Zs_header = std::vector<std::string>{"k [GeV]", "p [GeV]", "ZAbar", "ZA", "Zc"};
-
-      output.dump_to_csv("strong_couplings.csv", strong_couplings_data, false, strong_couplings_header);
-      output.dump_to_csv("Zs.csv", Zs_data, false, Zs_header);
-    } else {
-      output.dump_to_csv("strong_couplings.csv", strong_couplings_data, true);
-      output.dump_to_csv("Zs.csv", Zs_data, true);
-    }
+    // The scalar trajectories the tuner reads back: m2A is the observable it tunes, and the two
+    // p_min values are what the runaway criterion is evaluated on, sample by sample.
+    hdf.scalar("k", k);
+    hdf.scalar("m2A", variables[idxv("ZA")] * powr<2>(prm.p_grid_min) - powr<2>(prm.p_grid_min));
+    hdf.scalar("Zc_pmin", variables[idxv("Zc")]);
+    hdf.scalar("ZA_pmin", variables[idxv("ZA")]);
   }
 };

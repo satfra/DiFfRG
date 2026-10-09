@@ -1,0 +1,32 @@
+Pre-built binary bundle of DiFfRG's dependencies (deal.II, Kokkos, Boost, TBB,
+SUNDIALS, HDF5, Eigen, autodiff, spdlog, ...). Installing it skips the
+multi-hour dependency superbuild; the DiFfRG library itself then builds from
+source against the bundle in minutes.
+
+### Install
+
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/satfra/DiFfRG_current/main/install-diffrg-deps.sh) --version @VERSION@
+```
+
+The installer verifies the checksum, relocates the bundle to your prefix
+(default `~/.local/share/DiFfRG`), checks host prerequisites, and prints the
+`cmake -DBUNDLED_DIR=...` invocation for building the DiFfRG library. Add
+`--build-library` (from inside a DiFfRG checkout) to have it do that too.
+
+### Requirements (@VARIANT@)
+
+- Linux x86_64 with glibc >= @GLIBC_FLOOR@ (Rocky/Alma 9+, Ubuntu 22.04+, Debian 12+, Fedora, Arch)
+- a CPU supporting x86-64-v3 (AVX2+FMA -- any consumer CPU from ~2013 on)
+- to build DiFfRG against it: a C++20 compiler, CMake >= 3.20, BLAS/LAPACK, GSL, zlib, gfortran
+
+Further variants of this release, where attached: `-cuda12` (needs the CUDA
+12 toolkit and GCC 12 or >= 14) and `-openmpi` (MPI with PETSc, hypre and
+MUMPS; needs Open MPI >= 4.1 with its development files, i.e. `mpicc`, on the
+host -- install with `--mpi`).
+
+For configurations a bundle does not cover (other MPIs such as Intel MPI or
+Cray MPICH, other CPUs or platforms), build from source with
+`install_diffrg.sh --mode source`.
+
+`sha256(diffrg-deps-@VERSION@-@VARIANT@.tar.zst) = @SHA256@`

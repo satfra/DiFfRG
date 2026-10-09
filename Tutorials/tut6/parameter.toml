@@ -1,0 +1,45 @@
+# Tutorial 6 with the CG assembler. For KT use parameter_KT.toml.
+
+[tutorial]
+  # cg or kt (with parameter_KT.toml)
+  assembler = "cg"
+  # per_point, cpu or gpu
+  backend = "cpu"
+
+[physical]
+Lambda = 0.65
+N = 2
+T = 0.05
+# initial condition V'(rho) = m2 + lambda / 2 * rho
+m2 = -0.1
+lambda = 71.6
+
+[integration]
+x_order = 32
+x_extent_tolerance = 1e-4
+jacobian_quadrature_factor = 0.5
+
+[discretization]
+fe_order = 2
+
+[discretization.grid]
+x_grid = "0:1e-4:5e-3, 5e-3:5e-4:6e-3, 6e-3:1e-3:1.5e-2"
+refine = 0
+
+[timestepping]
+final_time = 4
+output_dt = 0.1
+
+[timestepping.implicit]
+dt = 1e-3
+minimal_dt = 1e-4
+maximal_dt = 0.1
+abs_tol = 1e-13
+rel_tol = 1e-7
+
+[output]
+vtk = false
+hdf5 = true
+verbosity = 1
+folder = "./"
+name = "output"

@@ -1,6 +1,10 @@
-DiFfRG_install/
-DiFfRG_build/
-DiFfRG_debug/
+bin*/
+build*/
+local_install/
+.ci/
+CMakeUserPresets.json
+.idea/
+.zed/
 profile/
 .ipynb_checkpoints
 *.pvd
@@ -8,11 +12,18 @@ profile/
 *.log
 .cache/
 .venv/
+.vscode/
+.claude/
+.codex/
+.opencode/
+CMakeUserPresets.json
 
-## remove builds from Applications
-Applications/*/build
-## remove tutorials
-Applications/tut1
+## profiling metadata
+.xctrace-home/
+profile.time-profile.xml
+profile.time-sample.xml
+profile.trace/
+
 
 ## Core latex/pdflatex auxiliary files:
 *.aux
@@ -208,6 +219,7 @@ sympy-plots-for-*.tex/
 # pythontex
 *.pytxcode
 pythontex-files-*/
+__pycache__
 
 # tcolorbox
 *.listing
@@ -277,6 +289,5 @@ TSWLatexianTemp*
 *.sta
 *.DS_STORE
 
-# Third-party header fetched at configure time (see DiFfRG/cmake/setup_build_system.cmake).
-# qmc publishes no licence upstream, so it is not redistributed with DiFfRG.
-DiFfRG/include/qmc/
+## Julia Pkg manifests (generated)
+DiFfRG/julia/**/Manifest.toml

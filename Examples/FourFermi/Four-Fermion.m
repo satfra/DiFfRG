@@ -183,16 +183,16 @@ Return[ex1]
 Finalize[expr_]:=SimplifyAllMomenta[q,ExpandScalarProductsFiniteT[expr]]
 
 
-kernelLambda1=<|"Path"->"qbqqbq","Name"->"lambda1","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ctype"->"double","Device"->"CPU"|>;
-kernelLambda2=<|"Path"->"qbqqbq","Name"->"lambda2","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ctype"->"double","Device"->"CPU"|>;
-kernelLambda3=<|"Path"->"qbqqbq","Name"->"lambda3","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ctype"->"double","Device"->"CPU"|>;
-kernelLambda4=<|"Path"->"qbqqbq","Name"->"lambda4","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ctype"->"double","Device"->"CPU"|>;
-kernelLambda5=<|"Path"->"qbqqbq","Name"->"lambda5","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ctype"->"double","Device"->"CPU"|>;
-kernelLambda6=<|"Path"->"qbqqbq","Name"->"lambda6","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ctype"->"double","Device"->"CPU"|>;
-kernelLambda7=<|"Path"->"qbqqbq","Name"->"lambda7","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ctype"->"double","Device"->"CPU"|>;
-kernelLambda8=<|"Path"->"qbqqbq","Name"->"lambda8","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ctype"->"double","Device"->"CPU"|>;
-kernelLambda9=<|"Path"->"qbqqbq","Name"->"lambda9","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ctype"->"double","Device"->"CPU"|>;
-kernelLambda10=<|"Path"->"qbqqbq","Name"->"lambda10","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ctype"->"double","Device"->"CPU"|>;
+kernelLambda1=<|"Path"->"qbqqbq","Name"->"lambda1","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ComputeType"->"double","Device"->"CPU"|>;
+kernelLambda2=<|"Path"->"qbqqbq","Name"->"lambda2","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ComputeType"->"double","Device"->"CPU"|>;
+kernelLambda3=<|"Path"->"qbqqbq","Name"->"lambda3","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ComputeType"->"double","Device"->"CPU"|>;
+kernelLambda4=<|"Path"->"qbqqbq","Name"->"lambda4","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ComputeType"->"double","Device"->"CPU"|>;
+kernelLambda5=<|"Path"->"qbqqbq","Name"->"lambda5","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ComputeType"->"double","Device"->"CPU"|>;
+kernelLambda6=<|"Path"->"qbqqbq","Name"->"lambda6","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ComputeType"->"double","Device"->"CPU"|>;
+kernelLambda7=<|"Path"->"qbqqbq","Name"->"lambda7","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ComputeType"->"double","Device"->"CPU"|>;
+kernelLambda8=<|"Path"->"qbqqbq","Name"->"lambda8","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ComputeType"->"double","Device"->"CPU"|>;
+kernelLambda9=<|"Path"->"qbqqbq","Name"->"lambda9","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ComputeType"->"double","Device"->"CPU"|>;
+kernelLambda10=<|"Path"->"qbqqbq","Name"->"lambda10","Type"->"Quadratureq0","Angles"->0,"d"->4,"AD"->False,"ComputeType"->"double","Device"->"CPU"|>;
 
 kernels={kernelLambda1,kernelLambda2,kernelLambda3,kernelLambda4,kernelLambda5,kernelLambda6,kernelLambda7,kernelLambda8,kernelLambda9,kernelLambda10};
 
@@ -267,6 +267,9 @@ Clear[ididx];
 
 For[i=1,i<=10,i++,Print["Working on Fierz Basis Element number "<> ToString[i]];
 \[Lambda]iLoops[[i]]=Import["TraceBuffer/lambda"<>ToString[i]<>"/sum.m"];
-MakeKernel[Symbol["kernelLambda"<>ToString[i]],kernelParameterList,Re[\[Lambda]iLoops[[i]]],2*etaQ*Symbol["lambda"<>ToString[i]]];
+MakeKernelFiniteTq0[Symbol["kernelLambda"<>ToString[i]],kernelParameterList,Re[\[Lambda]iLoops[[i]]],2*etaQ*Symbol["lambda"<>ToString[i]]];
 ];
 Clear[i];
+
+
+

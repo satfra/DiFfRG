@@ -1,0 +1,175 @@
+# On-demand build of the pre-built CUDA dependency bundle
+# (diffrg-deps-<version>-linux-x86_64-v3-cuda12.tar.zst, sm_75/Turing floor;
+# applications retarget themselves to the local GPU via DiFfRG_CUDA_ARCH).
+#
+# GitHub-hosted runners have no GPU, so validation here is build-only: the
+# container jobs install the bundle, audit linkage (driver stub), and compile
+# the DiFfRG library + tests against it. Run the actual test suite on a GPU
+# machine before publishing:
+#   containers/release/test-tarball.sh -g -f dist/diffrg-deps-<v>-linux-x86_64-v3-cuda12.tar.zst
+name: release-deps-linux-cuda
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_version:
+        description: "Bundle version (X.Y.Z, becomes tag deps-vX.Y.Z)"
+        required: true
+      cuda_arch:
+        description: "Kokkos CUDA architecture floor (applications retarget via DiFfRG_CUDA_ARCH)"
+        default: TURING75
+      mpi:
+        description: "MPI implementation the bundle links (openmpi adds the -openmpi variant: PETSc, hypre, MUMPS)"
+        type: choice
+        options: [none, openmpi]
+        default: none
+      draft_release:
+        description: "Attach the result to a draft release deps-v<version>"
+        type: boolean
+        default: false
+
+env:
+  # The bundle variant: linux-x86_64-v3-cuda12, or linux-x86_64-v3-cuda12-openmpi.
+  VARIANT: linux-x86_64-v3-cuda12${{ inputs.mpi != 'none' && format('-{0}', inputs.mpi) || '' }}
+
+permissions:
+  contents: write # only used when draft_release=true
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: release-deps-linux-cuda-${{ inputs.mpi }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          # CUDA legs are disk-hungry (devel base image + nvcc build tree);
+          # reclaim everything reasonable (~40 GB).
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/.ghcup /usr/local/share/boost \
+                      /opt/hostedtoolcache /usr/share/swift /usr/local/julia* \
+                      /usr/local/share/powershell /usr/lib/google-cloud-sdk \
+                      /usr/local/lib/node_modules
+          sudo docker system prune -af >/dev/null 2>&1 || true
+          df -h /
+
+      - name: Build the bundle
+        run: |
+          # cuda_arch is consumed by the Dockerfile; forward it explicitly.
+          docker buildx build --load \
+            -t diffrg-deps-release:cuda \
+            -f containers/release/linux-x86_64-v3-cuda12.Dockerfile \
+            --build-arg "mpi=${{ inputs.mpi }}" \
+            --build-arg threads=4 \
+            --build-arg "bundle_version=${{ inputs.bundle_version }}" \
+            --build-arg "cuda_arch=${{ inputs.cuda_arch }}" \
+            --build-arg "git_sha=${GITHUB_SHA}" \
+            --build-arg "deps_inputs_hash=$(bash containers/release/deps-inputs-hash.sh "${VARIANT}")" \
+            --progress=plain .
+          mkdir -p containers/release/dist
+          cid="$(docker create diffrg-deps-release:cuda)"
+          docker cp "${cid}:/dist/." containers/release/dist/
+          docker rm "${cid}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diffrg-deps-${{ inputs.bundle_version }}-${{ env.VARIANT }}
+          path: containers/release/dist/
+          if-no-files-found: error
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ubuntu24.04-cuda, rockylinux9-cuda]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          # CUDA legs are disk-hungry (devel base image + nvcc build tree);
+          # reclaim everything reasonable (~40 GB).
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/.ghcup /usr/local/share/boost \
+                      /opt/hostedtoolcache /usr/share/swift /usr/local/julia* \
+                      /usr/local/share/powershell /usr/lib/google-cloud-sdk \
+                      /usr/local/lib/node_modules
+          sudo docker system prune -af >/dev/null 2>&1 || true
+          df -h /
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: diffrg-deps-${{ inputs.bundle_version }}-${{ env.VARIANT }}
+          path: containers/release/dist/
+
+      - name: Validate on ${{ matrix.distro }} (build-only, no GPU)
+        run: |
+          bash ./containers/release/test-tarball.sh \
+            -f "containers/release/dist/diffrg-deps-${{ inputs.bundle_version }}-${{ env.VARIANT }}.tar.zst" \
+            -j 3 -d "${{ matrix.distro }}" -g -s $([[ "${{ inputs.mpi }}" != none ]] && echo -m)
+
+      # Runs even after a wedge, and the disk report distinguishes exhaustion
+      # from other kills when a leg dies with SIGTERM.
+      - name: Disk state after validation
+        if: always()
+        run: df -h / && sudo docker system df || true
+
+      - name: Upload distro log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-${{ matrix.distro }}
+          path: containers/release/logs/${{ matrix.distro }}*.log
+
+  finalize:
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: diffrg-deps-${{ inputs.bundle_version }}-${{ env.VARIANT }}
+          path: dist/
+
+      # Build-only here: GPU-executed ctest must happen on a real GPU machine,
+      # which upgrades the stamp before publishing.
+      - name: Write the tested stamp
+        run: |
+          name="diffrg-deps-${{ inputs.bundle_version }}-${{ env.VARIANT }}"
+          echo "tested-build-only" > "dist/${name}.tar.zst.tested"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diffrg-deps-${{ inputs.bundle_version }}-${{ env.VARIANT }}
+          path: dist/
+          overwrite: true
+
+      - name: Attach to draft release
+        if: inputs.draft_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="deps-v${{ inputs.bundle_version }}"
+          gh release view "${tag}" --repo "${{ github.repository }}" >/dev/null 2>&1 \
+            || gh release create "${tag}" --repo "${{ github.repository }}" \
+                 --draft --title "DiFfRG dependency bundle ${{ inputs.bundle_version }}" \
+                 --notes "Draft -- assets uploaded by the release-deps workflows." \
+                 --target "${GITHUB_SHA}"
+          gh release upload "${tag}" dist/* --clobber --repo "${{ github.repository }}"
+
+      - name: Summary
+        run: |
+          echo "## diffrg-deps ${{ inputs.bundle_version }} (${{ env.VARIANT }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- CUDA arch floor: ${{ inputs.cuda_arch }} (+ PTX for newer GPUs; applications retarget via DiFfRG_CUDA_ARCH)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- validation: BUILD-ONLY (no GPU on hosted runners) -- run test-tarball.sh -g on a GPU machine before publishing" >> "$GITHUB_STEP_SUMMARY"

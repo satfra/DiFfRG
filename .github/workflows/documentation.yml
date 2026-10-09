@@ -1,64 +1,63 @@
 name: Documentation
 run-name: Build and deploy the documentation
-on: [push]
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
-  # Build job
   build:
-    # Specify runner +  build & upload the static files as an artifact
+    name: Build documentation
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
-      - name: Install doxygen
-        run: | 
+
+      - name: Install Doxygen and Graphviz
+        run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential python3 python3-venv python3-pip graphviz
+          sudo apt-get install -y cmake build-essential graphviz wget ca-certificates
           wget https://www.doxygen.nl/files/doxygen-1.12.0.linux.bin.tar.gz
           tar xfv doxygen-1.12.0.linux.bin.tar.gz
           cd doxygen-1.12.0/
           sudo make install
-          cd ..
-      - name: Create temporary working-directory
-        run: mkdir build
-      - name: Build doxygen documentation
-        run: |
-          cd build
-          cmake -DDiFfRG_ONLY_DOCUMENTATION=ON -DCMAKE_INSTALL_PREFIX=../install/ ../DiFfRG 
-          make documentation
-          make install
-          cd ..
-      - name: Build python documentation
-        run: |
-          python3 -m venv .venv
-          source .venv/bin/activate
-          pip install pdoc python/dist/DiFfRG-1.0.0-py3-none-any.whl
-          cd python
-          pdoc -o python ./DiFfRG
-          cd ..
-      - name: Assemble
-        run: |
-          mkdir documentation
-          mv install/documentation/html documentation/cpp
-          mv python/python documentation/python
-          mv Mathematica/DiFfRG/doc_built documentation/wolfram
-      - name: Upload static files as artifact
-        if: github.ref == 'refs/heads/main'
-        id: deployment
-        uses: actions/upload-pages-artifact@v3 # or specific "vX.X.X" version tag for this action
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          path: ./documentation
-  # Deployment job
+          # doxysphinx supports Python 3.9-3.12 only.
+          python-version: '3.12'
+
+      - name: Install documentation toolchain
+        run: python -m pip install -r DiFfRG/documentation/requirements.txt
+
+      - name: Build unified documentation
+        run: bash DiFfRG/documentation/build.sh
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./DiFfRG/documentation/_build/html
+
   deploy:
-    if: github.ref == 'refs/heads/main'
-    permissions:
-      id-token: write
-      pages: write
+    name: Deploy documentation
+    runs-on: ubuntu-latest
+    needs: build
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
     steps:
-        - name: Deploy to GitHub Pages
-          id: deployment
-          uses: actions/deploy-pages@v4
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

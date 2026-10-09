@@ -1,5 +1,5 @@
 // DiFfRG
-#include "DiFfRG/common/json.hh"
+#include "DiFfRG/common/config_tree.hh"
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/model/model.hh>
 
@@ -12,10 +12,15 @@ namespace DiFfRG
 
     fRG::fRG(double Lambda) : Lambda(Lambda), k(Lambda) { set_time(0.); }
 
-    fRG::fRG(const JSONValue& json) : Lambda(json.get_double("/physical/Lambda")), k(Lambda) { set_time(0.); }
+    fRG::fRG(const ConfigTree &config) : Lambda(config.get_double_or_warn("/physical/Lambda", 1.0)), k(Lambda)
+    {
+      set_time(0.);
+    }
 
     void fRG::set_time(double t_)
     {
+      if (time_initialized && t_ == t) return;
+      time_initialized = true;
       t = t_;
       k = std::exp(-static_cast<long double>(t)) * Lambda;
       k2 = powr<2>(k);

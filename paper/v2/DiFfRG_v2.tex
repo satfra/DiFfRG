@@ -1,0 +1,329 @@
+%\documentclass[aps,twocolumn,prd,superscriptaddress]{revtex4-2}
+\documentclass[preprint,10pt,sort&compress]{elsarticle}
+\usepackage[a4paper, total={6.5in, 8.6in}]{geometry}
+
+%%%%%%%%%%%%% Packages %%%%%%%%%%%%%
+
+% general
+\usepackage[utf8]{inputenc}
+
+\usepackage{amsmath}
+\usepackage{bbm}
+\usepackage{mathtools}
+\usepackage{amsfonts}
+\usepackage{mathrsfs}
+\usepackage{slashed}
+\usepackage{tensor}
+\usepackage{bbold}
+\usepackage{MnSymbol}
+\usepackage{textcomp}
+\usepackage[export]{adjustbox}
+\usepackage[]{mdframed}
+
+
+% graphics and colors
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{xcolor}
+\usepackage{array}
+\usepackage[abs]{overpic}
+
+% floats+
+\usepackage{placeins}
+\usepackage{makecell}
+\usepackage{subcaption}
+
+% units and refs
+\usepackage{xspace}
+\usepackage{siunitx}
+\usepackage{xfrac}
+\usepackage{hyperref}
+\usepackage[nameinlink]{cleveref}
+\usepackage{appendix}
+
+
+% code listings
+\usepackage{listings}
+\definecolor{backcolor}{rgb}{0.99,0.98,0.98}
+\definecolor{string-color}{rgb}{0.3333, 0.5254, 0.345}
+\definecolor{darkgrey}{rgb}{0.0627, 0.07, 0.082}
+\definecolor{darkred}{rgb}{0.3, 0.05, 0.05}
+\definecolor{codeblue}{rgb}{0.2,0.35,0.75}
+\definecolor{codepurple}{rgb}{0.38,0.1,0.52}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codegreen}{rgb}{0.05,0.3,0.05}
+\definecolor{codered}{rgb}{0.6,0.2,0.1}
+\definecolor{backgroundColour}{rgb}{0.99,0.99,0.98}
+\lstdefinestyle{myStyle}{
+    language = C++,
+    basicstyle = {\ttfamily \small \color{darkgrey}},
+    backgroundcolor = {\color{backcolor}},
+	commentstyle=\color{codegreen},
+    stringstyle = {\color{string-color}},
+    keywordstyle = {\color{codeblue}},
+    keywordstyle = [2]{\color{codepurple}},
+    keywordstyle = [3]{\color{codered}},
+    keywordstyle = [4]{\color{codegray}},
+    keywordstyle = [5]{\color{codegreen}},
+    otherkeywords = {<, >, :, ::, DiFfRG, constexpr, uint, size_t, &, get, vector, array, Tensor, Scalar, FunctionND},
+    morekeywords = [2]{AbstractModel, FEFunctionDescriptor, VariableDescriptor, ExtractorDescriptor, ComponentDescriptor
+	TimeStepperSUNDIALS_IDA, UMFPack, Point, real, AD, NoJacobians, FE_AD,LLFFlux,FlowBoundaries
+	},
+    morekeywords = [3]{DiFfRG, CG, DG, dDG, LDG, def, Variables, dealii, std, autodiff},
+    morekeywords = [4]{<, >, :, ::, ;, &},
+    morekeywords = [5]{},
+	breakatwhitespace=false,
+	breaklines=true,
+	captionpos=b,
+	keepspaces=true,
+	numbers=left,
+	numbersep=5pt,
+	numberstyle=\scriptsize\color{darkred},
+	showspaces=false,
+	showstringspaces=false,
+	showtabs=false,
+	tabsize=2
+}
+\lstdefinestyle{genStyle}{
+    basicstyle = {\ttfamily \small \color{darkgrey}},
+    backgroundcolor = {\color{backcolor}},
+	commentstyle=\color{codegreen},
+    stringstyle = {\color{string-color}},
+    keywordstyle = {\color{codeblue}},
+	breakatwhitespace=false,
+	breaklines=true,
+	captionpos=b,
+	keepspaces=true,
+	numbers=left,
+	numbersep=5pt,
+	numberstyle=\scriptsize\color{darkred},
+	showspaces=false,
+	showstringspaces=false,
+	showtabs=false,
+	tabsize=2
+}
+\lstset{style=genStyle}
+\lstdefinelanguage{CMake}{%
+	morekeywords={if, else, endif, project, cmake_minimum_required, set, find_package, add_executable},%
+	sensitive=false,%
+	morecomment=[l]{\#},%
+	morecomment=[s]{/*}{*/},%
+	morestring=[b]",%
+	otherkeywords={add_flows, setup_application},%
+	keywordstyle = [2]{\color{codepurple}},
+	morekeywords = [2]{REQUIRED, HINTS, VERSION, SYSTEM},
+}
+\lstdefinelanguage{Bash}{%
+	morekeywords={if, else, fi, mkdir, cd, cmake, bash, git},%
+	sensitive=false,%
+	morecomment=[l]{\#},%
+	morecomment=[s]{/*}{*/},%
+	morestring=[b]",%
+    keywordstyle = {\color{codeblue}},
+    keywordstyle = [2]{\color{codepurple}},
+    morekeywords = [2]{$, /, ..},
+}
+
+% Mathematica code
+\usepackage{mmacells}
+\mmaDefineMathReplacement[≤]{<=}{\leq}
+\mmaDefineMathReplacement[≥]{>=}{\geq}
+\mmaDefineMathReplacement[≠]{!=}{\neq}
+\mmaDefineMathReplacement[→]{->}{\to}[2]
+\mmaDefineMathReplacement[⧴]{:>}{:\hspace{-.2em}\to}[2]
+\mmaDefineMathReplacement{∉}{\notin}
+\mmaDefineMathReplacement{∞}{\infty}
+\mmaDefineMathReplacement{𝕕}{\mathbbm{d}}
+\mmaSet{
+	leftmargin=4.5em,
+	morefv={gobble=0},
+	linklocaluri=mma/symbol/definition:#1,
+	morecellgraphics={yoffset=1.9ex},
+	labelsep=0.5em
+}
+
+% tikz stuff
+\usepackage{tikz}
+\usetikzlibrary{backgrounds}
+\usetikzlibrary{decorations.pathreplacing}
+\usetikzlibrary{shapes, arrows,calc}
+\tikzstyle{roundbox} = [rectangle, draw, text centered, rounded corners,
+minimum height=2em, minimum width=2em, draw=black!10, fill=blue!4]
+\tikzstyle{process} = [rectangle, draw, minimum height=1em,
+minimum width=3em, text centered, draw=black!10, fill=green!4]
+\tikzstyle{integration} = [ellipse, draw, text centered, minimum height=1em,
+minimum width=3em, draw=black!10, fill=red!4]
+\tikzset{font={\fontsize{9pt}{11}\selectfont}}
+
+% other
+\usepackage{booktabs}
+\usepackage{multirow}
+\newcommand{\ra}[1]{\renewcommand{\arraystretch}{#1}}
+\newcolumntype{C}{>{$}c<{$}}
+\AtBeginDocument{
+	\heavyrulewidth=.08em
+	\lightrulewidth=.05em
+	\cmidrulewidth=.03em
+	\belowrulesep=.65ex
+	\belowbottomsep=0pt
+	\aboverulesep=.4ex
+	\abovetopsep=0pt
+	\cmidrulesep=\doublerulesep
+	\cmidrulekern=.5em
+	\defaultaddspace=.5em
+}
+
+%%%%%%%%%%%%% Macros %%%%%%%%%%%%%
+\newcommand{\DiFfRG}{\texttt{DiFfRG}\xspace}
+\newcommand{\cpp}[1]{\lstinline[language=C++,style=myStyle]|#1|}
+\newcommand{\cmake}[1]{\lstinline[language=CMake]|#1|}
+\newcommand{\mathem}[1]{\lstinline[language=Mathematica]|#1|}
+\newcommand{\bash}[1]{\lstinline[language=Bash]|#1|}
+\newcommand{\LEGO}{LEGO\textsuperscript{\textregistered}}
+
+%%%%%%%%%%%%% Options %%%%%%%%%%%%%
+\captionsetup{justification=centerlast}
+\sisetup{range-units=single}
+
+%%%%%%%%%% Table of Contents %%%%%%%%%%%
+\makeatletter
+%\def\l@subsubsection#1#2{}
+\makeatother
+
+%%%%%%%%%%%%% Graphic paths %%%%%%%%%%%%%
+\graphicspath{{./figures/}}
+
+
+%%%%%%%%%%%%% Title and hypersetup %%%%%%%%%%%%%
+\newcommand{\gettitle}{DiFfRG 2.0}
+
+\hypersetup{
+	pdftitle={\gettitle},
+	pdfauthor={Sattler},
+	pdfkeywords={discontinuous galerkin} {finite element method} {functional renormalisation group} {effective potential} {phase transition} {numerical methods} {phase structure} {GPU computing} {parallel computing} {vertex expansion} {derivative expansion},
+	bookmarksopen=true,
+	bookmarksopenlevel=2,
+	bookmarksnumbered=true,
+	colorlinks,
+	linkcolor={red!75!black},
+	citecolor={blue!75!black},
+	urlcolor={blue!75!black}
+}
+
+\journal{Computer Physics Communications}
+
+%%%%%%%%%%%%% Document %%%%%%%%%%%%%
+\begin{document}
+
+\renewcommand{\thefootnote}{\fnsymbol{footnote}}
+\begin{frontmatter}
+
+	\title{\gettitle}
+	
+	\author[a]{Keiwan Jamaly
+		\footnote{\url{yourmail}}}
+
+	\author[c]{Franz R. Sattler 
+		\footnote{\url{fsattler@physik.uni-bielefeld.de}}}
+
+
+	\address[a]{Institut f\"ur Theoretische
+		Physik, Universit\"at Heidelberg, Philosophenweg 16, 69120 Heidelberg,
+		Germany}
+	\address[b]{ExtreMe Matter Institute EMMI, GSI, Planckstr. 1, 64291 Darmstadt, Germany}
+	\address[c]{Institut f\"ur Physik, Universit\"at Bielefeld...}
+
+	\begin{abstract}
+
+		We update \texttt{DiFfRG} (\texttt{Di}scretisation \texttt{F}ramework for \texttt{f}unctional \texttt{R}enormalisation \texttt{G}roup flows).
+
+	\end{abstract}
+
+\end{frontmatter}
+\renewcommand{\thefootnote}{\arabic{footnote}}
+
+%%%%%%%%%%%%%%%%%%%%
+\vspace{0.25cm}
+{\bf PROGRAM SUMMARY}\\\vspace{-0.2cm}
+
+\begin{small}
+	\noindent
+	{\em Program Title:}  DiFfRG \\
+	{\em Licensing provisions:} GPLv3                                   \\
+	{\em Programming language:} C++, Mathematica, Python                                  \\
+	{\em Computer:}  Any Linux/Mac machine                           \\
+	{\em Nature of problem:}  Evaluate large systems of fRG flows with full effective potentials and/or vertex expansions\\
+	{\em Solution method:} Combine finite element methods and efficient time-steppers with fast numerical integration of flow equations and momentum grids. \\
+	{\em Unusual features:} The code-generation capabilities of the \texttt{Mathematica} subpackage allow for very fast development of extremly large systems of flow equations. Field-space discretisations can be easily defined by the user with a range of different finite element methods.\\
+\end{small}
+
+%\hrule
+\clearpage
+\tableofcontents
+
+
+%%%%%%%%%%%%%%%%%%%%
+\section{Introduction}
+\label{sec:introduction}
+
+Mention the previous work...
+
+Things we want to highlight...
+
+Overview...
+
+
+%%%%%%%%%%%%%%%%%%%%
+\section{Example applications}
+\label{sec:examples}
+%
+\noindent
+%
+All examples are  present in the folder \texttt{Examples/} and can be built using the scripts \texttt{build.sh}, present in every single subfolder, corresponding to the below examples.
+
+
+%%%%%%%%%%%%%%%%%%%%
+\subsection{Example 01}
+\label{sec:example01}
+
+We want some examples, benchmarks, etc
+
+
+%%%%%%%%%%%%%%%%%%%%
+\section{Summary and outlook}
+\label{sec:outlook}
+
+The \DiFfRG framework is still evolving.
+
+
+%%%%%%%%%%%%%%%%%%%%
+\section*{Acknowledgments}
+
+We thank Andreas Geissel, Friederike Ihssen and Nicolas Wink for discussion and collaboration on related projects.
+This work is done within the fQCD collaboration \cite{fQCD} and we thank its members for discussions and collaborations  on related projects.
+This work is funded by the Deutsche Forschungsgemeinschaft (DFG, German Research Foundation) under Germany’s Excellence Strategy EXC 2181/1 - 390900948 (the Heidelberg STRUCTURES Excellence Cluster) and the Collaborative Research Centre SFB 1225 (ISOQUANT).
+FRS acknowledges funding by the GSI Helmholtzzentrum f\"ur Schwerionenforschung.
+
+
+%%%%%%%%%%%%%%%%%%%%
+
+
+\appendix
+%% now insert the new code block
+\gdef\thesection{\Alph{section}}
+\makeatletter
+\renewcommand\@seccntformat[1]{\appendixname\ \csname the#1\endcsname.\hspace{0.5em}}
+\makeatother
+\begingroup
+\allowdisplaybreaks
+
+%%%%%%%%%%%%%%%%%%%%
+\section{First}
+
+\endgroup
+%%%%%%%%%%%%%%%%%%%%
+
+\bibliographystyle{elsarticle-num}
+\bibliography{ref-lib}
+
+\end{document}

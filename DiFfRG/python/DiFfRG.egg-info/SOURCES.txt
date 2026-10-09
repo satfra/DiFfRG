@@ -1,0 +1,16 @@
+pyproject.toml
+DiFfRG/__init__.py
+DiFfRG/parallel.py
+DiFfRG/phasediagram.py
+DiFfRG/plot.py
+DiFfRG/utilities.py
+DiFfRG.egg-info/PKG-INFO
+DiFfRG.egg-info/SOURCES.txt
+DiFfRG.egg-info/dependency_links.txt
+DiFfRG.egg-info/requires.txt
+DiFfRG.egg-info/top_level.txt
+DiFfRG/file_io/__init__.py
+DiFfRG/file_io/csv.py
+DiFfRG/file_io/hdf5.py
+DiFfRG/file_io/paths.py
+DiFfRG/file_io/vtk.py

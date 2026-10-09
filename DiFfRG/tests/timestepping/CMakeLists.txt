@@ -8,17 +8,11 @@ add_subdirectory(solver)
 # Test timesteppers
 # ##############################################################################
 
-add_executable(test_sundials_ida test_sundials_ida.cc)
-setup_test(test_sundials_ida)
-
-add_executable(test_implicit_euler test_implicit_euler.cc)
-setup_test(test_implicit_euler)
-
-add_executable(test_explicit_euler test_explicit_euler.cc)
-setup_test(test_explicit_euler)
-
-add_executable(test_trbdf2 test_trbdf2.cc)
-setup_test(test_trbdf2)
-
-add_executable(test_sundials_arkode test_sundials_arkode.cc)
-setup_test(test_sundials_arkode)
+setup_test(sundials_ida.cc)
+setup_mpi_test(sundials_ida_boost.cc)
+setup_test(scaled_gmres.cc)
+setup_test(implicit_euler.cc)
+setup_test(explicit_euler.cc)
+setup_test(trbdf2.cc)
+setup_test(snapshot_restart.cc)
+setup_test(local_tolerances.cc)

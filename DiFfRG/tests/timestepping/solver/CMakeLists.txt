@@ -1,13 +1,6 @@
 # ##############################################################################
-# Test Newton solver
+# Tests
 # ##############################################################################
 
-add_executable(test_newton test_newton.cc)
-setup_test(test_newton)
-
-# ##############################################################################
-# Test KINSOL solver
-# ##############################################################################
-
-add_executable(test_kinsol test_kinsol.cc)
-setup_test(test_kinsol)
+setup_test(newton.cc)
+setup_test(kinsol.cc)

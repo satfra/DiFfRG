@@ -79,6 +79,7 @@ namespace DiFfRG
     VectorType residual_vector;
     VectorType initial_vector;
     VectorType iterate_vector;
+    VectorType eest_tmp;
     double abstol, reltol, assemble_threshold;
     unsigned int max_steps, n_stepsize_iterations;
 

@@ -1,0 +1,217 @@
+diff --git a/include/deal.II/base/scalar_polynomials_base.h b/include/deal.II/base/scalar_polynomials_base.h
+index 1c96466fa..db4b96280 100644
+--- a/include/deal.II/base/scalar_polynomials_base.h
++++ b/include/deal.II/base/scalar_polynomials_base.h
+@@ -82,8 +82,15 @@ public:
+   /**
+    * Virtual destructor. Makes sure that pointers to this class are deleted
+    * properly.
++   *
++   * Declared here and defined out-of-line as defaulted so that it is not
++   * implicitly constexpr. Under clang-CUDA an implicit constexpr destructor is
++   * promoted to __host__ __device__ and device-emitted; for derived polynomial
++   * classes the resulting destructor chain reaches the host-only ~Polynomial
++   * and fails to compile (deal.II issue #18797). A non-constexpr base
++   * destructor keeps every derived implicit destructor host-only.
+    */
+-  virtual ~ScalarPolynomialsBase() = default;
++  virtual ~ScalarPolynomialsBase();
+ 
+   /**
+    * Compute the value and the derivatives of the polynomials at
+diff --git a/include/deal.II/base/tensor_polynomials_base.h b/include/deal.II/base/tensor_polynomials_base.h
+index 321bb8c58..d95c538a8 100644
+--- a/include/deal.II/base/tensor_polynomials_base.h
++++ b/include/deal.II/base/tensor_polynomials_base.h
+@@ -81,8 +81,15 @@ public:
+   /**
+    * Virtual destructor. Makes sure that pointers to this class are deleted
+    * properly.
++   *
++   * Declared here and defined out-of-line as defaulted so that it is not
++   * implicitly constexpr. Under clang-CUDA an implicit constexpr destructor is
++   * promoted to __host__ __device__ and device-emitted; for derived polynomial
++   * classes the resulting destructor chain reaches the host-only ~Polynomial
++   * and fails to compile (deal.II issue #18797). A non-constexpr base
++   * destructor keeps every derived implicit destructor host-only.
+    */
+-  virtual ~TensorPolynomialsBase() = default;
++  virtual ~TensorPolynomialsBase();
+ 
+   /**
+    * Compute the value and the derivatives of the polynomials at
+diff --git a/source/base/polynomials_bernstein.cc b/source/base/polynomials_bernstein.cc
+index bbb429f66..18cfe6e42 100644
+--- a/source/base/polynomials_bernstein.cc
++++ b/source/base/polynomials_bernstein.cc
+@@ -14,14 +14,28 @@
+ 
+ #include <deal.II/base/polynomials_bernstein.h>
+ 
+-#include <boost/math/special_functions/binomial.hpp>
+-
+ #include <vector>
+ 
+ DEAL_II_NAMESPACE_OPEN
+ 
+ namespace
+ {
++  // Exact binomial coefficient C(n, k) for the small degrees used by Bernstein
++  // polynomials. This replaces boost::math::binomial_coefficient, whose header
++  // transitively includes the beta/round chain; in Boost 1.9x that mis-marks
++  // boost::math::iround for the GPU (its forward declaration is
++  // __host__ __device__ but the definition is __host__-only), which fails to
++  // compile when clang compiles this TU as CUDA via the Kokkos backend.
++  template <typename number>
++  number
++  binomial_coefficient(const unsigned int n, const unsigned int k)
++  {
++    number result = number(1);
++    for (unsigned int i = 0; i < k; ++i)
++      result = result * number(n - i) / number(i + 1);
++    return result;
++  }
++
+   template <typename number>
+   std::vector<number>
+   get_bernstein_coefficients(const unsigned int k, const unsigned int n)
+@@ -33,8 +47,8 @@ namespace
+     for (unsigned int i = k; i < n + 1; ++i)
+       {
+         coeff[i] = ((i - k) % 2 == 0 ? 1 : -1) *
+-                   boost::math::binomial_coefficient<number>(n, i) *
+-                   boost::math::binomial_coefficient<number>(i, k);
++                   binomial_coefficient<number>(n, i) *
++                   binomial_coefficient<number>(i, k);
+       }
+     return coeff;
+   }
+diff --git a/source/base/scalar_polynomials_base.cc b/source/base/scalar_polynomials_base.cc
+index 29161992c..3240eae46 100644
+--- a/source/base/scalar_polynomials_base.cc
++++ b/source/base/scalar_polynomials_base.cc
+@@ -43,6 +43,10 @@ ScalarPolynomialsBase<dim>::memory_consumption() const
+ 
+ 
+ 
++template <int dim>
++ScalarPolynomialsBase<dim>::~ScalarPolynomialsBase() = default;
++
++
+ template class ScalarPolynomialsBase<0>;
+ template class ScalarPolynomialsBase<1>;
+ template class ScalarPolynomialsBase<2>;
+diff --git a/source/base/tensor_polynomials_base.cc b/source/base/tensor_polynomials_base.cc
+index 8d749cb5e..6ec66efbd 100644
+--- a/source/base/tensor_polynomials_base.cc
++++ b/source/base/tensor_polynomials_base.cc
+@@ -33,6 +33,10 @@ TensorPolynomialsBase<dim>::TensorPolynomialsBase(
+ 
+ 
+ 
++template <int dim>
++TensorPolynomialsBase<dim>::~TensorPolynomialsBase() = default;
++
++
+ template class TensorPolynomialsBase<1>;
+ template class TensorPolynomialsBase<2>;
+ template class TensorPolynomialsBase<3>;
+diff --git a/source/non_matching/quadrature_generator.cc b/source/non_matching/quadrature_generator.cc
+index e79706f53..f5d724d62 100644
+--- a/source/non_matching/quadrature_generator.cc
++++ b/source/non_matching/quadrature_generator.cc
+@@ -35,9 +35,23 @@
+ 
+ #include <deal.II/non_matching/quadrature_generator.h>
+ 
++// Boost.Math 1.88+ enables a CUDA/GPU code path under __CUDACC__ that is only
++// validated with nvcc; under clang-CUDA it produces __host__ vs
++// __host__ __device__ overload conflicts (e.g. boost::math::iround). This TU is
++// host-only, so include Boost.Math with the GPU path disabled. __CUDACC__ is
++// restored afterwards for the rest of the (Kokkos-using) translation unit.
++#ifdef __CUDACC__
++#  define DEAL_II_CUDACC_WAS_DEFINED
++#  undef __CUDACC__
++#endif
+ #include <boost/math/special_functions/relative_difference.hpp>
+ #include <boost/math/special_functions/sign.hpp>
+ #include <boost/math/tools/roots.hpp>
++#include <boost/math/tools/toms748_solve.hpp>
++#ifdef DEAL_II_CUDACC_WAS_DEFINED
++#  define __CUDACC__ 1
++#  undef DEAL_II_CUDACC_WAS_DEFINED
++#endif
+ 
+ #include <algorithm>
+ #include <vector>
+diff --git a/source/base/CMakeLists.txt b/source/base/CMakeLists.txt
+index 045e978d3..0ec4a6aa1 100644
+--- a/source/base/CMakeLists.txt
++++ b/source/base/CMakeLists.txt
+@@ -61,6 +61,35 @@ set(_unity_include_src
+   partitioner.cc
+   patterns.cc
+   path_search.cc
++  qprojector.cc
++  quadrature.cc
++  quadrature_lib.cc
++  quadrature_selector.cc
++  symbolic_function.cc
++  table_handler.cc
++  tensor.cc
++  tensor_function.cc
++  tensor_function_parser.cc
++  thread_management.cc
++  timer.cc
++  time_stepping.cc
++  trilinos_utilities.cc
++  utilities.cc
++  vectorization.cc
++  )
++
++set(_separate_src
++  data_out_base.cc
++  symmetric_tensor.cc
++  # The polynomial classes below carry explicit template instantiations
++  # (template class TensorProductPolynomials<dim>; etc.). Under clang-CUDA the
++  # instantiated, host-only destructors are spuriously emitted for the device
++  # side once these files are concatenated into a jumbo translation unit,
++  # tripping deal.II issue #18797 (~Polynomial / ~TensorProductPolynomials
++  # reached from a __host__ __device__ std::vector destructor). Compiling them
++  # as separate TUs — exactly as in a non-unity build — avoids the spurious
++  # device emission while the rest of source/base still benefits from the
++  # unity build.
+   polynomial.cc
+   polynomials_abf.cc
+   polynomials_adini.cc
+@@ -81,30 +110,10 @@ set(_unity_include_src
+   polynomials_rt_bubbles.cc
+   polynomials_vector_anisotropic.cc
+   polynomials_wedge.cc
+-  qprojector.cc
+-  quadrature.cc
+-  quadrature_lib.cc
+-  quadrature_selector.cc
+   scalar_polynomials_base.cc
+-  symbolic_function.cc
+-  table_handler.cc
+-  tensor.cc
+-  tensor_function.cc
+-  tensor_function_parser.cc
+   tensor_product_polynomials.cc
+   tensor_product_polynomials_bubbles.cc
+   tensor_product_polynomials_const.cc
+-  thread_management.cc
+-  timer.cc
+-  time_stepping.cc
+-  trilinos_utilities.cc
+-  utilities.cc
+-  vectorization.cc
+-  )
+-
+-set(_separate_src
+-  data_out_base.cc
+-  symmetric_tensor.cc
+   )
+ 
+ if(DEAL_II_WITH_SCALAPACK)

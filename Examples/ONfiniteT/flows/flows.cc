@@ -1,22 +1,21 @@
-#include "flows.hh"
+#include "./flows.hh"
 
-ON_finiteTFlowEquations::ON_finiteTFlowEquations(const JSONValue &json)
-    : FlowEquationsFiniteT(
-          json, json.get_double("/physical/T"),
-
-          [&](double q2) { return 1. / (q2 + __REGULATOR__::RB(powr<2>(k), q2)) * __REGULATOR__::RBdot(powr<2>(k), q2); },
-          [&](double q0) { return 1. / (powr<2>(q0) + __REGULATOR__::RB(powr<2>(k), powr<2>(q0))) * __REGULATOR__::RBdot(powr<2>(k), powr<2>(q0)); },
-          [&](double q0) { return 1. / powr<2>(powr<2>(q0) + powr<2>(k)); }),
-
-      grid_size_int{{x_quadrature_order}}, grid_sizes_angle_int{{x_quadrature_order, angle_quadrature_order}},
-      grid_sizes_3D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order}},
-      grid_sizes_4D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, angle_quadrature_order}},
-
-      grid_sizes_int_fT{{x_quadrature_order, x0_quadrature_order}}, grid_sizes_angle_int_fT{{x_quadrature_order, angle_quadrature_order, x0_quadrature_order}},
-      grid_sizes_4D_int_fT{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, x0_quadrature_order}},
-
-      grid_sizes_2D_cartesian_int{{x_quadrature_order, x_quadrature_order}}, grid_sizes_3D_cartesian_int{{x_quadrature_order, x_quadrature_order, x_quadrature_order}},
-
-      quadrature_provider(json), V_integrator(quadrature_provider, grid_size_int, x_extent, json)
+ONFiniteTFlows::ONFiniteTFlows(const DiFfRG::ConfigTree& config) : quadrature_provider(config), V(quadrature_provider, config), V_pion(quadrature_provider, config), V_sigma(quadrature_provider, config)
 {
+}
+void ONFiniteTFlows::set_k(const double k)
+{
+  DiFfRG::all_set_k(V, k);DiFfRG::all_set_k(V_pion, k);DiFfRG::all_set_k(V_sigma, k);
+}
+void ONFiniteTFlows::set_T(const double T)
+{
+  DiFfRG::all_set_T(V, T);DiFfRG::all_set_T(V_pion, T);DiFfRG::all_set_T(V_sigma, T);
+}
+void ONFiniteTFlows::set_typical_E(const double E)
+{
+  DiFfRG::all_set_typical_E(V, E);DiFfRG::all_set_typical_E(V_pion, E);DiFfRG::all_set_typical_E(V_sigma, E);
+}
+void ONFiniteTFlows::set_x_extent(const double x_extent)
+{
+  DiFfRG::all_set_x_extent(V, x_extent);DiFfRG::all_set_x_extent(V_pion, x_extent);DiFfRG::all_set_x_extent(V_sigma, x_extent);
 }

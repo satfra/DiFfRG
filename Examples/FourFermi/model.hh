@@ -10,7 +10,7 @@ using namespace dealii;
 using namespace DiFfRG;
 
 struct Parameters {
-  Parameters(const JSONValue &json)
+  Parameters(const ConfigTree &json)
   {
     try {
       Lambda = json.get_double("/physical/Lambda");
@@ -51,12 +51,12 @@ class FourFermi : public def::AbstractModel<FourFermi, Components>,
   ExternalDataInterpolator external_data;
 
 public:
-  FourFermi(const JSONValue &json)
+  FourFermi(const ConfigTree &json, ReportPort log = {})
       : def::fRG(json.get_double("/physical/Lambda")), prm(json), coordinates1D(8, 0., 20., 5.), MQ(coordinates1D),
         flow_equations(json)
   {
     flow_equations.set_k(prm.Lambda);
-    flow_equations.print_parameters("log");
+    flow_equations.print_parameters(log);
 
     external_data =
         ExternalDataInterpolator({"external_data/kGeV.txt", "external_data/etaA.txt", "external_data/etaQ.txt",

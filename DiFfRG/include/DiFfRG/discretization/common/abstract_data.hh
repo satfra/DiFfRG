@@ -3,6 +3,9 @@
 // external libraries
 #include <deal.II/lac/vector.h>
 
+// DiFfRG
+#include <DiFfRG/common/linear_algebra.hh>
+
 namespace DiFfRG
 {
   using namespace dealii;
@@ -14,32 +17,43 @@ namespace DiFfRG
    *
    * @tparam Discretization Spatial Discretization used in the system
    */
-  template <typename NumberType> class AbstractFlowingVariables
+  template <typename NumberType, typename VectorType_ = dealii::Vector<NumberType>> class AbstractFlowingVariables
   {
   public:
     /**
+     * @brief The vector type holding the state.
+     *
+     * Appended with a default so every existing `AbstractFlowingVariables<double>` keeps its
+     * meaning. A distributed run substitutes a PETSc MPI vector here; the matching block type
+     * is derived from it rather than hard-wired, because dealii::BlockVector cannot hold a
+     * distributed block.
+     */
+    using VectorType = VectorType_;
+    using BlockVectorType = get_type::BlockVectorType<VectorType>;
+
+    /**
      * @brief Obtain the data vector holding both spatial (block 0) and variable (block 1) data.
      *
-     * @return BlockVector<NumberType>& The data vector.
+     * @return BlockVectorType& The data vector.
      */
-    virtual BlockVector<NumberType> &data() = 0;
-    virtual const BlockVector<NumberType> &data() const = 0;
+    virtual BlockVectorType &data() = 0;
+    virtual const BlockVectorType &data() const = 0;
 
     /**
      * @brief Obtain the spatial data vector.
      *
-     * @return Vector<NumberType>& The spatial data vector.
+     * @return VectorType& The spatial data vector.
      */
-    virtual Vector<NumberType> &spatial_data() = 0;
-    virtual const Vector<NumberType> &spatial_data() const = 0;
+    virtual VectorType &spatial_data() = 0;
+    virtual const VectorType &spatial_data() const = 0;
 
     /**
      * @brief Obtain the variable data vector.
      *
-     * @return Vector<NumberType>& The variable data vector.
+     * @return VectorType& The variable data vector.
      */
-    virtual Vector<NumberType> &variable_data() = 0;
-    virtual const Vector<NumberType> &variable_data() const = 0;
+    virtual VectorType &variable_data() = 0;
+    virtual const VectorType &variable_data() const = 0;
   };
 
 } // namespace DiFfRG

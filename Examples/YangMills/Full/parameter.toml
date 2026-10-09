@@ -1,0 +1,83 @@
+[tuning.m2A]
+  tune = false
+
+  # With zc_target > 0 the search accepts any convergent flow whose Zc(0) lands BELOW the target,
+  # so there is no tolerance involved. rel_tol only governs the deep-scaling mode (zc_target = 0),
+  # where there is no interval to land in and the fitted separatrix is converged to instead.
+  zc_target = 0.01
+  rel_tol   = 0.001
+
+  # Cold bracket in the dimensionless u = m2A/Lambda^2; the initial condition is
+  # ZA(p) = (p^2 + m2A)/p^2 at k = Lambda, so u is the natural search variable and this bracket
+  # transfers across cutoff scales where an absolute one goes stale. These are hypotheses: the
+  # search widens them geometrically if they do not straddle, so being wrong costs a few flows
+  # rather than a failed run. Everything else the search needs is a named constant in tuning.hh,
+  # together with the measurement it came from.
+  u_lower = -3e-2
+  u_upper = -1e-3
+
+[physical]
+  Lambda = 100
+  Nc     = 3
+
+  # Gluon mass parameter, tuned to the scaling regime (angle-resolved S0/S1/SPhi vertices plus the
+  # angle-resolved ZA4 tadpole). The scaling separatrix sits near m2A = -91.9: approaching it from
+  # above, the IR gluon mass tunes through 0 and the ghost dressing is driven toward the scaling
+  # solution, while below it the flow crosses to the Higgs branch and diverges. The flow is
+  # numerically stable on the massive side -- the collinear singularity is confined to one grid
+  # corner by the S0/S1/SPhi gridding.
+  m2A = -91.9
+
+  alphaA4   = 0.1085
+  alphaA3   = 0.105
+  alphaAcbc = 0.11
+
+  tilt_A4   = 0.0
+  tilt_A3   = -0.01
+  tilt_Acbc = 0.0
+
+  eta_iter_max = 20
+  eta_tol      = 1e-3
+
+[integration]
+  x_order    = 32
+  cos1_order = 8
+  cos2_order = 8
+  phi_order  = 8
+
+  x_extent_tolerance         = 1e-4
+  jacobian_quadrature_factor = 0.5
+
+[discretization]
+  p_grid_min = 1e-4
+  p_grid_max = 100.0
+  # Cluster the 96 momentum points -- and the S0 axis of the vertex grid -- around the gluon
+  # dressing peak. p_grid_focus = 0 gives a plain logarithmic grid; at 1.5 the cell width at 1 GeV
+  # is 0.018 decades instead of 0.063, and 42 instead of 15 points fall into [0.3, 3] GeV. The
+  # price is the deep IR and UV, where the coarsest cell grows to 0.24 decades -- both are flat
+  # there.
+  p_grid_center = 1.0
+  p_grid_focus  = 1.5
+
+[timestepping]
+  final_time = 16.0
+  output_dt  = 0.2
+
+[timestepping.explicit]
+  dt         = 0.2
+  minimal_dt = 1e-3
+  maximal_dt = 1.0
+  abs_tol    = 1e-4
+  rel_tol    = 1e-3
+
+[timestepping.implicit]
+  dt         = 1e-4
+  minimal_dt = 1e-6
+  maximal_dt = 1e-1
+  abs_tol    = 1e-14
+  rel_tol    = 1e-8
+
+[output]
+  verbosity = 1
+  folder    = "./"
+  name      = "output"

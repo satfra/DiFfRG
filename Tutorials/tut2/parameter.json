@@ -13,8 +13,7 @@
   },
   "discretization": {
     "fe_order": 3,
-    "threads": 8,
-    "batch_size": 64,
+    "threads": 0,
     "overintegration": 0,
     "output_subdivisions": 2,
 

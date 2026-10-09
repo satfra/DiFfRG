@@ -5,10 +5,6 @@
 
 // C++ standard library
 #include <cmath>
-#include <cstdlib>
-#include <cstring>
-#include <ctime>
-#include <iostream>
 #include <limits>
 
 namespace DiFfRG
@@ -38,22 +34,22 @@ namespace DiFfRG
     if (n == 1) return;
     if ((int)e.size() != n) throw std::runtime_error("The size of e must be d.size() for the purpose of this routine.");
     if ((int)z.size() != n) throw std::runtime_error("The size of z must be d.size().");
-    T b;
-    T c;
-    T f;
-    T g;
-    int i;
-    int ii;
+    T b = 0;
+    T c = 0;
+    T f = 0;
+    T g = 0;
+    int i = 0;
+    int ii = 0;
     int itn = 30;
-    int j;
-    int k;
-    int l;
-    int m;
-    int mml;
-    T p;
-    T prec;
-    T r;
-    T s;
+    int j = 0;
+    int k = 0;
+    int l = 0;
+    int m = 0;
+    int mml = 0;
+    T p = 0;
+    T prec = 0;
+    T r = 0;
+    T s = 0;
 
     prec = std::numeric_limits<T>::epsilon();
 

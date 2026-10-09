@@ -1,32 +1,20 @@
-#include "flows.hh"
+#include "./flows.hh"
 
-QuarkMesonFlowEquations::QuarkMesonFlowEquations(const JSONValue &json)
-    : FlowEquationsFiniteT(
-          json, json.get_double("/physical/T"),
-
-          [&](double q2) {
-            return 1. / (q2 + __REGULATOR__::RB(powr<2>(k), q2)) * __REGULATOR__::RBdot(powr<2>(k), q2);
-          },
-          [&](double q0) {
-            return 1. / (powr<2>(q0) + __REGULATOR__::RB(powr<2>(k), powr<2>(q0))) *
-                   __REGULATOR__::RBdot(powr<2>(k), powr<2>(q0));
-          },
-          [&](double q0) { return 1. / powr<2>(powr<2>(q0) + powr<2>(k)); }),
-
-      grid_size_int{{x_quadrature_order}}, grid_sizes_angle_int{{x_quadrature_order, angle_quadrature_order}},
-      grid_sizes_3D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order}},
-      grid_sizes_4D_int{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, angle_quadrature_order}},
-
-      grid_sizes_int_fT{{x_quadrature_order, x0_quadrature_order}},
-      grid_sizes_angle_int_fT{{x_quadrature_order, angle_quadrature_order, x0_quadrature_order}},
-      grid_sizes_4D_int_fT{{x_quadrature_order, angle_quadrature_order, angle_quadrature_order, x0_quadrature_order}},
-
-      grid_sizes_2D_cartesian_int{{x_quadrature_order, x_quadrature_order}},
-      grid_sizes_3D_cartesian_int{{x_quadrature_order, x_quadrature_order, x_quadrature_order}},
-
-      quadrature_provider(json), V_integrator(quadrature_provider, grid_size_int, x_extent, json),
-      etaQ_integrator(quadrature_provider, grid_sizes_angle_int, x_extent, json),
-      etaPhi_integrator(quadrature_provider, grid_sizes_angle_int, x_extent, json),
-      hPhi0_integrator(quadrature_provider, grid_sizes_angle_int, x_extent, json)
+  LPA_QM_flows::LPA_QM_flows(const DiFfRG::ConfigTree& json) : quadrature_provider(json), etaPhi(quadrature_provider, json), etaQ(quadrature_provider, json), hPhi0(quadrature_provider, json), V(quadrature_provider, json) 
+{}
+ void LPA_QM_flows::set_k(const double k)
 {
+DiFfRG::all_set_k(etaPhi, k);DiFfRG::all_set_k(etaQ, k);DiFfRG::all_set_k(hPhi0, k);DiFfRG::all_set_k(V, k);
+}
+ void LPA_QM_flows::set_T(const double T)
+{
+DiFfRG::all_set_T(etaPhi, T);DiFfRG::all_set_T(etaQ, T);DiFfRG::all_set_T(hPhi0, T);DiFfRG::all_set_T(V, T);
+}
+ void LPA_QM_flows::set_typical_E(const double E)
+{
+DiFfRG::all_set_typical_E(etaPhi, E);DiFfRG::all_set_typical_E(etaQ, E);DiFfRG::all_set_typical_E(hPhi0, E);DiFfRG::all_set_typical_E(V, E);
+}
+ void LPA_QM_flows::set_x_extent(const double x_extent)
+{
+DiFfRG::all_set_x_extent(etaPhi, x_extent);DiFfRG::all_set_x_extent(etaQ, x_extent);DiFfRG::all_set_x_extent(hPhi0, x_extent);DiFfRG::all_set_x_extent(V, x_extent);
 }

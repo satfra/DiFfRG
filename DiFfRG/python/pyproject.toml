@@ -1,0 +1,34 @@
+[project]
+name = "DiFfRG"
+version = "1.1.0"
+authors = [
+  { name = "Franz Richard Sattler", email = "sattler@thphys.uni-heidelberg.de" },
+]
+description = "The python subpackage of DiFfRG, for processing datra created from DiFfRG simulations."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "numpy",
+  "scipy",
+  "matplotlib",
+  "adaptive[notebook]",
+  "pandas",
+  "h5py",
+  "loky",
+  "cloudpickle",
+  "seaborn",
+  "jupyter_bokeh",
+  "vtk",
+]
+
+[project.urls]
+Homepage = "https://github.com/satfra/DiFfRG"
+Issues = "https://github.com/satfra/DiFfRG/issues"
+
+[tool.setuptools.packages.find]
+exclude = ["html"]

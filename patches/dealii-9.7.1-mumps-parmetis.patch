@@ -1,0 +1,45 @@
+--- a/cmake/modules/FindDEAL_II_MUMPS.cmake
++++ b/cmake/modules/FindDEAL_II_MUMPS.cmake
+@@ -59,6 +59,26 @@ deal_ii_find_library(PORD_LIBRARY
+   PATH_SUFFIXES lib${LIB_SUFFIX} lib64 lib
+   )
+ 
++#
++# DiFfRG: static MUMPS archives (PETSc's --download-mumps builds them) must be
++# followed on the link line by everything they reference, or linkers that
++# default to --as-needed (Debian/Ubuntu) drop those libraries before reaching
++# the archives: "undefined reference to ParMETIS_V32_NodeND" and
++# "_gfortran_transfer_real_write". So list ParMETIS (used for orderings with
++# --download-parmetis) and the Fortran runtime here, after the archives.
++#
++deal_ii_find_library(PARMETIS_LIBRARY
++  NAMES parmetis
++  HINTS ${MUMPS_DIR} ${METIS_DIR}
++  PATH_SUFFIXES lib${LIB_SUFFIX} lib64 lib
++  )
++set(MUMPS_FORTRAN_RUNTIME_LIBRARIES)
++foreach(_lib ${CMAKE_Fortran_IMPLICIT_LINK_LIBRARIES})
++  if(_lib MATCHES "^(gfortran|quadmath)$")
++    list(APPEND MUMPS_FORTRAN_RUNTIME_LIBRARIES ${_lib})
++  endif()
++endforeach()
++
+ if(EXISTS ${MUMPS_INCLUDE_DIR}/dmumps_c.h)
+   file(STRINGS "${MUMPS_INCLUDE_DIR}/dmumps_c.h" MUMPS_VERSION_STRING
+     REGEX "#define.*MUMPS_VERSION")
+@@ -81,12 +101,14 @@ process_feature(MUMPS
+     REQUIRED DMUMPS_LIBRARY MUMPS_COMMON_LIBRARY SCALAPACK_LIBRARIES
+     OPTIONAL BLACS_LIBRARIES
+     OPTIONAL PORD_LIBRARY
++    OPTIONAL PARMETIS_LIBRARY
+     OPTIONAL METIS_LIBRARIES MPI_Fortran_LIBRARIES
++    OPTIONAL MUMPS_FORTRAN_RUNTIME_LIBRARIES
+   INCLUDE_DIRS
+     REQUIRED MUMPS_INCLUDE_DIR
+   LINKER_FLAGS
+     OPTIONAL LAPACK_LINKER_FLAGS
+   CLEAR
+-    DMUMPS_LIBRARY MUMPS_COMMON_LIBRARY PORD_LIBRARY
++    DMUMPS_LIBRARY MUMPS_COMMON_LIBRARY PORD_LIBRARY PARMETIS_LIBRARY
+     MUMPS_INCLUDE_DIR
+   )

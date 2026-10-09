@@ -1,0 +1,69 @@
+{
+  "physical": {
+    "Lambda": 1.0,
+    "N": 2.0,
+    "lambda2": -0.1,
+    "lambda4": 50.0,
+    "lambda6": 0.0,
+    "T": 1e-3
+  },
+  "integration": {
+    "x_order": 32,
+    "angle_quadrature_order": 8,
+    "x0_quadrature_order": 16,
+    "x0_summands": 8,
+    "q0_quadrature_order": 16,
+    "q0_summands": 8,
+    "x_extent_tolerance": 1E-3,
+    "x0_extent_tolerance": 1E-3,
+    "q0_extent_tolerance": 1E-3,
+    "jacobian_quadrature_factor": 5E-1
+  },
+  "discretization": {
+    "fe_order": 2,
+    "threads": 0,
+    "overintegration": 0,
+    "output_subdivisions": 0,
+    "EoM_abs_tol": 1e-14,
+    "EoM_max_iter": 100,
+    "grid": {
+      "x_grid": "0:1e-4:5e-3, 5e-3:5e-4:6e-3, 6e-3:1e-3:1.5e-2",
+      "y_grid": "0:0.1:1",
+      "z_grid": "0:0.1:1",
+      "refine": 0
+    },
+    "adaptivity": {
+      "start_adapt_at": 0E0,
+      "adapt_dt": 2E-1,
+      "level": 0,
+      "refine_percent": 1E-1,
+      "coarsen_percent": 2E-1
+    }
+  },
+  "timestepping": {
+    "final_time": 4.0,
+    "output_dt": 1E-1,
+    "explicit": {
+      "dt": 1E-1,
+      "minimal_dt": 1E-4,
+      "maximal_dt": 1E-1,
+      "abs_tol": 1E-16,
+      "rel_tol": 1E-4
+    },
+    "implicit": {
+      "dt": 1E-4,
+      "minimal_dt": 1E-4,
+      "maximal_dt": 1E-1,
+      "abs_tol": 1E-13,
+      "rel_tol": 1E-7
+    }
+  },
+  "output": {
+    "max_pending_frames": 2,
+    "vtk": true,
+    "hdf5": true,
+    "verbosity": 10000,
+    "folder": "./",
+    "name": "output"
+  }
+}

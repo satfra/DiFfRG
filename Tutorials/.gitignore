@@ -2,3 +2,11 @@
 */TraceBuffer/
 */diagrams/
 */flows/
+
+# tut3, tut4 and tut6 ship their generated flow equations so they build out-of-the-box.
+!tut3/flows/
+!tut3/flows/**
+!tut4/flows/
+!tut4/flows/**
+!tut6/flows/
+!tut6/flows/**

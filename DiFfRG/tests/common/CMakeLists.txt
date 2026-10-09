@@ -1,22 +1,19 @@
 # ##############################################################################
-# Test
+# Add subdirectories
 # ##############################################################################
 
 add_subdirectory(quadrature)
 
-add_executable(test_configuration_helper test_configuration_helper.cc)
-setup_test(test_configuration_helper)
+# ##############################################################################
+# Test
+# ##############################################################################
 
-add_executable(test_cpu_complex_autodiff test_cpu_complex_autodiff.cc)
-setup_test(test_cpu_complex_autodiff)
-
-if(USE_CUDA)
-  add_executable(test_gpu_autodiff test_gpu_autodiff.cu)
-  setup_test(test_gpu_autodiff)
-
-  add_executable(test_gpu_complex test_gpu_complex.cu)
-  setup_test(test_gpu_complex)
-
-  add_executable(test_gpu_complex_autodiff test_gpu_complex_autodiff.cu)
-  setup_test(test_gpu_complex_autodiff)
-endif()
+setup_test(csv.cc)
+setup_test(config_tree.cc)
+setup_test(configuration_helper.cc)
+setup_test(init_threads.cc)
+setup_test(autodiff.cc)
+setup_test(complex_autodiff.cc)
+setup_test(tbb.cc)
+setup_test(root_finding.cc)
+setup_test(stream_filter.cc)

@@ -1,1 +1,0 @@
-#include "VPolyakov.cu"

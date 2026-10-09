@@ -1,0 +1,55 @@
+{
+  "physical": {
+    "Lambda": 1.0,
+    "N": 2.0,
+    "lambda2": 0.04857,
+    "lambda4": -0.5,
+    "lambda6": 1.0
+  },
+  "shock": {
+    "contrast": 3.0,
+    "locality": 0.7,
+    "gap": 2,
+    "width": 12,
+    "window": 100,
+    "edge_cells": 5,
+    "offset_cells": 4
+  },
+  "discretization": {
+    "fe_order": 0,
+    "threads": 0,
+    "overintegration": 0,
+    "output_subdivisions": 1,
+    "EoM_abs_tol": 1e-12,
+    "EoM_max_iter": 100,
+    "grid": {
+      "x_grid": "0:2e-5:0.02, 0.02:5e-4:0.2, 0.2:5e-3:1.0",
+      "y_grid": "0:1:1",
+      "z_grid": "0:1:1",
+      "refine": 0
+    }
+  },
+  "timestepping": {
+    "final_time": 5.0,
+    "output_dt": 0.1,
+    "implicit": {
+      "dt": 1e-06,
+      "minimal_dt": 1e-09,
+      "maximal_dt": 0.1,
+      "abs_tol": 1e-12,
+      "rel_tol": 1e-08
+    },
+    "explicit": {
+      "dt": 0.05,
+      "minimal_dt": 1e-06,
+      "maximal_dt": 0.1,
+      "abs_tol": 1e-10,
+      "rel_tol": 1e-08
+    }
+  },
+  "output": {
+    "verbosity": 1,
+    "folder": "./",
+    "name": "output"
+  }
+}

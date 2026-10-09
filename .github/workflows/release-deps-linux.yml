@@ -1,0 +1,154 @@
+# On-demand build of the pre-built Linux dependency bundle
+# (diffrg-deps-<version>-linux-x86_64-v3-cpu.tar.zst).
+#
+# Runs the same scripts as a local release build (containers/release/
+# build-release.sh + test-tarball.sh), so both paths stay equivalent. The
+# result is stored as a workflow artifact named like the tarball; with
+# draft_release=true it is additionally attached to a DRAFT GitHub release
+# deps-v<version> for review -- publishing the draft (or running
+# containers/release/publish-release.sh locally on the downloaded artifact)
+# is always a manual step.
+name: release-deps-linux
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_version:
+        description: "Bundle version (X.Y.Z, becomes tag deps-vX.Y.Z)"
+        required: true
+      run_tests:
+        description: "Distro-matrix validation depth"
+        type: choice
+        options: [quick, build-only]
+        default: quick
+      mpi:
+        description: "MPI implementation the bundle links (openmpi adds the -openmpi variant: PETSc, hypre, MUMPS)"
+        type: choice
+        options: [none, openmpi]
+        default: none
+      draft_release:
+        description: "Attach the result to a draft release deps-v<version>"
+        type: boolean
+        default: false
+
+env:
+  # The bundle variant: linux-x86_64-v3-cpu, or linux-x86_64-v3-cpu-openmpi.
+  VARIANT: linux-x86_64-v3-cpu${{ inputs.mpi != 'none' && format('-{0}', inputs.mpi) || '' }}
+
+permissions:
+  contents: write # only used when draft_release=true
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: release-deps-linux-${{ inputs.mpi }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350 # GitHub caps hosted jobs at 360; MPI variants add PETSc + MUMPS
+    steps:
+      - uses: actions/checkout@v4
+
+      # The superbuild needs ~25 GB of scratch; hosted runners start with ~14.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/.ghcup /usr/local/share/boost
+          df -h /
+
+      - name: Build the bundle
+        run: bash ./containers/release/build-release.sh -v "${{ inputs.bundle_version }}" -V "${VARIANT}" -j 4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diffrg-deps-${{ inputs.bundle_version }}-${{ env.VARIANT }}
+          path: containers/release/dist/
+          if-no-files-found: error
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ubuntu24.04, debian13, fedora41, rockylinux9]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+                      /usr/local/.ghcup /usr/local/share/boost
+          df -h /
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: diffrg-deps-${{ inputs.bundle_version }}-${{ env.VARIANT }}
+          path: containers/release/dist/
+
+      - name: Validate on ${{ matrix.distro }}
+        run: |
+          extra=''
+          [[ "${{ inputs.run_tests }}" == build-only ]] && extra='-s'
+          [[ "${{ inputs.mpi }}" != none ]] && extra="${extra} -m"
+          bash ./containers/release/test-tarball.sh \
+            -f "containers/release/dist/diffrg-deps-${{ inputs.bundle_version }}-${{ env.VARIANT }}.tar.zst" \
+            -j 4 -d "${{ matrix.distro }}" ${extra}
+
+      - name: Upload distro log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-log-${{ matrix.distro }}
+          path: containers/release/logs/${{ matrix.distro }}*.log
+
+  finalize:
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: diffrg-deps-${{ inputs.bundle_version }}-${{ env.VARIANT }}
+          path: dist/
+
+      # The per-distro jobs each validated the tarball; this stamp is what
+      # publish-release.sh checks before publishing.
+      - name: Write the tested stamp
+        run: |
+          name="diffrg-deps-${{ inputs.bundle_version }}-${{ env.VARIANT }}"
+          if [[ "${{ inputs.run_tests }}" == quick ]]; then
+            echo "tested-with-ctest" > "dist/${name}.tar.zst.tested"
+          else
+            echo "tested-build-only" > "dist/${name}.tar.zst.tested"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diffrg-deps-${{ inputs.bundle_version }}-${{ env.VARIANT }}
+          path: dist/
+          overwrite: true
+
+      - name: Attach to draft release
+        if: inputs.draft_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="deps-v${{ inputs.bundle_version }}"
+          gh release view "${tag}" --repo "${{ github.repository }}" >/dev/null 2>&1 \
+            || gh release create "${tag}" --repo "${{ github.repository }}" \
+                 --draft --title "DiFfRG dependency bundle ${{ inputs.bundle_version }}" \
+                 --notes "Draft -- assets uploaded by the release-deps workflows." \
+                 --target "${GITHUB_SHA}"
+          gh release upload "${tag}" dist/* --clobber --repo "${{ github.repository }}"
+
+      - name: Summary
+        run: |
+          echo "## diffrg-deps ${{ inputs.bundle_version }} (${{ env.VARIANT }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- validation: ${{ inputs.run_tests }} on 4 distros" >> "$GITHUB_STEP_SUMMARY"
+          echo "- to publish locally: download the artifact into containers/release/dist/ and run containers/release/publish-release.sh -v ${{ inputs.bundle_version }}" >> "$GITHUB_STEP_SUMMARY"
+          [[ "${{ inputs.draft_release }}" == "true" ]] && echo "- attached to draft release deps-v${{ inputs.bundle_version }} -- review and publish it in the Releases UI" >> "$GITHUB_STEP_SUMMARY" || true

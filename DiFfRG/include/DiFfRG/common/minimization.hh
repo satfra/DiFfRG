@@ -2,7 +2,12 @@
 
 // standard library
 #include <array>
+#include <cmath>
+#include <limits>
+#include <string>
+
 #include <functional>
+#include <spdlog/spdlog.h>
 #include <stdexcept>
 
 // external libraries
@@ -180,6 +185,30 @@ namespace DiFfRG
      */
     void set_x0(const std::array<double, dim> &x0) { this->x0 = x0; }
 
+    /**
+     * @brief Stop as soon as the objective falls to or below this value.
+     *
+     * The simplex-size test alone answers "has the search stopped moving", which is a statement
+     * about the parameter space and says nothing about whether the answer is any good. When the
+     * objective is a calibrated quantity -- an RMS residual, say -- a target on IT is the
+     * meaningful criterion, and the size test degrades to a give-up condition. NaN (the default)
+     * disables this and restores pure size-based convergence.
+     */
+    void set_f_target(const double f_target) { this->f_target = f_target; }
+
+    /// Objective value at the point returned by minimize(). NaN before it ran.
+    double get_min_value() const { return min_value; }
+
+    /**
+     * @brief Whether the search met its criterion: the f-target if one was set, otherwise the
+     * simplex-size test. False when it stopped because the simplex collapsed short of the target
+     * or the iteration cap was hit -- in both cases minimize() still returns the best point found.
+     */
+    bool converged() const { return m_converged; }
+
+    /// Why the search stopped, for logging.
+    const std::string &get_stop_reason() const { return stop_reason; }
+
     static double gsl_wrap(const gsl_vector *v, void *params)
     {
       GSLSimplexMinimizer<dim> *self = (GSLSimplexMinimizer<dim> *)params;
@@ -209,21 +238,38 @@ namespace DiFfRG
 
       gsl_multimin_fminimizer_set(s, &gsl_f, x, init_step);
 
-      int status;
+      const bool have_target = std::isfinite(f_target);
+      int status = GSL_CONTINUE;
+      bool iterate_failed = false;
+      this->m_converged = false;
+      this->stop_reason = "iteration limit reached";
       this->iter = 0;
       do {
         this->iter++;
-        status = gsl_multimin_fminimizer_iterate(s);
-        if (status) break;
+        if (gsl_multimin_fminimizer_iterate(s)) {
+          iterate_failed = true;
+          this->stop_reason = "GSL simplex iteration failed";
+          break;
+        }
 
-        double size = gsl_multimin_fminimizer_size(s);
+        if (have_target && s->fval <= f_target) {
+          this->m_converged = true;
+          this->stop_reason = "objective reached the target";
+          break;
+        }
+
+        const double size = gsl_multimin_fminimizer_size(s);
         status = gsl_multimin_test_size(size, this->abs_tol);
+        if (status == GSL_SUCCESS) {
+          // Without a target this IS the criterion; with one, the simplex ran out of room before
+          // the objective got there, which is a real answer about the model, not a failure.
+          this->m_converged = !have_target;
+          this->stop_reason = have_target ? "simplex collapsed short of the target" : "simplex size below tolerance";
+          break;
+        }
+      } while (this->iter < this->max_iter);
 
-        if (status == GSL_SUCCESS) break;
-
-      } while (status == GSL_CONTINUE && this->iter < this->max_iter);
-
-      if (status != GSL_SUCCESS) throw std::runtime_error("Minimization failed.");
+      this->min_value = s->fval;
 
       std::array<double, dim> result;
       for (int i = 0; i < dim; ++i)
@@ -232,11 +278,22 @@ namespace DiFfRG
       gsl_multimin_fminimizer_free(s);
       gsl_vector_free(x);
 
+      // Only a genuine solver breakdown is fatal. Stopping short of the target still yields the
+      // best point seen, and the caller can ask converged()/get_stop_reason() about it.
+      if (iterate_failed) throw std::runtime_error("Minimization failed: " + this->stop_reason);
+      if (!this->m_converged)
+        spdlog::warn("GSLSimplexMinimizer: {} after {} iterations; returning the best point with f = {:.6e}",
+                     this->stop_reason, this->iter, this->min_value);
+
       return result;
     }
 
     std::array<double, dim> x0;
     double step_size;
+    double f_target = std::numeric_limits<double>::quiet_NaN();
+    double min_value = std::numeric_limits<double>::quiet_NaN();
+    bool m_converged = false;
+    std::string stop_reason;
   };
 
   /**
