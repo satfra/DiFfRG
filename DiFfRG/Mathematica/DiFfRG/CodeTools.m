@@ -266,9 +266,11 @@ DeclareSymmetricPoints2DP4[q_, p_, {p1_, p2_, p3_, p4_}, cos1_ : Symbol @ "cos1"
 
 (* ::Input::Initialization:: *)
 
+(* XFiniteT[x, T] is X(x / (2 T)) on the C++ side (physics/thermodynamics.hh), so X(a / T) is
+   XFiniteT[a, T / 2]. *)
 SafeFiniteTFunctions[expr_, T_] :=
   Module[{a},
-    expr //. {Tanh[a_ / (2 T)] :> Symbol["TanhFiniteT"][a, T], Tanh[a_ / T] :> Symbol["TanhFiniteT"][a, 2 T], Tanh[a_ / (2 T)] ^ n_ :> Symbol["TanhFiniteT"][a, T] ^ n, Tanh[a_ / T] ^ n_ :> Symbol["TanhFiniteT"][a, 2 T] ^ n, Coth[a_ / (2 T)] :> Symbol["CothFiniteT"][a, T], Coth[a_ / T] :> Symbol["CothFiniteT"][a, 2 T], Coth[a_ / (2 T)] ^ n_ :> Symbol["CothFiniteT"][a, T] ^ n, Coth[a_ / T] ^ n_ :> Symbol["CothFiniteT"][a, 2 T] ^ n, Csch[a_ / (2 T)] :> Symbol["CschFiniteT"][a, T], Csch[a_ / T] :> Symbol["CschFiniteT"][a, 2 T], Csch[a_ / (2 T)] ^ n_ :> Symbol["CschFiniteT"][a, T] ^ n, Csch[a_ / T] ^ n_ :> Symbol["CschFiniteT"][a, 2 T] ^ n, Sech[a_ / (2 T)] :> Symbol["SechFiniteT"][a, T], Sech[a_ / T] :> Symbol["SechFiniteT"][a, 2 T], Sech[a_ / (2 T)] ^ n_ :> Symbol["SechFiniteT"][a, T] ^ n, Sech[a_ / T] ^ n_ :> Symbol["SechFiniteT"][a, 2 T] ^ n}
+    expr //. {Tanh[a_ / (2 T)] :> Symbol["TanhFiniteT"][a, T], Tanh[a_ / T] :> Symbol["TanhFiniteT"][a, T / 2], Tanh[a_ / (2 T)] ^ n_ :> Symbol["TanhFiniteT"][a, T] ^ n, Tanh[a_ / T] ^ n_ :> Symbol["TanhFiniteT"][a, T / 2] ^ n, Coth[a_ / (2 T)] :> Symbol["CothFiniteT"][a, T], Coth[a_ / T] :> Symbol["CothFiniteT"][a, T / 2], Coth[a_ / (2 T)] ^ n_ :> Symbol["CothFiniteT"][a, T] ^ n, Coth[a_ / T] ^ n_ :> Symbol["CothFiniteT"][a, T / 2] ^ n, Csch[a_ / (2 T)] :> Symbol["CschFiniteT"][a, T], Csch[a_ / T] :> Symbol["CschFiniteT"][a, T / 2], Csch[a_ / (2 T)] ^ n_ :> Symbol["CschFiniteT"][a, T] ^ n, Csch[a_ / T] ^ n_ :> Symbol["CschFiniteT"][a, T / 2] ^ n, Sech[a_ / (2 T)] :> Symbol["SechFiniteT"][a, T], Sech[a_ / T] :> Symbol["SechFiniteT"][a, T / 2], Sech[a_ / (2 T)] ^ n_ :> Symbol["SechFiniteT"][a, T] ^ n, Sech[a_ / T] ^ n_ :> Symbol["SechFiniteT"][a, T / 2] ^ n}
   ];
 
 (* ::Chapter:: *)

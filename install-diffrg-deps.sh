@@ -253,6 +253,13 @@ if [[ ${os_name} == Darwin ]]; then
       while IFS= read -r dep; do
         install_name_tool -change "$dep" "${dep/#${BUILD_PREFIX}/${prefix}}" "$dylib"
       done || true
+    # @rpath references resolve through each dylib's own LC_RPATH first. Left at the build
+    # prefix, a machine that still has a /opt/diffrg bundle (e.g. the builder) loads a second
+    # copy of Kokkos/TBB from there, whose global state is not the one the app sees.
+    otool -l "$dylib" | awk '$1=="path"{print $2}' | grep "^${BUILD_PREFIX}" |
+      while IFS= read -r rp; do
+        install_name_tool -rpath "$rp" "${rp/#${BUILD_PREFIX}/${prefix}}" "$dylib"
+      done || true
     codesign --force -s - "$dylib" 2>/dev/null \
       || warn "could not re-sign $dylib -- it may fail to load"
   done

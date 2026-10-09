@@ -32,6 +32,78 @@ namespace DiFfRG
 {
   using namespace dealii;
 
+  namespace
+  {
+    /// Progress record of one explicit step: its size and error estimate (at /output/verbosity >= 2).
+    constexpr ProgressTopic explicit_step_topic{"step", "explicit"};
+
+    /**
+     * @brief Adams-Bashforth-Moulton composed exactly as boost::numeric::odeint::adams_bashforth_moulton does it,
+     * but keeping the Adams-Bashforth predictor: the predictor-corrector difference is a free estimate of the local
+     * error of the step. While the multistep history is being built (the first Steps - 1 steps after a reset, taken by
+     * the initializing one-step method) there is no estimate.
+     *
+     * Both methods have order Steps, with error constants g_Steps (predictor) and g*_Steps = g_Steps - g_{Steps-1}
+     * (corrector), where g_m = 1 - sum_{j<m} g_j / (m + 1 - j) are the Adams-Bashforth coefficients. The local error
+     * of the corrected step is therefore milne_factor = |g*_Steps| / g_{Steps-1} times the difference (~1/33 at
+     * Steps = 8).
+     */
+    template <size_t Steps, typename State, typename Algebra, typename Operations, typename Resizer,
+              typename InitializingStepper>
+    class ABMWithErrorEstimate
+    {
+      using AB = boost::numeric::odeint::adams_bashforth<Steps, State, double, State, double, Algebra, Operations,
+                                                         Resizer, InitializingStepper>;
+      using AM = boost::numeric::odeint::adams_moulton<Steps, State, double, State, double, Algebra, Operations,
+                                                       Resizer>;
+
+    public:
+      ABMWithErrorEstimate() : am(ab.algebra()) {}
+      ABMWithErrorEstimate(const ABMWithErrorEstimate &other) : ab(other.ab), am(ab.algebra()), predicted(other.predicted)
+      {
+      }
+      ABMWithErrorEstimate &operator=(const ABMWithErrorEstimate &other)
+      {
+        ab = other.ab;
+        predicted = other.predicted;
+        return *this;
+      }
+
+      /// @return whether the step carries an error estimate (the multistep history was complete).
+      template <typename System> bool do_step(System system, State &x, const double t, const double dt)
+      {
+        if (!ab.is_initialized()) {
+          ab.do_step(system, x, t, dt);
+          return false;
+        }
+        if (predicted.size() != x.size()) predicted.resize(x.size());
+        ab.do_step(system, x, t, predicted, dt);
+        am.do_step(system, x, predicted, t + dt, x, dt, ab.step_storage());
+        return true;
+      }
+      void reset() { ab.reset(); }
+      /// The Adams-Bashforth prediction of the last step with an estimate.
+      const State &predictor() const { return predicted; }
+
+      static constexpr double milne_factor()
+      {
+        double g[Steps + 1] = {1.};
+        for (size_t m = 1; m <= Steps; ++m) {
+          g[m] = 1.;
+          for (size_t j = 0; j < m; ++j)
+            g[m] -= g[j] / double(m + 1 - j);
+        }
+        const double corrector = g[Steps] - g[Steps - 1];
+        return (corrector < 0. ? -corrector : corrector) / g[Steps - 1];
+      }
+
+    private:
+      AB ab;
+      AM am;
+      State predicted;
+    };
+  } // namespace
+
   template <typename VectorType, typename SparseMatrixType, uint dim, template <typename...> typename LinearSolver>
   void TimeStepperSUNDIALS_IDA_BoostABM_impl<VectorType, SparseMatrixType, dim, LinearSolver>::run_segment(
       AbstractFlowingVariables<NumberType, VectorType> &initial_condition, const double t_start, const double t_stop)
@@ -148,8 +220,7 @@ namespace DiFfRG
 
     using InitializingStepper = stepper_type_0;
 
-    adams_bashforth_moulton<Steps, State, Value, Deriv, Time, Algebra, Operations, Resizer, InitializingStepper>
-        variable_stepper;
+    ABMWithErrorEstimate<Steps, State, Algebra, Operations, Resizer, InitializingStepper> variable_stepper;
 
     // [PREDICT, mode 2] Persistent cache for the forward lookahead: a copy of the multistep
     // stepper plus the lookahead trajectory it has produced beyond the committed buffer
@@ -255,10 +326,11 @@ namespace DiFfRG
     Eigen::VectorXd dv_prev_committed;
     double t_prev_committed = -std::numeric_limits<double>::infinity();
     bool have_prev_dv = false;
-    // Honour the user's explicit-step cap, exactly as the RK path does. Set once and held
-    // fixed: the ABM multistep order requires a uniform dt across its history, so cur_dt
-    // must never change after this point.
-    const double cur_dt = std::min(expl.dt, expl.maximal_dt);
+    // Honour the user's explicit-step cap, exactly as the RK path does. The ABM multistep order
+    // requires a uniform dt across its history, so cur_dt only ever changes together with a
+    // reset of that history, in explicit_step() under /timestepping/explicit/error_control.
+    const double base_dt = std::min(expl.dt, expl.maximal_dt);
+    double cur_dt = base_dt;
 
     // How the explicit variable couples to the (implicit) spatial block, via
     // /timestepping/explicit/coupling_mode:
@@ -357,6 +429,58 @@ namespace DiFfRG
       }
     };
 
+    // One explicit step of the committed trajectory from step_time, appended to the buffer.
+    //
+    // Under /timestepping/explicit/error_control the step is error controlled: the local error
+    // estimate, scaled by explicit abs_tol / rel_tol, must stay below 1, else the step is retaken
+    // at half the size with a fresh multistep history -- down to minimal_dt. After 2 * Steps
+    // estimated steps in a row with an error below 1/4 the step doubles back towards base_dt,
+    // again with a fresh history. The estimate does not fall like dt^(Steps + 1) in practice --
+    // right-hand sides read at an EoM or from interpolated spatial data are not smooth on the
+    // scale of dt -- so the growth test cannot rely on that. Away from fast features (a jump in
+    // the variables' right-hand side, say) nothing changes; across one the step shrinks and grows
+    // back.
+    const bool error_control = config.get_bool("/timestepping/explicit/error_control", false);
+    int calm_steps = 0;
+    Eigen::VectorXd step_backup;
+    auto explicit_step = [&](double &step_time) {
+      for (;;) {
+        step_backup = variable_sol;
+        const bool estimated = variable_stepper.do_step(get_variable_residual, variable_sol, step_time, cur_dt);
+        double err = 0.;
+        if (estimated) {
+          const auto &pred = variable_stepper.predictor();
+          for (Eigen::Index i = 0; i < variable_sol.size(); ++i)
+            err = std::max(err, variable_stepper.milne_factor() * std::abs(variable_sol[i] - pred[i]) /
+                                    (expl.abs_tol + expl.rel_tol * std::abs(variable_sol[i])));
+          this->log.progress(ProgressEvent{.topic = explicit_step_topic,
+                                           .time = step_time + cur_dt,
+                                           .minimum_verbosity = 2}
+                                 .field("dt", cur_dt)
+                                 .field("err", err));
+        }
+        if (error_control && err > 1. && cur_dt > expl.minimal_dt) {
+          variable_sol = step_backup;
+          variable_stepper.reset();
+          cur_dt = std::max(0.5 * cur_dt, expl.minimal_dt);
+          calm_steps = 0;
+          continue;
+        }
+        step_time += cur_dt;
+        variable_buffer.push_back(variable_sol);
+        variable_buffer_times.push_back(step_time);
+        if (error_control && estimated) {
+          calm_steps = err < 0.25 ? calm_steps + 1 : 0;
+          if (calm_steps >= 2 * int(Steps) && cur_dt < base_dt) {
+            cur_dt = std::min(2. * cur_dt, base_dt);
+            variable_stepper.reset();
+            calm_steps = 0;
+          }
+        }
+        return;
+      }
+    };
+
     // [STAGGER] Advance the REAL explicit buffer forward in whole cur_dt steps -- each
     // taken exactly ONCE over the run -- until its front leads the accepted spatial region
     // (t_accepted) by no more than half a step. Equivalently, the step landing on a grid
@@ -374,10 +498,7 @@ namespace DiFfRG
       int guard = 0;
       while (t_accepted + 1e-12 * std::max(1.0, std::abs(t_accepted)) >= step_time + 0.5 * cur_dt &&
              guard++ < 1000000) {
-        variable_stepper.do_step(get_variable_residual, variable_sol, step_time, cur_dt);
-        step_time += cur_dt;
-        variable_buffer.push_back(variable_sol);
-        variable_buffer_times.push_back(step_time);
+        explicit_step(step_time);
       }
       spatial_extrapolate = false;
     };
@@ -391,10 +512,7 @@ namespace DiFfRG
       variable_sol = variable_buffer.back();
       int guard = 0;
       while (step_time < target && !is_close(step_time, target) && guard++ < 1000000) {
-        variable_stepper.do_step(get_variable_residual, variable_sol, step_time, cur_dt);
-        step_time += cur_dt;
-        variable_buffer.push_back(variable_sol);
-        variable_buffer_times.push_back(step_time);
+        explicit_step(step_time);
       }
       spatial_extrapolate = false;
     };
@@ -492,10 +610,7 @@ namespace DiFfRG
       double step_time = variable_buffer_times.back();
       variable_sol = variable_buffer.back();
       while (step_time + cur_dt <= limit + 1e-12 * std::max(1.0, std::abs(limit))) {
-        variable_stepper.do_step(get_variable_residual, variable_sol, step_time, cur_dt);
-        step_time += cur_dt;
-        variable_buffer.push_back(variable_sol);
-        variable_buffer_times.push_back(step_time);
+        explicit_step(step_time);
       }
     };
 

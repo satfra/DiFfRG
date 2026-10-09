@@ -147,6 +147,11 @@ namespace DiFfRG
    * - /timestepping/explicit/abs_tol: The absolute tolerance for an explicit timestepping algorithm.
    * - /timestepping/explicit/rel_tol: The relative tolerance for an explicit timestepping algorithm.
    * - /timestepping/explicit/detect_stuck: Whether repeated-time callback detection is enabled.
+   * - /timestepping/explicit/error_control: IDA + Adams-Bashforth-Moulton only. Control the local error of the
+   *   explicit steps with explicit/abs_tol and rel_tol, estimated by the predictor-corrector difference: a step that
+   *   fails it is retaken at half the step size (down to explicit/minimal_dt), and the step size grows back to
+   *   explicit/dt once the error stays small (default false: fixed step explicit/dt). The estimate is reported at
+   *   /output/verbosity >= 2 either way.
    *
    * Flow snapshots and restarts (all optional; see run() and documentation/getting_started/snapshots.md):
    * - /timestepping/snapshots/k: list of RG scales at which to write a snapshot (needs /physical/Lambda).

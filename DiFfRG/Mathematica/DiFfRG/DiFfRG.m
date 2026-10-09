@@ -238,12 +238,17 @@ Options[MatsubaraSum] = {Debug -> False};
 
 MatsubaraSumHelper[expr_, p0_Symbol, T_, fun_, debug_] :=
 	Module[{denom, poles, residues, n, r, SumB},
+		(* term by term with the SAME weight: recursing into MatsubaraSum would sum the terms of a
+		   fermionic sum on the bosonic tower *)
 		If[Head[expr] == Plus,
-			Return[Total[Flatten[Map[MatsubaraSum[#, p0, T]&, List @@ expr], 1]]]
+			Return[Total[Map[MatsubaraSumHelper[#, p0, T, fun, debug]&, List @@ expr]]]
 		];
 		denom = Denominator[expr] // Collect[#, p0]&;
 		poles = p0 /. Solve[denom == 0, p0] // FullSimplify;
 		poles = Assuming[T > 0 && _Symbol \[Element] Reals, poles // FullSimplify];
+		(* Solve lists a root once per multiplicity; Residue already accounts for the order of a pole,
+		   so a repeated root would be counted twice *)
+		poles = DeleteDuplicates[poles, Simplify[#1 - #2] === 0&];
 		If[debug,
 			Print["Denominator found:"];
 			Print[denom];
