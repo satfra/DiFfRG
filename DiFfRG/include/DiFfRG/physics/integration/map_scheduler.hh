@@ -60,8 +60,10 @@ namespace DiFfRG
    * see MapScheduler::least_loaded.
    */
   enum class MapResource : int { device = 0, host = 1 };
+  /// Number of MapResource values.
   inline constexpr int n_map_resources = 2;
 
+  /// Name of a MapResource, for logging.
   inline const char *to_string(const MapResource r) { return r == MapResource::host ? "host" : "device"; }
 
   /// Which resource a map() runs on and how many evaluations saturate one rank's share of it.
@@ -92,7 +94,7 @@ namespace DiFfRG
   }
 
   /**
-   * @brief This rank's window into the external grid of one QuadratureIntegrator::map() call.
+   * @brief This rank's window into the external grid of one map() call.
    */
   struct MapSlice {
     /// First external grid point this rank computes.
@@ -103,78 +105,6 @@ namespace DiFfRG
     bool owns_all(const size_t grid_size) const { return offset == 0 && count == grid_size; }
   };
 
-  /**
-   * @brief Decides, without any user input, which rank computes which part of each map().
-   *
-   * ## What is split
-   *
-   * Only the **external** coordinate grid of a `map()` -- never a quadrature reduction. Every
-   * individual integral is therefore still summed entirely on one rank, in the original order, so
-   * the result is **bitwise identical to a serial run at any rank count**. That is not a nicety:
-   * the flow kernels feed a stiff DAE (see common/tbb.hh), where a last-bit change in a residual
-   * changes the accepted step sequence and hence the whole trajectory. It also makes rebalancing
-   * numerically free -- moving a partition boundary changes *which* rank computes a point, never
-   * *what* it computes.
-   *
-   * Splitting applies to grids of any dimension. `SubCoordinates` is a window into the *linear*
-   * index range, matching `part()` above, so the split needs no per-axis structure; it used to
-   * derive a per-axis box, which is the same set of points only for `dim == 1`, and multi-dimensional
-   * grids were therefore assigned whole to a single rank. That mattered: the multi-angle vertex
-   * flows are both the most expensive and the ones with multi-dimensional external grids.
-   *
-   * ## How the split is chosen
-   *
-   * Per call, with `G` external grid points and a quadrature volume `Q = prod(grid_size)`:
-   *
-   *     S = G * Q                                   (kernel evaluations in this map)
-   *     r = clamp(S / quantum, 1, min(n_ranks, G))  (how many ranks to spread it over)
-   *     owners = the r least-loaded ranks
-   *
-   * Inside a batch, `quantum` is the **fill threshold**, not a launch-overhead threshold: below
-   * roughly 5e4 evaluations these register-heavy kernels do not occupy a modern device anyway, so
-   * splitting further buys nothing and costs a launch plus a gather. Deriving it from launch cost
-   * (~1e3 evaluations) would oversplit by two orders of magnitude.
-   *
-   * The practical consequence is the one that matters for load balance: a **cheap flow is assigned
-   * whole** to the least-loaded rank rather than chopped into slivers, so a block of many small
-   * flows spreads across ranks instead of every rank doing a sliver of every flow.
-   *
-   * That reasoning is an argument about *opportunity cost*, and it holds only while there are other
-   * maps to take the ranks this one leaves out. Outside a `DeferredMaps` scope there are none:
-   * `map()` flushes on return, so the map is the whole batch and every rank without a slice sits in
-   * the `Allgatherv` until the owners finish. There the fill threshold gives away ranks for nothing,
-   * and the threshold that applies is instead `internal::launch_threshold` -- a slice must still
-   * cover the launch that computes it, and that is the only remaining constraint. `set_batched()`
-   * is how the scheduler learns which case it is in. An explicit user override wins over both.
-   *
-   * ## Mixed device and host models
-   *
-   * A rank holds two independent resources -- its GPU and its share of the node's cores -- and both
-   * `r` and the ownership choice are made against the one the calling integrator actually uses.
-   * `r` follows from that space's fill threshold (a device is saturated by its resident threads, a
-   * host by workers x a grain), and the slices are charged to a **separate per-resource budget**, so
-   * a rank that has just taken a large TBB flow is still the natural home for the next GPU flow.
-   *
-   * That is what makes a model mixing `GPU_exec` and `TBB_exec` integrators use both at once rather
-   * than merely correctly: within a `DeferredMaps` scope the device path launches asynchronously and
-   * returns, so a host map issued after it runs concurrently with it, and each resource is levelled
-   * across ranks on its own. What the budgets deliberately do *not* do is convert between the two --
-   * there is no exchange rate at which a device evaluation equals a host one, and assuming one is
-   * exactly the mistake a single shared budget makes.
-   *
-   * Two limits remain, and both are outside this class. Within one resource the weight per
-   * evaluation is 1, so flows with equal `S` but different per-evaluation cost still mis-weigh
-   * (calibration, plan stage 4). And the overlap only exists inside a deferral scope: a host map
-   * issued with deferral off flushes -- and therefore synchronises every rank -- before the device
-   * work behind it can catch up.
-   *
-   * ## Determinism
-   *
-   * Every rank runs the same program and issues the same sequence of `map()` calls, so a schedule
-   * that is a pure function of that sequence is identical on all ranks without any communication.
-   * The running per-rank load is part of that state and is reset by `complete()`. A plan checksum
-   * is verified inside `complete()`; a mismatch aborts the job rather than hanging it.
-   */
   /**
    * @brief A scope in which map() must not be called.
    *
@@ -194,7 +124,9 @@ namespace DiFfRG
   class NoMapsHere
   {
   public:
+    /// Opens the scope.
     NoMapsHere();
+    /// Closes the scope.
     ~NoMapsHere();
     NoMapsHere(const NoMapsHere &) = delete;
     NoMapsHere &operator=(const NoMapsHere &) = delete;
@@ -203,17 +135,109 @@ namespace DiFfRG
     static bool active();
   };
 
+  /**
+   * @brief Decides automatically which MPI rank computes which part of each map().
+   *
+   * Only the grid of external points of a map() is split between ranks, never a single integral. Each integral is
+   * still summed on one rank in the same order, so results are bitwise identical to a serial run at any rank count.
+   * In a serial run the scheduler does nothing.
+   *
+   * Rules for user code:
+   * - map() is collective: every rank must issue the same sequence of map() calls, with the same grids. A map() that
+   *   only some ranks reach (e.g. inside a rank-local branch, or inside a NoMapsHere scope) aborts or hangs the job.
+   * - map_points() is rank-local and does not take part in the scheduling.
+   *
+   * Settings:
+   * - `/integration/map_quantum` (parameter file) or the environment variable `DIFFRG_MAP_QUANTUM`: number of
+   *   kernel evaluations one rank should receive; a map() with \f$S\f$ evaluations is spread over about
+   *   \f$S/\text{quantum}\f$ ranks. 0 (default) derives it from the hardware. The environment variable wins over
+   *   the parameter file.
+   * - `/integration/map_verbose` or `DIFFRG_MAP_VERBOSE`: log the schedule.
+   * - `DIFFRG_MAP_VERIFY_EVERY`: check that all ranks agree on the schedule every n-th batch (default 64, plus the
+   *   first 8 batches); 0 or 1 checks every batch. Set it to 1 when debugging a hang.
+   */
+  // Design notes.
+  //
+  // ## What is split
+  //
+  // Only the **external** coordinate grid of a `map()` -- never a quadrature reduction. Every
+  // individual integral is therefore still summed entirely on one rank, in the original order, so
+  // the result is **bitwise identical to a serial run at any rank count**. That is not a nicety:
+  // the flow kernels feed a stiff DAE (see common/tbb.hh), where a last-bit change in a residual
+  // changes the accepted step sequence and hence the whole trajectory. It also makes rebalancing
+  // numerically free -- moving a partition boundary changes *which* rank computes a point, never
+  // *what* it computes.
+  //
+  // Splitting applies to grids of any dimension. `SubCoordinates` is a window into the *linear*
+  // index range, matching `part()`, so the split needs no per-axis structure.
+  //
+  // ## How the split is chosen
+  //
+  // Per call, with `G` external grid points and a quadrature volume `Q = prod(grid_size)`:
+  //
+  //     S = G * Q                                   (kernel evaluations in this map)
+  //     r = clamp(S / quantum, 1, min(n_ranks, G))  (how many ranks to spread it over)
+  //     owners = the r least-loaded ranks
+  //
+  // Inside a batch, `quantum` is the **fill threshold**, not a launch-overhead threshold: below
+  // roughly 5e4 evaluations these register-heavy kernels do not occupy a modern device anyway, so
+  // splitting further buys nothing and costs a launch plus a gather. Deriving it from launch cost
+  // (~1e3 evaluations) would oversplit by two orders of magnitude.
+  //
+  // The practical consequence is the one that matters for load balance: a **cheap flow is assigned
+  // whole** to the least-loaded rank rather than chopped into slivers, so a block of many small
+  // flows spreads across ranks instead of every rank doing a sliver of every flow.
+  //
+  // That reasoning is an argument about *opportunity cost*, and it holds only while there are other
+  // maps to take the ranks this one leaves out. Outside a `DeferredMaps` scope there are none:
+  // `map()` flushes on return, so the map is the whole batch and every rank without a slice sits in
+  // the `Allgatherv` until the owners finish. There the fill threshold gives away ranks for nothing,
+  // and the threshold that applies is instead `internal::launch_threshold` -- a slice must still
+  // cover the launch that computes it, and that is the only remaining constraint. `set_batched()`
+  // is how the scheduler learns which case it is in. An explicit user override wins over both.
+  //
+  // ## Mixed device and host models
+  //
+  // A rank holds two independent resources -- its GPU and its share of the node's cores -- and both
+  // `r` and the ownership choice are made against the one the calling integrator actually uses.
+  // `r` follows from that space's fill threshold (a device is saturated by its resident threads, a
+  // host by workers x a grain), and the slices are charged to a **separate per-resource budget**, so
+  // a rank that has just taken a large TBB flow is still the natural home for the next GPU flow.
+  //
+  // That is what makes a model mixing `GPU_exec` and `TBB_exec` integrators use both at once rather
+  // than merely correctly: within a `DeferredMaps` scope the device path launches asynchronously and
+  // returns, so a host map issued after it runs concurrently with it, and each resource is levelled
+  // across ranks on its own. What the budgets deliberately do *not* do is convert between the two --
+  // there is no exchange rate at which a device evaluation equals a host one, and assuming one is
+  // exactly the mistake a single shared budget makes.
+  //
+  // Two limits remain, and both are outside this class. Within one resource the weight per
+  // evaluation is 1, so flows with equal `S` but different per-evaluation cost still mis-weigh.
+  // And the overlap only exists inside a deferral scope: a host map
+  // issued with deferral off flushes -- and therefore synchronises every rank -- before the device
+  // work behind it can catch up.
+  //
+  // ## Determinism
+  //
+  // Every rank runs the same program and issues the same sequence of `map()` calls, so a schedule
+  // that is a pure function of that sequence is identical on all ranks without any communication.
+  // The running per-rank load is part of that state and is reset by `complete()`. A plan checksum
+  // is verified inside `complete()`; a mismatch aborts the job rather than hanging it.
   class MapScheduler
   {
   public:
+    /// The process-wide scheduler.
     static MapScheduler &instance();
 
     /// Whether there is more than one rank to schedule over. False in a serial run, which makes
     /// every method below a no-op and the whole feature zero-overhead.
     bool active() const { return m_n_ranks > 1; }
 
+    /// This process's rank in comm().
     uint rank() const { return m_rank; }
+    /// Number of ranks in comm().
     uint n_ranks() const { return m_n_ranks; }
+    /// The communicator maps are distributed over (MPI_COMM_WORLD).
     MPI_Comm comm() const { return m_comm; }
 
     /**
@@ -244,6 +268,7 @@ namespace DiFfRG
     /// rank-local "is a result still staged" test, which ranks would answer differently.
     bool plan_contains(size_t integrator_id) const;
 
+    /// Whether any map() has been registered since the last complete().
     bool has_open_plan() const { return !m_plan.empty(); }
 
     /**
@@ -276,6 +301,7 @@ namespace DiFfRG
     void set_quantum(double quantum);
     /// The explicit override, or 0 when the automatic defaults are in force.
     double quantum() const { return m_quantum_override; }
+    /// Log every schedule to the console.
     void set_verbose(bool verbose) { m_verbose = verbose; }
 
   protected:

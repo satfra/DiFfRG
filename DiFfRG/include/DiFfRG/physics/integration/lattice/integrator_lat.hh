@@ -94,19 +94,45 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief Sums a kernel over the momenta of a d-dimensional periodic lattice, d = 1..4.
+   * @brief Sums a kernel over the momenta of a periodic lattice in \f$d = 1,\ldots,4\f$ dimensions.
    *
-   *     result = constant(args...) + 1/prod_i(N_i a_i) sum_{n} kernel(q_0, ..., q_{d-1}, args...)
+   * \f[
+   *   I = \texttt{constant}(\ldots) + \frac{1}{\prod_i N_i a_i} \sum_{n} K(q_0, \ldots, q_{d-1}, \ldots)\,,
+   *   \qquad q_i = \frac{2\pi n_i}{N_i a_i}\,,
+   * \f]
+   * where \f$n_i = -N_i/2, \ldots, N_i/2 - 1\f$ runs over the first Brillouin zone. Axis 0 is the temporal one, with
+   * \f$N_0 = N_t\f$ points and spacing \f$a_0 = a_t\f$; every further axis is spatial, with \f$N_s\f$ and \f$a_s\f$.
+   * \f$N_t\f$ and \f$N_s\f$ must be even. There is no RG scale or cutoff: the lattice alone sets the momenta.
    *
-   * with q_i = 2 pi n_i / (N_i a_i) and n_i in the first Brillouin zone. Axis 0 has extent N_t and
-   * spacing a_t, every further axis N_s and a_s; see internal::LatticeGrid for which axes are halved
-   * and what that assumes about the kernel.
+   * To halve the cost, the spatial axes are summed only over \f$n_i = 0, \ldots, N_i/2\f$ with doubled weights for the
+   * interior points, so **the kernel must be even in each spatial \f$q_i\f$**. The temporal axis is halved the same way
+   * only if `q0_symmetric` is set, which requires the kernel to be even in \f$q_0\f$ too.
    *
-   * map() is distributed over MPI ranks by MapScheduler, exactly like the quadrature integrators.
+   * Kernel interface:
+   * - get(): `KERNEL::kernel(q0, ..., q_{d-1}, args...)` and `KERNEL::constant(args...)`
+   * - map(): `KERNEL::kernel(q0, ..., q_{d-1}, pos..., args...)` and `KERNEL::constant(pos..., args...)`
    *
-   * @tparam d number of lattice dimensions
+   * map() is distributed over MPI ranks like that of QuadratureIntegrator. map_points() is not provided.
+   *
+   * Example:
+   * @code
+   * struct MyKernel { // even in every q_i
+   *   static KOKKOS_FORCEINLINE_FUNCTION double kernel(const double q0, const double q1, const double m2)
+   *   {
+   *     return 1. / (q0 * q0 + q1 * q1 + m2);
+   *   }
+   *   static KOKKOS_FORCEINLINE_FUNCTION double constant(const double) { return 0.; }
+   * };
+   *
+   * // N_t = 16, N_s = 32, a_t = a_s = 0.1, kernel even in q0
+   * DiFfRG::IntegratorLat2D<double, MyKernel, DiFfRG::GPU_exec> integrator({16, 32}, {0.1, 0.1}, true);
+   * double result;
+   * integrator.get(result, m2);
+   * @endcode
+   *
+   * @tparam d number of lattice dimensions, 1 to 4
    * @tparam NT numerical type of the result
-   * @tparam KERNEL provides static `kernel(q_0, ..., q_{d-1}, args...)` and `constant(args...)`
+   * @tparam KERNEL kernel to be summed, providing static `kernel` and `constant`
    * @tparam ExecutionSpace GPU_exec, KokkosHost_exec or TBB_exec
    */
   template <int d, typename NT, typename KERNEL, typename ExecutionSpace>
@@ -120,6 +146,11 @@ namespace DiFfRG
     /// (N_t) and (a_t) for d == 1, (N_t, N_s) and (a_t, a_s) otherwise.
     static constexpr size_t n_extents = d == 1 ? 1 : 2;
 
+    /**
+     * @param grid_size number of lattice points, \f$(N_t)\f$ for d = 1, \f$(N_t, N_s)\f$ otherwise; each even
+     * @param a lattice spacings, \f$(a_t)\f$ for d = 1, \f$(a_t, a_s)\f$ otherwise
+     * @param q0_symmetric whether the kernel is even in \f$q_0\f$, which halves the temporal sum
+     */
     IntegratorLat(const std::array<uint, n_extents> grid_size, const std::array<ctype, n_extents> a,
                   const bool q0_symmetric = false)
         : IntegratorLat(ExecutionSpace(), grid_size, a, q0_symmetric)
@@ -127,9 +158,10 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Construct from /integration/lattice/{N_t, N_s, a_t, a_s, q0_symmetric}, as generated flows do.
+     * @brief Construct from the parameter file, as generated flows do.
      *
-     * d == 1 reads only N_t and a_t. q0_symmetric is optional and defaults to false.
+     * Reads `/integration/lattice/N_t`, `N_s`, `a_t`, `a_s` (all required; d = 1 reads only `N_t` and `a_t`) and
+     * `/integration/lattice/q0_symmetric` (optional, default false).
      */
     IntegratorLat(QuadratureProvider &quadrature_provider, const ConfigTree &config)
         : IntegratorLat(quadrature_provider.template next_execution_space<ExecutionSpace>(), config_sizes(config),
@@ -137,22 +169,26 @@ namespace DiFfRG
     {
     }
 
+    /// Set the lattice spacings, \f$(a_t)\f$ for d = 1, \f$(a_t, a_s)\f$ otherwise.
     void set_a(const std::array<ctype, n_extents> a)
     {
       m_a = a;
       m_grid = make_grid();
     }
+    /// Set whether the kernel is even in \f$q_0\f$, which halves the temporal sum.
     void set_q0_symmetric(const bool symmetric)
     {
       m_q0_symmetric = symmetric;
       m_grid = make_grid();
     }
 
+    /// Number of lattice points, \f$(N_t)\f$ for d = 1, \f$(N_t, N_s)\f$ otherwise.
     const std::array<uint, n_extents> &grid_size() const { return m_grid_size; }
 
     /// Lattice points visited per external grid point. The scheduler's cost score.
     size_t quadrature_volume() const { return m_grid.size(); }
 
+    /// Compute the sum for the arguments `t...` and write it to `dest`. Blocks until the result is there.
     template <typename... T>
       requires internal::accepts_args<NT, KERNEL, ctype, d, T...>
     void get(NT &dest, const T &...t) const
@@ -265,6 +301,11 @@ namespace DiFfRG
           });
     }
 
+    /**
+     * @brief Compute the sum at every point of `coordinates`, writing point i to `dest[i]`.
+     *
+     * Distributed over MPI ranks; every rank must call it, in the same order. See QuadratureIntegrator::map().
+     */
     template <typename OT, typename Coordinates, typename... Args>
       requires internal::is_map_result<OT, NT>
     auto map(OT *dest, const Coordinates &coordinates, const Args &...args)
@@ -444,6 +485,8 @@ namespace DiFfRG
     }
   };
 
+  /// @name Lattice integrators of fixed dimension
+  /// @{
   template <typename NT, typename KERNEL, typename ExecutionSpace>
   using IntegratorLat1D = IntegratorLat<1, NT, KERNEL, ExecutionSpace>;
   template <typename NT, typename KERNEL, typename ExecutionSpace>
@@ -452,4 +495,5 @@ namespace DiFfRG
   using IntegratorLat3D = IntegratorLat<3, NT, KERNEL, ExecutionSpace>;
   template <typename NT, typename KERNEL, typename ExecutionSpace>
   using IntegratorLat4D = IntegratorLat<4, NT, KERNEL, ExecutionSpace>;
+  /// @}
 } // namespace DiFfRG

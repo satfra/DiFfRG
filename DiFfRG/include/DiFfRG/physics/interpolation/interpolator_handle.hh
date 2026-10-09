@@ -12,16 +12,17 @@
 namespace DiFfRG
 {
   /**
-   * @brief Whether T hands kernels a compact handle of itself, via `t.handle<ctype>()`.
+   * @brief Whether T provides a compact read-only view of itself for kernels, via `t.handle<ctype>()`.
    *
-   * A handle is what an integrator passes to a kernel in place of the interpolator: read-only
-   * views of the device and host buffers plus the coordinates, in the precision ctype the kernel
-   * computes in. It carries no Kokkos bookkeeping and no copy in the other precision, which keeps
-   * the launch arguments small (they go through the 32 kB of constant memory a CUDA launch has).
+   * When an interpolator is passed as an argument to an integrator, the kernel receives this handle instead of the
+   * interpolator: the same index(), at() and operator(), with the data in the precision ctype the kernel computes in.
+   * Kernels should therefore take interpolator arguments as `const auto &`.
    *
-   * A class deriving from an interpolator inherits handle(). If it changes what the interpolator
-   * returns, it has to shadow handle() as well, or kernels taking handles bypass the change.
+   * A class deriving from an interpolator inherits handle(). If it changes what the interpolator returns, it has to
+   * override handle() as well, or kernels bypass the change.
    */
+  // Handles hold raw pointers and no Kokkos bookkeeping, keeping launch arguments small (CUDA passes them through
+  // 32 kB of constant memory).
   template <typename T>
   concept has_kernel_handle = requires(const T &t) {
     t.template handle<float>();
@@ -37,6 +38,7 @@ namespace DiFfRG
       return (t);
   }
 
+  /// The type a kernel computing in ctype receives for an argument of type T.
   template <typename T, typename ctype>
   using kernel_handle_t = std::remove_cvref_t<decltype(to_kernel_handle<ctype>(std::declval<const T &>()))>;
 
@@ -91,9 +93,9 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief An interpolator's single-precision twin: value type and coordinates, see
-   * SplineInterpolator1D. It exists only for double (or complex double) data on coordinates that
-   * rebind_ctype can turn into float.
+   * @brief Value type and coordinates of an interpolator's single-precision copy, read by single-precision kernels.
+   *
+   * The copy exists only for double (or complex double) data on coordinates that rebind_ctype can turn into float.
    */
   template <typename NT, typename Coordinates> struct SinglePrecisionTwin {
     using value_type = get_type::single_precision<NT>;

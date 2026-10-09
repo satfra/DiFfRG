@@ -71,8 +71,10 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief What a kernel receives in place of a SplineInterpolator1DStack: read-only views of its
-   * device and host buffers plus its coordinates, in one precision. See has_kernel_handle.
+   * @brief Read-only view of a SplineInterpolator1DStack, as passed to integration kernels.
+   *
+   * Obtained from SplineInterpolator1DStack::handle(); offers the same index(), at() and operator(). See
+   * has_kernel_handle.
    */
   template <typename NT, typename Coordinates, typename Layout> class SplineInterpolator1DStackHandle
   {
@@ -114,14 +116,22 @@ namespace DiFfRG
   };
 
   /**
-   * @brief A stack of 1D splines, callable from host AND device code.
+   * @brief A stack of 1D cubic splines \f$f(s, x)\f$, usable in host and device code.
    *
-   * Linear in the stack axis, spline in the data axis. See LinearInterpolator1D for the
-   * host/device dispatch rationale. Like SplineInterpolator1D, a double-precision interpolator keeps
-   * a single-precision copy for single-precision kernels.
+   * Axis 0 is the stack variable \f$s\f$ (e.g. a Matsubara frequency), axis 1 the spline variable \f$x\f$ (e.g. a
+   * spatial momentum); calls take them in that order, `f(s, x)`. Each row of fixed \f$s\f$ is a cubic spline in the
+   * grid index of \f$x\f$, as in SplineInterpolator1D; between rows the result is interpolated linearly.
    *
-   * @tparam NT input data type
-   * @tparam Coordinates coordinate system of the input data
+   * Outside the grid the boundary values are used; how an \f$s\f$ beyond the stack is handled is up to the
+   * coordinate system (the finite-temperature systems, e.g. BosonicCoordinates1DFiniteT, fold \f$s \to |s|\f$ when the
+   * stack starts at 0 and move the excess frequency into the momentum). The spline axis needs at least 2 points;
+   * periodic axes are not supported.
+   *
+   * The data is zero after construction; set it with update(). Host and device copies are kept in sync. A
+   * double-precision interpolator also keeps a single-precision copy for single-precision kernels (see handle()).
+   *
+   * @tparam NT value type of the data (real, complex or autodiff)
+   * @tparam Coordinates 2D coordinate system: a CoordinatePackND of two 1D systems or a finite-temperature system
    */
   template <typename NT, typename Coordinates> class SplineInterpolator1DStack
   {
@@ -152,7 +162,7 @@ namespace DiFfRG
     static constexpr size_t dim = 2;
 
     /**
-     * @brief Construct a SplineInterpolator1DStack with zeroed data and a coordinate system.
+     * @brief Allocate zeroed data on the grid of `coordinates`.
      *
      * @param coordinates coordinate system of the data
      */
@@ -182,16 +192,23 @@ namespace DiFfRG
       }
     }
 
-    /// Shallow copy of ALL views, valid in host and in device code. See LinearInterpolator1D.
+    /// Shallow copy: the copy shares the data, so later update() calls are seen by both.
     KOKKOS_DEFAULTED_FUNCTION SplineInterpolator1DStack(const SplineInterpolator1DStack &) = default;
 
     /**
-     * @brief Replace the data, leaving host AND device current. The only mutator.
+     * @brief Replace the data and recompute the splines. Host and device copies are both current when this returns.
      *
-     * `in_data` is row-major; the fill indexes the mirror through operator(), which keeps that
-     * contract independent of the mirror's own layout. See LinearInterpolator1D::update() for why
-     * the host fill is a plain loop and why the single trailing fence is not optional.
+     * The end conditions are first derivatives \f$df/di\f$ with respect to the grid index of \f$x\f$ (not to
+     * \f$x\f$), the same for every row. A value left at its default (or not finite) gives a natural boundary
+     * condition, \f$f'' = 0\f$, at that end.
+     *
+     * @param in_data values in row-major order `[s][x]`: `in_data[i * n1 + j]` for stack index i and spline grid point
+     * j, with `n1 = get_coordinates().sizes()[1]`; converted to NT
+     * @param lower_y1 derivative \f$df/di\f$ at the first spline grid point
+     * @param upper_y1 derivative \f$df/di\f$ at the last spline grid point
      */
+    // Filled element-wise: the views' storage layout need not be row-major. See
+    // LinearInterpolator1D::update() for the copy and fence.
     template <typename NT2>
     void update(const NT2 *in_data, const ctype lower_y1 = std::numeric_limits<ctype>::max(),
                 const ctype upper_y1 = std::numeric_limits<ctype>::max())
@@ -228,8 +245,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief The compact view of this interpolator a kernel computing in CT receives, see
-     * has_kernel_handle: the single-precision copy for a float kernel, the data itself otherwise.
+     * @brief The read-only view a kernel computing in precision CT receives (see has_kernel_handle).
+     *
+     * For CT = float and double data this reads the single-precision copy, otherwise the data itself.
      */
     template <typename CT> auto handle() const
     {
@@ -244,27 +262,20 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Host-side element access, in the row-major order update() takes its input in.
+     * @brief Value at flat row-major index i, the order update() takes (host only).
      */
     NT operator[](size_t i) const { return host_values(i / sizes[1], i % sizes[1]); }
 
     /**
-     * @brief Map physical coordinates onto grid indices.
+     * @brief Fractional grid indices of the point (s, x), i.e. Coordinates::backward(s, x).
      *
-     * Split out of operator() because it is the expensive half: Coordinates::backward is a fp64
-     * log/log1p per logarithmic axis, ~200 fp64 instructions each on current NVIDIA parts against
-     * ~10 for the interpolation. A generated kernel evaluating several dressings at the SAME point
-     * otherwise pays it once per dressing -- the compiler cannot CSE it, because each interpolator
-     * owns its own `coordinates` members and cannot be proven to agree with another's.
+     * `f(s, x) == f.at(f.index(s, x))`. Several interpolators on the same coordinate system can share one index()
+     * call, which saves the (possibly expensive) coordinate transform.
      *
-     * Depends only on the coordinate system, so the result may be shared across interpolators that
-     * share one. Clamping and stencil resolution stay in at(), since they are size dependent and
-     * would otherwise make an index untransferable between interpolators of different extent.
-     *
-     * The return type is spelled out rather than deduced: nvcc loses `decltype(var)` when the
-     * initializer has a deduced return type inside a class-template member, and the consumer stores
-     * this in a `const auto`.
+     * @param s stack variable
+     * @param x spline variable
      */
+    // Return type spelled out: nvcc loses decltype(var) of a deduced return type inside a class-template member.
     device::array<typename Coordinates::ctype, 2> KOKKOS_FUNCTION
     index(const typename Coordinates::ctype s, const typename Coordinates::ctype x) const
     {
@@ -272,7 +283,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Interpolate at grid indices previously obtained from index().
+     * @brief Interpolate at fractional grid indices, as returned by index().
+     *
+     * @param raw fractional grid indices {stack, spline}; out-of-range values are clamped
      */
     NT KOKKOS_FUNCTION at(const device::array<typename Coordinates::ctype, 2> &raw) const
     {
@@ -281,7 +294,10 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Interpolate the data at a given point.
+     * @brief Interpolate the data at the point (s, x).
+     *
+     * @param s stack variable
+     * @param x spline variable
      */
     NT KOKKOS_FUNCTION operator()(const typename Coordinates::ctype s,
                                   const typename Coordinates::ctype x) const
@@ -297,10 +313,9 @@ namespace DiFfRG
     const Coordinates &get_coordinates() const { return coordinates; }
 
     /**
-     * @brief Read-only handle to the host values, in the mirror's storage order.
+     * @brief Pointer to the host copy of the values (read-only).
      *
-     * NOTE the storage order is NOT the row-major order update() takes: the device view is pinned
-     * to GPU_memory, hence LayoutLeft. Use operator[] for row-major access.
+     * The storage order depends on the backend and need not be row-major; use operator[] for row-major access.
      */
     const NT *data() const { return host_values.data(); }
 

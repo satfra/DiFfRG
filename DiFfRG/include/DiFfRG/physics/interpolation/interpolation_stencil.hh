@@ -13,20 +13,21 @@ namespace DiFfRG
    * @brief The two grid indices and the interpolation weight for one axis of a linear interpolation.
    */
   template <typename CT> struct InterpolationStencil {
-    size_t lower, upper;
-    CT t;
+    size_t lower, upper; ///< neighbouring grid indices
+    CT t;                ///< weight of `upper`, in [0, 1]
   };
 
   /**
    * @brief Resolve a fractional grid index into the linear-interpolation stencil along one axis.
    *
    * For a non-periodic axis the index is clamped to [0, n-1] and the stencil is [lower, lower+1] with lower <= n-2,
-   * i.e. evaluations outside the grid are constant-extrapolated from the boundary cell.
+   * so points outside the grid get the boundary value. Requires n >= 2.
    *
    * For a periodic axis no clamping happens - the coordinate's backward() has already folded the index into [0, n) -
    * and the upper index wraps around to 0 in the last cell, which closes the grid across the seam.
    *
    * @tparam periodic whether the axis is periodic, see is_periodic_coordinate_v / is_periodic_axis_v
+   * @tparam CT floating-point type of the index
    * @param idx fractional grid index, as returned by Coordinates::backward
    * @param n number of grid points along the axis
    */

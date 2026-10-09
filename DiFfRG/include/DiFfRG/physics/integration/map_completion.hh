@@ -27,40 +27,24 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief Deferred landing of QuadratureIntegrator::map() results in host memory.
+   * @brief Registry of map() results that are computed but not yet copied to their destination.
    *
-   * Why this exists. `map()` used to finish with
+   * Outside a DeferredMaps scope this is invisible: every integrator's map() returns with the result in `dest`.
+   * Inside a scope, device results wait in page-locked buffers and host maps wait in a queue until flush() (called
+   * when the scope ends, or via flush_maps()) runs the queued work, fences and copies everything into place. User
+   * code normally only needs DeferredMaps and flush_maps().
    *
-   *     Kokkos::deep_copy(space, dest_view, dest_device_view);
-   *
-   * where `dest_view` wraps caller memory — a `dealii::Vector` element range, i.e. ordinary
-   * *pageable* host memory. A device-to-pageable `cudaMemcpyAsync` is not actually asynchronous:
-   * the driver has to stage it, so the call blocks until the copy (and therefore the kernels
-   * feeding it) has completed. Measured on a YangMills solve: `cudaMemcpyAsync` totalled 15.933 s
-   * against 15.966 s of kernel time — the host sat inside that copy for essentially the entire
-   * GPU execution. The consequence is that there is **zero host run-ahead**: the GPU drains after
-   * every one of the ~3400 map() calls, and all host preparation for the next flow is exposed as
-   * GPU idle time. On a part where the kernels are slow (an RTX 4070) that costs a few percent;
-   * on one where they are ~6x faster (an A100) it is over half the wall clock.
-   *
-   * The fix is to copy into a *pinned* staging buffer instead, which really is asynchronous, and
-   * to defer the final pinned->caller memcpy until someone needs the numbers. Integrators register
-   * that pending copy here; `flush()` fences once and lands all of them together.
-   *
-   * Deferral is **opt-in and scoped**, via DeferredMaps. Outside such a scope `map()` keeps its
-   * original contract — the result is in `dest` when it returns — so every existing caller (tests,
-   * Examples, downstream models) is unaffected. That matters because the failure mode of a silent
-   * contract change here is not a compile error but wrong numbers.
-   *
-   * Inside a DeferredMaps scope the caller promises not to read any `dest` until the scope ends
-   * (or it calls flush_maps() itself). Use it around a run of *independent* flows.
-   *
-   * Not thread safe: the flow evaluation path is single-threaded (the parallelism lives inside the
-   * Kokkos kernels), and this registry is only touched from it.
+   * Not thread safe; only call it from the thread that issues the maps.
    */
+  // Why results are staged: copying device results straight into caller memory (pageable, e.g. a
+  // dealii::Vector) blocks until the kernels feeding it are done, so the host could never run ahead
+  // of the GPU. Measured on a YangMills solve, the host sat in that copy for essentially the whole
+  // GPU time. A copy into pinned memory is truly asynchronous; the final pinned -> caller memcpy is
+  // deferred to flush().
   class MapCompletion
   {
   public:
+    /// A staged result still to be copied: `bytes` bytes from `src` to `dst`.
     struct PendingCopy {
       void *dst;
       const void *src;
@@ -85,8 +69,8 @@ namespace DiFfRG
      * but the device idling once its queue drains.
      *
      * Deferring removes the trap. `flush()` runs this queue **before** it fences, so the host work
-     * happens while the device work already issued is still running, and the caller no longer has
-     * to know that interleaving `GPU, CPU, GPU` is slower than `GPU, GPU, CPU`.
+     * happens while the device work already issued is still running, whatever order the caller
+     * issued device and host maps in.
      *
      * The job owns copies of everything it needs (`std::function` requires a copy-constructible
      * target, which every kernel argument is), so it does not depend on the caller's locals still
@@ -157,6 +141,7 @@ namespace DiFfRG
      * @brief Whether the caller has opened a DeferredMaps scope.
      */
     static bool deferral_enabled() { return deferral(); }
+    /// Turn deferral on or off; DeferredMaps does this for you.
     static void set_deferral(const bool enabled)
     {
       deferral() = enabled;
@@ -193,13 +178,14 @@ namespace DiFfRG
    * @brief Scope in which map() results are landed lazily instead of one blocking copy per call.
    *
    * Wrap a run of flows that do not read each other's results:
-   *
-   *     {
-   *       DeferredMaps defer;
-   *       flows.ZA4.map(&residual[idxv("ZA4")], coords, args);
-   *       flows.ZA3.map(&residual[idxv("ZA3")], coords, args);
-   *       ...
-   *     } // one fence here, then all results land
+   * @code
+   * {
+   *   DeferredMaps defer;
+   *   flows.ZA4.map(&residual[idxv("ZA4")], coords, args);
+   *   flows.ZA3.map(&residual[idxv("ZA3")], coords, args);
+   *   ...
+   * } // one fence here, then all results land
+   * @endcode
    *
    * Inside the scope the host keeps issuing work instead of blocking on each result, so the GPU
    * does not drain between flows. Reading any of the destinations before the scope closes is a
@@ -212,8 +198,7 @@ namespace DiFfRG
    * two totals, not their sum. Without the queue, a host map placed between two device maps would
    * stall the second launch until it finished.
    *
-   * Non-reentrant by design: a nested scope would flush at the inner closing brace and surprise
-   * the outer one, so nesting is not supported.
+   * Do not nest scopes: the inner one would flush at its closing brace.
    */
   class DeferredMaps
   {

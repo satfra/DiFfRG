@@ -17,19 +17,24 @@ namespace DiFfRG
   namespace LoopIntegrals
   {
     /**
-     * @brief Performs the integral
-     * \f[
-     *    \int d\Omega_{d} \int_0^\infty dq f(q^2) q^{d-1}
-     * \f]
+     * @brief Integrates a function of \f$q^2\f$ over a \f$d\f$-dimensional momentum, up to a cutoff.
      *
-     * @tparam NT Number type used throughout.
-     * @tparam d Dimension of the integral.
-     * @tparam FUN Function type of the integrand.
-     * @param fun Integrand, should be a callable with signature NT(double q^2).
-     * @param x_quadrature Quadrature rule for the integral over \f$q^2\f$, \f$q^2 = x * k^2\f$.
-     * @param x_extent Extent of the integral over \f$q^2\f$, \f$q^2 = x * k^2\f$.
-     * @param k Momentum scale as defined above.
-     * @return NT Result of the integral.
+     * \f[
+     *   \int_{|q| < q_\text{max}} \frac{d^dq}{(2\pi)^d}\, f(q^2) = \frac{S_d}{(2\pi)^d} \int_0^{q_\text{max}} dq\,
+     *   q^{d-1} f(q^2)\,, \qquad q_\text{max} = \sqrt{x_\text{extent}}\, k\,,
+     * \f]
+     * where \f$S_d = 2\pi^{d/2}/\Gamma(d/2)\f$ is the surface of the unit sphere in \f$d\f$ dimensions.
+     *
+     * Runs on the host, serially, so that the result is reproducible bit by bit.
+     *
+     * @tparam NT number type of the result
+     * @tparam d dimension, \f$d > 0\f$
+     * @tparam FUN callable `NT(double q2)`
+     * @param fun integrand \f$f(q^2)\f$
+     * @param x_quadrature quadrature rule on \f$[0, 1]\f$, applied to \f$q / q_\text{max}\f$
+     * @param x_extent \f$q_\text{max}^2 / k^2\f$
+     * @param k momentum scale
+     * @return the integral
      */
     template <typename NT, int d, typename FUN>
     NT integrate(const FUN &fun, const QGauss<1> &x_quadrature, const double x_extent, const double k)

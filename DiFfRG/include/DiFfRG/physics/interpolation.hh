@@ -1,5 +1,37 @@
 #pragma once
 
+/**
+ * @file interpolation.hh
+ * @brief Interpolators for data on a grid, e.g. momentum-dependent couplings fed into integration kernels.
+ *
+ * Available interpolators:
+ * - LinearInterpolator1D, LinearInterpolator2D, LinearInterpolator3D (or LinearInterpolatorND, chosen by dimension):
+ *   (multi-)linear interpolation. Supports periodic axes.
+ * - PeriodicCubicInterpolator3D: as LinearInterpolator3D, but cubic (and smooth) along periodic axes.
+ * - SplineInterpolator1D: cubic spline in one variable.
+ * - SplineInterpolator1DStack: one cubic spline in \f$x\f$ per value of a second, stacked variable \f$s\f$ (e.g. a
+ *   Matsubara frequency), linear between them; called as `f(s, x)`.
+ *
+ * All of them are used the same way:
+ * - Construct from a coordinate system (discretization/coordinates/), which defines the grid. The data starts at zero.
+ * - Set the data with `update(ptr)`: `ptr` points to `coordinates.size()` values, row-major for more than one axis
+ *   (the last axis runs fastest).
+ * - Evaluate with `f(x...)` on host or device. Outside the grid the boundary value is used; periodic axes wrap.
+ * - To use one in an integration kernel, pass it as an argument to the integrator's get()/map(); the kernel should
+ *   take it as `const auto &` and receives a lightweight read-only handle with the same call operator (see
+ *   has_kernel_handle).
+ *
+ * @code
+ * LogarithmicCoordinates1D<double> coords(64, 1e-3, 40., 2.); // 64 points, p in [1e-3, 40], bias 2
+ * SplineInterpolator1D<double, LogarithmicCoordinates1D<double>> Z(coords);
+ * std::vector<double> values(coords.size());
+ * for (size_t i = 0; i < coords.size(); ++i)
+ *   values[i] = 1. + coords.forward(i); // data at the grid points
+ * Z.update(values.data());
+ * const double z = Z(0.5); // interpolated value at p = 0.5
+ * @endcode
+ */
+
 #include <DiFfRG/common/kokkos.hh>
 #include <DiFfRG/common/types.hh>
 
@@ -15,8 +47,8 @@ namespace DiFfRG
   };
 
   /**
-   * @brief Checks that an interpolator class provides the required methods (get_coordinates) and a
-   * call operator with the correct arity.
+   * @brief Checks that an interpolator class provides get_coordinates() and a call operator taking `T::dim`
+   * coordinates.
    */
   template <typename T>
   concept has_interpolator_methods = has_interpolator_types<T> && requires(T t) {
@@ -25,14 +57,14 @@ namespace DiFfRG
   };
 
   /**
-   * @brief A concept for what is an interpolator class
+   * @brief What makes a type an interpolator.
    *
-   * An interpolator class must provide the following methods:
-   * - get_coordinates(): returns the coordinates object used for the interpolation
-   * - operator()(x...): interpolates at a point, callable from host AND device code
-   *
-   * The interpolator class must also define the following type aliases:
-   * - value_type: the type of the values being interpolated
+   * Required members:
+   * - `value_type`: type of the interpolated values
+   * - `ctype`: type of the coordinates
+   * - `dim`: number of coordinates
+   * - `get_coordinates()`: the coordinate system of the grid
+   * - `operator()(x_1, ..., x_dim)`: the interpolated value at a point
    *
    * @tparam T The type to check
    */

@@ -8,38 +8,69 @@
 #include <DiFfRG/common/kokkos.hh>
 #include <DiFfRG/common/utils.hh>
 
+/**
+ * @file regulators.hh
+ * @brief Momentum regulators for bosons and fermions.
+ *
+ * All regulators share one interface and one set of conventions. With the RG scale \f$k\f$, the momentum \f$q\f$
+ * and \f$x = q^2/k^2\f$, each regulator provides
+ * - `RB(k2, q2)` \f$= R_B = q^2\, r_B(x)\f$, the bosonic regulator,
+ * - `RBdot(k2, q2)` \f$= \partial_t R_B\f$, with \f$t = \ln k\f$ and \f$q^2\f$ held fixed,
+ * - `RF(k2, q2)` \f$= R_F = q\, r_F(x)\f$, the fermionic regulator, defined by \f$1 + r_F = \sqrt{1 + r_B}\f$, i.e.
+ *   \f$R_F = \sqrt{R_B + q^2} - q\f$,
+ * - `RFdot(k2, q2)` \f$= \partial_t R_F\f$,
+ * - `dq2RB(k2, q2)` \f$= \partial R_B / \partial q^2\f$ and `dq2RF(k2, q2)` \f$= \partial R_F / \partial q^2\f$, where
+ *   available (see the individual regulators).
+ *
+ * Note that the arguments are the squares \f$k^2\f$ and \f$q^2\f$. All functions are static, usable in host and device
+ * code, and templated on the two argument types, so they also accept e.g. autodiff or single-precision arguments.
+ *
+ * Parameters are passed through an options struct. To change one, derive from the default options:
+ * @code
+ * struct MyOpts : DiFfRG::ExponentialRegulatorOpts {
+ *   static constexpr int b = 3;
+ * };
+ * using Regulator = DiFfRG::ExponentialRegulator<MyOpts>;
+ * const double r = Regulator::RB(k * k, q * q);
+ * @endcode
+ */
+
 namespace DiFfRG
 {
   /**
-   * @brief Implements the Litim regulator, i.e.
+   * @brief The Litim (flat) regulator.
+   *
    * \f[
-   *  R_B(k^2,q^2) = (k^2 - q^2) \Theta(k^2 - q^2)
+   *  R_B = (k^2 - q^2)\, \Theta(k^2 - q^2)\,, \qquad \partial_t R_B = 2 k^2\, \Theta(k^2 - q^2)\,.
    * \f]
    *
-   * Provides the following functions:
-   * - RB(k2, q2) = \f$ p^2 r_B(k^2,p^2) \f$
-   * - RBdot(k2, q2) = \f$ \partial_t R_B(k^2,p^2) \f$
-   * - RF(k2, q2) = \f$ p r_F(k^2,p^2) \f$
-   * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
+   * Provides `RB`, `RBdot`, `RF` and `RFdot`, see regulators.hh for the conventions. `dq2RB` and `dq2RF` are not
+   * available: \f$R_B\f$ has a kink at \f$q = k\f$.
+   *
+   * @tparam Dummy unused; it only makes `LitimRegulator<>` a template like the other regulators.
    */
   template <class Dummy = void> struct LitimRegulator {
+    /// \f$R_B\f$ at \f$k^2\f$ = `k2`, \f$q^2\f$ = `q2`.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RB(const NT1 k2, const NT2 q2)
     {
       return (k2 - q2) * (k2 > q2);
     }
 
+    /// \f$\partial_t R_B\f$, \f$t = \ln k\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RBdot(const NT1 k2, const NT2 q2)
     {
       using T = std::decay_t<decltype(k2 * q2)>;
       return T(2) * k2 * (k2 > q2);
     }
 
+    /// \f$R_F = \sqrt{R_B + q^2} - q\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RF(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
       return sqrt(RB(k2, q2) + q2) - sqrt(q2);
     }
 
+    /// \f$\partial_t R_F\f$, \f$t = \ln k\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RFdot(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
@@ -47,39 +78,38 @@ namespace DiFfRG
       return T(0.5) * RBdot(k2, q2) / sqrt(RB(k2, q2) + q2);
     }
 
-    // Give an explicit compile error if a call to dq2RB is made
+    /// Not available for the Litim regulator.
     template <typename NT1, typename NT2> static void dq2RB(const NT1, const NT2) = delete;
   };
 
+  /// Options of BosonicRegulator.
   struct BosonicRegulatorOpts {
+    /// Exponent \f$b\f$ of the regulator (integer).
     static constexpr int b = 2;
   };
   /**
-   * @brief Implements one of the standard exponential regulators, i.e.
+   * @brief Regulator shaped like a Bose distribution.
+   *
    * \f[
-   *   R_B(k^2,q^2) = q^2 \frac{(q^2/k^2)^{b-1}}{\exp((q^2/k^2)^b) - 1}
+   *   R_B = q^2\, \frac{x^{b-1}}{e^{x^b} - 1} = k^2\, \frac{x^b}{e^{x^b} - 1}\,, \qquad x = q^2/k^2\,.
    * \f]
    *
-   * Provides the following functions:
-   * - RB(k2, q2) = \f$ p^2 r_B(k^2,p^2) \f$
-   * - dq2RB(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_B(k^2,p^2) \f$
-   * - RBdot(k2, q2) = \f$ \partial_t R_B(k^2,p^2) \f$
-   * - RF(k2, q2) = \f$ p r_F(k^2,p^2) \f$
-   * - dq2RF(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_F(k^2,p^2) \f$
-   * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
+   * Provides `RB`, `RBdot`, `RF`, `RFdot`, `dq2RB` and `dq2RF`, see regulators.hh for the conventions.
    *
-   * @tparam b The exponent in the regulator.
+   * @tparam OPTS options struct, see BosonicRegulatorOpts: `int b` (default 2).
    */
   template <class OPTS = BosonicRegulatorOpts> struct BosonicRegulator {
     // INTEGER, as in ExponentialRegulator: b is the exponent of powr<b>, a non-type int parameter.
     static constexpr int b = OPTS::b;
 
+    /// \f$R_B\f$ at \f$k^2\f$ = `k2`, \f$q^2\f$ = `q2`.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RB(const NT1 k2, const NT2 q2)
     {
       using Kokkos::expm1;
       return q2 * powr<b - 1>(q2 / k2) / expm1(powr<b>(q2 / k2));
     }
 
+    /// \f$\partial R_B/\partial q^2\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto dq2RB(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -91,6 +121,7 @@ namespace DiFfRG
       return T(b) * powr<b - 1>(q2 / k2) * (mexpm1 - xb * mexp) / powr<2>(mexpm1);
     }
 
+    /// \f$\partial_t R_B\f$, \f$t = \ln k\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RBdot(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -102,12 +133,14 @@ namespace DiFfRG
       return T(2) * k2 * xb * (mexpm1 * T(1 - b) + T(b) * mexp * xb) / powr<2>(mexpm1);
     }
 
+    /// \f$R_F = \sqrt{R_B + q^2} - q\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RF(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
       return sqrt(RB(k2, q2) + q2) - sqrt(q2);
     }
 
+    /// \f$\partial R_F/\partial q^2\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto dq2RF(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
@@ -116,6 +149,7 @@ namespace DiFfRG
       return (T(-1) + q * (T(1) + dq2RB(k2, q2)) / (q + RF(k2, q2))) / (T(2) * q);
     }
 
+    /// \f$\partial_t R_F\f$, \f$t = \ln k\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RFdot(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
@@ -124,31 +158,27 @@ namespace DiFfRG
     }
   };
 
+  /// Options of ExponentialRegulator.
   struct ExponentialRegulatorOpts {
+    /// Exponent \f$b\f$ of the regulator (integer).
     static constexpr int b = 2;
   };
   /**
-   * @brief Implements one of the standard exponential regulators, i.e.
+   * @brief Exponential regulator.
+   *
    * \f[
-   *   R_B(k^2,q^2) = k^2 \exp(-(q^2/k^2)^b)
+   *   R_B = k^2\, e^{-x^b}\,, \qquad x = q^2/k^2\,.
    * \f]
    *
-   * Provides the following functions:
-   * - RB(k2, q2) = \f$ p^2 r_B(k^2,p^2) \f$
-   * - dq2RB(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_B(k^2,p^2) \f$
-   * - RBdot(k2, q2) = \f$ \partial_t R_B(k^2,p^2) \f$
-   * - RF(k2, q2) = \f$ p r_F(k^2,p^2) \f$
-   * - dq2RF(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_F(k^2,p^2) \f$
-   * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
+   * Provides `RB`, `RBdot`, `RF`, `RFdot`, `dq2RB` and `dq2RF`, see regulators.hh for the conventions.
    *
-   * @tparam b The exponent in the regulator.
+   * @tparam OPTS options struct, see ExponentialRegulatorOpts: `int b` (default 2).
    */
   template <class OPTS = ExponentialRegulatorOpts> struct ExponentialRegulator {
-    // INTEGER: every use below goes through powr<b>, whose exponent is a non-type int parameter.
-    // As a double this template never instantiated -- and nothing in the tree instantiated it, so
-    // it never had to.
+    // Integer: every use below goes through powr<b>, whose exponent is a non-type int parameter.
     static constexpr int b = OPTS::b;
 
+    /// \f$R_B\f$ at \f$k^2\f$ = `k2`, \f$q^2\f$ = `q2`.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RB(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -156,6 +186,7 @@ namespace DiFfRG
       return k2 * exp(-xb);
     }
 
+    /// \f$\partial R_B/\partial q^2\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto dq2RB(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -165,6 +196,7 @@ namespace DiFfRG
       return T(-b) * xbm1 * exp(-xb);
     }
 
+    /// \f$\partial_t R_B\f$, \f$t = \ln k\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RBdot(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -173,12 +205,14 @@ namespace DiFfRG
       return T(2) * exp(-xb) * k2 * (T(1) + T(b) * xb);
     }
 
+    /// \f$R_F = \sqrt{R_B + q^2} - q\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RF(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
       return sqrt(RB(k2, q2) + q2) - sqrt(q2);
     }
 
+    /// \f$\partial R_F/\partial q^2\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto dq2RF(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
@@ -187,6 +221,7 @@ namespace DiFfRG
       return (T(-1) + q * (T(1) + dq2RB(k2, q2)) / (q + RF(k2, q2))) / (T(2) * q);
     }
 
+    /// \f$\partial_t R_F\f$, \f$t = \ln k\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RFdot(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
@@ -195,28 +230,28 @@ namespace DiFfRG
     }
   };
 
+  /// Options of SmoothedLitimRegulator.
   struct SmoothedLitimRegulatorOpts {
+    /// Width \f$\alpha\f$ of the smoothed step, in units of \f$x = q^2/k^2\f$.
     static constexpr double alpha = 2e-3;
   };
   /**
-   * @brief Implements one of the standard exponential regulators, i.e.
+   * @brief Litim regulator with the step function replaced by a smooth step of width \f$\alpha\f$.
+   *
    * \f[
-   *   R_B(k^2,q^2) = k^2 \exp(-(q^2/k^2)^b)
+   *   R_B = \frac{k^2 - q^2}{1 + e^{(x - 1)/\alpha}}\,, \qquad x = q^2/k^2\,.
    * \f]
+   * For \f$\alpha \to 0\f$ this becomes the LitimRegulator. Far above \f$q = k\f$, `RBdot` returns exactly 0.
    *
-   * Provides the following functions:
-   * - RB(k2, q2) = \f$ p^2 r_B(k^2,p^2) \f$
-   * - dq2RB(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_B(k^2,p^2) \f$
-   * - RBdot(k2, q2) = \f$ \partial_t R_B(k^2,p^2) \f$
-   * - RF(k2, q2) = \f$ p r_F(k^2,p^2) \f$
-   * - dq2RF(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_F(k^2,p^2) \f$
-   * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
+   * Provides `RB`, `RBdot`, `RF` and `RFdot`, see regulators.hh for the conventions. `dq2RB` and `dq2RF` are not
+   * available.
    *
-   * @tparam b The exponent in the regulator.
+   * @tparam OPTS options struct, see SmoothedLitimRegulatorOpts: `double alpha` (default \f$2\cdot 10^{-3}\f$).
    */
   template <class OPTS = SmoothedLitimRegulatorOpts> struct SmoothedLitimRegulator {
     static constexpr double alpha = OPTS::alpha;
 
+    /// \f$R_B\f$ at \f$k^2\f$ = `k2`, \f$q^2\f$ = `q2`.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RB(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -224,6 +259,7 @@ namespace DiFfRG
       return (k2 - q2) / (T(1) + exp((q2 / k2 - T(1)) / T(alpha)));
     }
 
+    /// \f$\partial_t R_B\f$, \f$t = \ln k\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RBdot(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -238,12 +274,14 @@ namespace DiFfRG
                  : T(2) * k2 * (T(1) + mexp * (x - powr<2>(x) + T(alpha)) / T(alpha)) / powr<2>(T(1) + mexp);
     }
 
+    /// \f$R_F = \sqrt{R_B + q^2} - q\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RF(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
       return sqrt(RB(k2, q2) + q2) - sqrt(q2);
     }
 
+    /// \f$\partial_t R_F\f$, \f$t = \ln k\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RFdot(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
@@ -252,31 +290,36 @@ namespace DiFfRG
     }
   };
 
+  /// Options of RationalExpRegulator.
   struct RationalExpRegulatorOpts {
+    /// Order \f$n\f$ to which \f$R_B\f$ matches the Litim regulator at small \f$x\f$, \f$1 \le n \le 16\f$.
     static constexpr int order = 8;
+    /// Slope of the exponential tail: \f$R_B \sim k^2 e^{-c x}\f$ at large \f$x\f$ (for \f$b_0 = 0\f$).
     constexpr static double c = 2;
+    /// Shapes the crossover from the Litim-like region into the tail.
     constexpr static double b0 = 0.;
   };
   /**
-   * @brief Implements a regulator given by \f[R_B(x) = k^2 e^{-f(x)}\,,\f] where \f$f(x)\f$ is a rational function
-   * chosen such that the propagator gets a pole of order order at x = 0 if the mass becomes negative (convexity
-   * restoration).
+   * @brief Smooth regulator that follows the Litim regulator at small momenta and decays exponentially at large ones.
    *
-   * Provides the following functions:
-   * - RB(k2, q2) = \f$ k^2 e^{-f(x)} \f$
-   * - RBdot(k2, q2) = \f$ \partial_t R_B(k^2,p^2) \f$
-   * - dq2RB(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_B(k^2,p^2) \f$
-   * - RF(k2, q2) = \f$ \sqrt{R_B(k^2,p^2) + p^2} - p \f$
-   * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
-   * - dq2RF(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_F(k^2,p^2) \f$
+   * \f[
+   *   R_B = k^2\, e^{-f(x)}\,, \qquad x = q^2/k^2\,.
+   * \f]
+   * \f$f\f$ is a rational function with \f$f(x) = -\ln(1 - x) + \mathcal{O}(x^{n+1}) = \sum_{m=1}^{n} x^m/m +
+   * \mathcal{O}(x^{n+1})\f$, where \f$n\f$ = `order`, so that \f$R_B = k^2 - q^2 + \mathcal{O}(x^{n+1})\f$. At large
+   * \f$x\f$, \f$f\f$ grows linearly, giving an exponential tail controlled by `c` and `b0`. For `order` = 1,
+   * \f$f(x) = x\f$. It is meant for flows that restore convexity, where the Litim-like behaviour at small \f$x\f$
+   * matters.
+   * The construction of \f$f\f$ is in the Mathematica notebook `ConvexRegulators.nb` next to this header.
    *
-   * @tparam order order of the pole.
+   * Provides `RB`, `RBdot`, `RF`, `RFdot`, `dq2RB` and `dq2RF`, see regulators.hh for the conventions.
+   *
+   * @tparam OPTS options struct, see RationalExpRegulatorOpts: `int order` (default 8), `double c` (default 2),
+   * `double b0` (default 0).
    */
   template <class OPTS = RationalExpRegulatorOpts> struct RationalExpRegulator {
     static constexpr int order = OPTS::order;
     static_assert(order > 0, "RationalExpRegulator : Regulator order must be positive!");
-    // These are magic numbers. c controls the tail, which is of shape exp(-c q^2/k^2), whereas b0 controls how strong
-    // the litim-like part gets cut off into the tail, see also the ConvexRegulators.nb Mathematica notebook
     constexpr static double c = OPTS::c;
     constexpr static double b0 = OPTS::b0;
 
@@ -569,6 +612,7 @@ namespace DiFfRG
       static_assert(order <= 16, "Rational regulator of order > 16 not implemented");
     }
 
+    /// \f$R_B\f$ at \f$k^2\f$ = `k2`, \f$q^2\f$ = `q2`.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RB(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -577,6 +621,7 @@ namespace DiFfRG
       return k2 * exp(-f);
     }
 
+    /// \f$\partial_t R_B\f$, \f$t = \ln k\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RBdot(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -587,6 +632,7 @@ namespace DiFfRG
       return T(2) * k2 * exp(-f) * (T(1) + df * x);
     }
 
+    /// \f$\partial R_B/\partial q^2\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto dq2RB(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -596,12 +642,14 @@ namespace DiFfRG
       return -exp(-f) * df;
     }
 
+    /// \f$R_F = \sqrt{R_B + q^2} - q\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RF(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
       return sqrt(RB(k2, q2) + q2) - sqrt(q2);
     }
 
+    /// \f$\partial_t R_F\f$, \f$t = \ln k\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RFdot(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
@@ -609,6 +657,7 @@ namespace DiFfRG
       return T(0.5) * RBdot(k2, q2) / sqrt(RB(k2, q2) + q2);
     }
 
+    /// \f$\partial R_F/\partial q^2\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto dq2RF(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
@@ -618,22 +667,23 @@ namespace DiFfRG
     }
   };
 
+  /// Options of PolynomialExpRegulator.
   struct PolynomialExpRegulatorOpts {
+    /// Number \f$n \ge 1\f$ of terms in \f$f(x)\f$.
     static constexpr int order = 8;
   };
   /**
-   * @brief Implements a regulator given by \f[R_B(x) = k^2 e^{-f(x)}\,,\f] where \f$f(x)\f$ is a polynomial chosen such
-   * that the propagator gets a pole of order order at x = 0 if the mass becomes negative (convexity restoration).
+   * @brief Smooth regulator built from the truncated series of \f$-\ln(1-x)\f$.
    *
-   * Provides the following functions:
-   * - RB(k2, q2) = \f$ k^2 e^{-f(x)} \f$
-   * - RBdot(k2, q2) = \f$ \partial_t R_B(k^2,p^2) \f$
-   * - dq2RB(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_B(k^2,p^2) \f$
-   * - RF(k2, q2) = \f$ \sqrt{R_B(k^2,p^2) + p^2} - p \f$
-   * - RFdot(k2, q2) = \f$ p \partial_ t R_F(k^2,p^2) \f$
-   * - dq2RF(k2, q2) = \f$ \frac{\partial}{\partial q^2} R_F(k^2,p^2) \f$
+   * \f[
+   *   R_B = k^2\, e^{-f(x)}\,, \qquad f(x) = \sum_{m=1}^{n} \frac{x^m}{m}\,, \qquad x = q^2/k^2\,,
+   * \f]
+   * with \f$n\f$ = `order`. Then \f$R_B = k^2 - q^2 + \mathcal{O}(x^{n+1})\f$ at small \f$x\f$, and \f$R_B\f$ falls off
+   * like \f$e^{-x^n/n}\f$ at large \f$x\f$. For \f$n \to \infty\f$ this approaches the LitimRegulator.
    *
-   * @tparam order order of the pole.
+   * Provides `RB`, `RBdot`, `RF`, `RFdot`, `dq2RB` and `dq2RF`, see regulators.hh for the conventions.
+   *
+   * @tparam OPTS options struct, see PolynomialExpRegulatorOpts: `int order` (default 8).
    */
   template <class OPTS = PolynomialExpRegulatorOpts> struct PolynomialExpRegulator {
     static constexpr int order = OPTS::order;
@@ -656,6 +706,7 @@ namespace DiFfRG
       else
         return powr<c0>(x) + get_df(std::integer_sequence<int, c...>{}, x);
     }
+    /// \f$R_B\f$ at \f$k^2\f$ = `k2`, \f$q^2\f$ = `q2`.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RB(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -664,6 +715,7 @@ namespace DiFfRG
       return k2 * exp(-f);
     }
 
+    /// \f$\partial_t R_B\f$, \f$t = \ln k\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RBdot(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -673,6 +725,7 @@ namespace DiFfRG
       return 2 * k2 * exp(-f) * (1 + df * x);
     }
 
+    /// \f$\partial R_B/\partial q^2\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto dq2RB(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
@@ -682,12 +735,14 @@ namespace DiFfRG
       return -exp(-f) * df;
     }
 
+    /// \f$R_F = \sqrt{R_B + q^2} - q\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RF(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
       return sqrt(RB(k2, q2) + q2) - sqrt(q2);
     }
 
+    /// \f$\partial_t R_F\f$, \f$t = \ln k\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RFdot(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;
@@ -695,6 +750,7 @@ namespace DiFfRG
       return T(0.5) * RBdot(k2, q2) / sqrt(RB(k2, q2) + q2);
     }
 
+    /// \f$\partial R_F/\partial q^2\f$.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto dq2RF(const NT1 k2, const NT2 q2)
     {
       using Kokkos::sqrt;

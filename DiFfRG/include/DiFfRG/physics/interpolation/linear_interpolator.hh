@@ -15,6 +15,7 @@ namespace DiFfRG
     template <typename T, int dim> constexpr bool has_dim = _has_dim<T, dim>::value;
   } // namespace internal
 
+  /// Selects LinearInterpolator{1,2,3}D by dimension; see LinearInterpolatorND.
   template <size_t dim, typename NT, typename Coordinates> struct LinearInterpolatorND_helper;
 
   template <typename NT, typename Coordinates> struct LinearInterpolatorND_helper<1, NT, Coordinates> {
@@ -30,10 +31,10 @@ namespace DiFfRG
   };
 
   /**
-   * @brief A linear interpolator for ND data, callable from host and device code alike.
+   * @brief LinearInterpolator1D, 2D or 3D, chosen by the dimension of Coordinates.
    *
-   * @tparam NT input data type
-   * @tparam Coordinates coordinate system of the input data
+   * @tparam NT value type of the data
+   * @tparam Coordinates coordinate system of the grid (dimension 1 to 3)
    */
   template <typename NT, typename Coordinates>
   using LinearInterpolatorND = typename LinearInterpolatorND_helper<Coordinates::dim, NT, Coordinates>::type;
