@@ -102,7 +102,7 @@ Optional:
 All other dependencies (deal.II, Kokkos, Boost, TBB, SUNDIALS, HDF5, ...) are either part of the pre-built bundle or built automatically.
 
 <details>
-<summary><h2>Package lists per system</h2> (click to expand)</summary>
+<summary><h3>Package lists per system</h3> (click to expand)</summary>
 
 #### Arch Linux
 ```bash
