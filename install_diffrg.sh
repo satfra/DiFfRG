@@ -546,11 +546,17 @@ ask build_dir "Temporary build folder" "${build_dir}"
 case "${prefix}" in /*) ;; *) prefix="$(pwd)/${prefix}" ;; esac
 case "${build_dir}" in /*) ;; *) build_dir="$(pwd)/${build_dir}" ;; esac
 
-# With an NVIDIA GPU present, offer the CUDA bundle (Turing/sm_75 or newer;
-# needs the CUDA 12 toolkit installed to build applications).
+# With an NVIDIA GPU or the CUDA toolkit present, offer the CUDA bundle
+# (Turing/sm_75 or newer; needs the CUDA 12 toolkit to build applications).
+# nvcc alone counts: a cluster build node often has no GPU or nvidia-smi.
 if [[ ${mode} == prebuilt && -z ${deps_variant} && -z ${deps_file} && "$(uname -s)" == Linux ]] &&
-  command -v nvidia-smi >/dev/null 2>&1; then
-  choose _c "An NVIDIA GPU was detected -- which bundle?" \
+  { command -v nvidia-smi || command -v nvcc; } >/dev/null 2>&1; then
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    gpu_note="An NVIDIA GPU was detected"
+  else
+    gpu_note="The CUDA toolkit was found"
+  fi
+  choose _c "${gpu_note} -- which bundle?" \
     "CPU bundle -- no GPU support" \
     "CUDA bundle -- GPU-enabled (Turing/RTX 20xx or newer; requires the CUDA >=12 toolkit)"
   [[ ${_c} -eq 1 ]] && deps_variant="linux-x86_64-v3-cuda12"
