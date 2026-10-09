@@ -129,7 +129,7 @@ namespace DiFfRG
      * host backend there is nothing to stage, but the work is synchronous, so inside a deferral scope
      * it is queued instead (run_or_queue_host).
      *
-     * Outside a deferral scope `dest` is valid on return, as it always was: flush() fences, lands the
+     * Outside a deferral scope `dest` is valid on return: flush() fences, lands the
      * staged copy and -- under MPI -- exchanges this batch's slices.
      *
      * `launch` is kept by value in a queued host job, so it must capture its arguments by value.

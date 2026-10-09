@@ -302,27 +302,56 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief This class performs numerical integration over a d-dimensional hypercube using quadrature rules.
+   * @brief Integrates a kernel over a box in `dim` variables with a tensor product of one-dimensional quadrature rules.
    *
-   * @tparam dim The dimension of the hypercube, which can be between 1 and 5.
-   * @tparam NT numerical type of the result
-   * @tparam KERNEL kernel to be integrated, which must provide the static methods `kernel` and `constant`
-   * @tparam ExecutionSpace can be any execution space, e.g. GPU_exec, TBB_exec.
+   * \f[
+   *   I(\text{args}) = \texttt{constant}(\text{args})
+   *     + \sum_{i_1, \ldots, i_\text{dim}} \prod_{d=1}^{\text{dim}} w_{d,i_d}\, \Delta_d \;
+   *       \text{kernel}(x_{1,i_1}, \ldots, x_{\text{dim},i_\text{dim}}, \text{args}) \,,
+   *   \qquad x_{d,i} = a_d + \Delta_d\, t_{d,i} \,, \quad \Delta_d = b_d - a_d \,,
+   * \f]
+   * where \f$t_{d,i}, w_{d,i}\f$ are the nodes and weights of the rule chosen for axis \f$d\f$, and
+   * \f$a_d, b_d\f$ are `grid_min[d]`, `grid_max[d]`. The nodes live on the rule's own interval (QuadratureType::a,
+   * QuadratureType::b): \f$[0,1]\f$ by default, \f$[-1,1]\f$ for Chebyshev. For a \f$[0,1]\f$ rule this is the
+   * integral over \f$[a_d, b_d]\f$; a \f$[-1,1]\f$ rule with \f$a_d = 0, b_d = 1\f$ integrates over
+   * \f$[-1,1]\f$. Rules with a weight function (Jacobi, Chebyshev) include it in \f$w\f$.
+   *
+   * Usually one of the wrappers is used instead (Integrator_p2, Integrator_fT_p2, ...), which set up the box and the
+   * measure for a momentum integral.
+   *
+   * **Kernel interface.** `KERNEL` is a class with static, device-callable member functions:
+   * - get(): `KERNEL::kernel(x_1, ..., x_dim, args...)` and `KERNEL::constant(args...)`.
+   * - map(): `KERNEL::kernel(x_1, ..., x_dim, p_1, ..., p_n, args...)` and `KERNEL::constant(p_1, ..., p_n, args...)`,
+   *   where \f$(p_1, \ldots, p_n)\f$ = `coordinates.forward(...)` is the external grid point being computed.
+   *
+   * `constant` is added once per result and not integrated. The integration variables are of type `ctype`. A
+   * single-precision integrator (`ctype` = `float`) passes the arguments of get() and map_points() in single
+   * precision. Interpolators (see is_interpolator) are passed as their lightweight handle in precision `ctype` if the
+   * kernel accepts that, e.g. when it takes them as `const auto &`. See also provides_kernel.
+   *
+   * @tparam dim number of integration variables, 1 to 5 (map() adds one dimension for the external grid, and Kokkos
+   * supports at most 6)
+   * @tparam NT type of the result, e.g. `double`, `float`, `complex<double>` or an autodiff type
+   * @tparam KERNEL kernel class, see above
+   * @tparam ExecutionSpace where the integrand is evaluated: GPU_exec, TBB_exec or KokkosHost_exec
    */
   template <int dim, typename NT, typename KERNEL, typename ExecutionSpace>
     requires(dim > 0)
   class QuadratureIntegrator : public AbstractIntegrator
   {
   public:
-    /**
-     * @brief Numerical type to be used for integration tasks e.g. the argument or possible jacobians.
-     */
+    /// Type of the integration variables: `NT` with complex and autodiff parts stripped, e.g. `double`.
     using ctype = typename get_type::ctype<NT>;
-    /**
-     * @brief Execution space to be used for the integration, e.g. GPU_exec, TBB_exec.
-     */
+    /// The execution space the integrand is evaluated in.
     using execution_space = ExecutionSpace;
 
+    /**
+     * @param quadrature_provider source of quadrature nodes and weights, shared between integrators
+     * @param _grid_size number of quadrature points per axis
+     * @param grid_min lower end \f$a_d\f$ of each axis
+     * @param grid_max upper end \f$b_d\f$ of each axis
+     * @param quadrature_type quadrature rule per axis
+     */
     QuadratureIntegrator(QuadratureProvider &quadrature_provider, const std::array<size_t, dim> &_grid_size,
                          const std::array<ctype, dim> &grid_min, const std::array<ctype, dim> &grid_max,
                          const std::array<QuadratureType, dim> &quadrature_type)
@@ -340,6 +369,7 @@ namespace DiFfRG
       set_grid_extents(grid_min, grid_max);
     }
 
+    /// Change the box to \f$[a_d, b_d]\f$ = [`grid_min[d]`, `grid_max[d]`], keeping the quadrature rules.
     void set_grid_extents(const std::array<ctype, dim> &grid_min, const std::array<ctype, dim> &grid_max)
     {
       for (size_t i = 0; i < dim; ++i) {
@@ -351,6 +381,11 @@ namespace DiFfRG
       }
     }
 
+    /**
+     * @brief Compute the integral for the extra kernel arguments @p t and write it to @p dest.
+     *
+     * Blocks until the result is available.
+     */
     template <typename... T>
       requires internal::accepts_args<NT, KERNEL, ctype, dim, T...>
     void get(NT &dest, const T &...t) const
@@ -380,6 +415,7 @@ namespace DiFfRG
       dest = OT(result);
     }
 
+    /// Compute the integral into a Kokkos reduction target @p dest (e.g. a rank-0 View) without waiting.
     template <typename OT, typename... T>
       requires(!std::is_same_v<OT, NT> && !internal::is_widened_result<OT, NT> &&
                internal::accepts_args<NT, KERNEL, ctype, dim, T...>)
@@ -389,6 +425,7 @@ namespace DiFfRG
       get(space, dest, t...);
     }
 
+    /// Launch the integral on @p space into a Kokkos reduction target @p dest (e.g. a rank-0 View) without waiting.
     template <typename OT, typename... T>
       requires(!std::is_same_v<OT, NT> && !internal::is_widened_result<OT, NT> &&
                internal::accepts_args<NT, KERNEL, ctype, dim, T...>)
@@ -423,6 +460,12 @@ namespace DiFfRG
                               KokkosNDLambdaWrapperReduction<dim, decltype(functor)>(functor), dest);
     }
 
+    /**
+     * @brief Launch the integrals for all points of @p coordinates on @p space into a device view, without waiting.
+     *
+     * Low-level form of map(OT *, ...): no MPI distribution and no copy to the host. `integral_view(i)` receives the
+     * result at `coordinates.forward(coordinates.from_linear_index(i))`.
+     */
     template <typename view_type, typename Coordinates, typename... Args>
     void map(ExecutionSpace &space, const view_type integral_view, const Coordinates &coordinates, const Args &...args)
     {
@@ -686,9 +729,10 @@ namespace DiFfRG
       run_map_points(dest, PointArg<internal::point_arg_value_t<A>>(args)...);
     }
 
+    /// How a device map_points() distributes its work; see MapPointsPolicy.
     void set_map_points_policy(const MapPointsPolicy policy) { m_map_points_policy = policy; }
 
-    /// Points evaluated per external grid point. Half of the scheduler's cost score.
+    /// Number of quadrature points, i.e. kernel evaluations per integral.
     size_t quadrature_volume() const
     {
       size_t volume = 1;
@@ -697,6 +741,22 @@ namespace DiFfRG
       return volume;
     }
 
+    /**
+     * @brief Compute the integral at every point of a grid of external values.
+     *
+     * `dest[i]` receives the integral with the external point \f$(p_1, \ldots, p_n)\f$ =
+     * `coordinates.forward(coordinates.from_linear_index(i))` inserted after the integration variables, see the class
+     * documentation. @p dest must hold `coordinates.size()` elements; it may be of type `NT`, or `double` for a
+     * single-precision integrator.
+     *
+     * With several MPI ranks the points are split between ranks automatically (see MapScheduler). This makes map()
+     * collective: every rank must call it in the same order. Do not call it inside a NoMapsHere scope (model
+     * callbacks during assembly); use map_points() there.
+     *
+     * `dest` holds the result on return, except inside a DeferredMaps scope, where it is filled when the scope ends.
+     *
+     * @return the execution space the work was issued on
+     */
     template <typename OT, typename Coordinates, typename... Args>
       requires internal::is_map_result<OT, NT>
     auto map(OT *dest, const Coordinates &coordinates, const Args &...args)
@@ -861,19 +921,24 @@ namespace DiFfRG
     mutable bool m_result_views_initialized = false;
   };
 
+  /**
+   * @brief QuadratureIntegrator on the host with TBB.
+   *
+   * Same interface and kernel requirements as the general class. Each integral is summed in a fixed order, so results
+   * do not depend on the number of threads.
+   */
   template <int dim, typename NT, typename KERNEL>
   class QuadratureIntegrator<dim, NT, KERNEL, TBB_exec> : public QuadratureIntegrator<dim, NT, KERNEL, KokkosHost_exec>
   {
     using Base = QuadratureIntegrator<dim, NT, KERNEL, KokkosHost_exec>;
 
   public:
-    /**
-     * @brief Numerical type to be used for integration tasks e.g. the argument or
-     * possible jacobians.
-     */
+    /// Type of the integration variables.
     using ctype = typename get_type::ctype<NT>;
+    /// The execution space, TBB_exec.
     using execution_space = TBB_exec;
 
+    /// See QuadratureIntegrator::QuadratureIntegrator.
     QuadratureIntegrator(QuadratureProvider &quadrature_provider, const std::array<size_t, dim> _grid_size,
                          std::array<ctype, dim> grid_min, std::array<ctype, dim> grid_max,
                          const std::array<QuadratureType, dim> quadrature_type)
@@ -881,6 +946,7 @@ namespace DiFfRG
     {
     }
 
+    /// See QuadratureIntegrator::get.
     template <typename... T>
       requires internal::accepts_args<NT, KERNEL, ctype, dim, T...>
     void get(NT &dest, const T &...t) const
@@ -935,6 +1001,7 @@ namespace DiFfRG
       internal::map_points_by_get(*this, dest, PointArg<internal::point_arg_value_t<A>>(args)...);
     }
 
+    /// map() without MPI distribution: computes all of @p coordinates on this rank and waits for the result.
     template <typename OT, typename Coordinates, typename... Args>
       requires internal::is_map_result<OT, NT>
     void map(execution_space &, OT *dest, const Coordinates &coordinates, const Args &...args)
@@ -963,6 +1030,7 @@ namespace DiFfRG
       });
     }
 
+    /// See QuadratureIntegrator::map.
     template <typename OT, typename Coordinates, typename... Args>
       requires internal::is_map_result<OT, NT>
     auto map(OT *dest, const Coordinates &coordinates, const Args &...args)

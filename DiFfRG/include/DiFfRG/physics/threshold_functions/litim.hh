@@ -9,8 +9,20 @@ namespace DiFfRG
   namespace fRG
   {
     /**
-     * @brief Here, useful threshold functions obtained by performing loop integrals with the litim regulator are
-     * collected. For explicit expressions, see the appendix of https://arxiv.org/abs/1909.02991
+     * @brief Threshold functions at finite temperature for the Litim regulator on spatial momenta.
+     *
+     * With a spatial Litim regulator, \f$R(\vec q^{\,2}) = (k^2 - \vec q^{\,2})\,\Theta(k^2 - \vec q^{\,2})\f$, the
+     * spatial loop integral is trivial and the Matsubara sum is done analytically, so the loop integrals of the local
+     * potential approximation become closed-form functions. Conventions for all functions here:
+     * - mass arguments (`mb2`, `mf2`, ...) are the dimensionless \f$m^2/k^2\f$ and enter through
+     *   \f$\epsilon = \sqrt{1 + m^2/k^2}\f$;
+     * - `k`, `T` and `mu` (\f$\mu\f$, quark chemical potential) are dimensionful;
+     * - `d` is the spacetime dimension (spatial dimension \f$d - 1\f$);
+     * - \f$\omega_n = 2\pi n T\f$ and \f$\nu_n = (2n+1)\pi T\f$ are bosonic and fermionic Matsubara frequencies,
+     *   \f$\sum_n\f$ runs over all \f$n \in \mathbb{Z}\f$.
+     *
+     * The functions are host-only. Orders that are not implemented throw `std::runtime_error` at run time. For the
+     * explicit expressions, see the appendix of https://arxiv.org/abs/1909.02991.
      */
     namespace TFLitimSpatial
     {
@@ -18,6 +30,20 @@ namespace DiFfRG
       static constexpr auto Pi2 = Pi * Pi;
       using Kokkos::sqrt, Kokkos::pow;
 
+      /**
+       * @brief Bosonic Matsubara sum with `nb` propagators.
+       *
+       * \f[
+       *   B_{n}(m^2) = k^{2n-1}\, T \sum_{j} \frac{1}{\big(\omega_j^2 + k^2 \epsilon^2\big)^{n}}\,,
+       *   \qquad B_1 = \frac{\coth(k\epsilon/2T)}{2\epsilon}\,,
+       *   \qquad B_{n+1} = -\frac{1}{n} \frac{\partial B_n}{\partial (m^2/k^2)}\,.
+       * \f]
+       * Implemented for \f$1 \le\f$ `nb` \f$\le 4\f$.
+       *
+       * @param mb2 dimensionless boson mass \f$m^2/k^2\f$
+       * @param k RG scale
+       * @param T temperature
+       */
       template <int nb, typename NT> NT B(const NT &mb2, const double &k, const double &T)
       {
         if constexpr (nb == 1)
@@ -47,6 +73,21 @@ namespace DiFfRG
           throw std::runtime_error("Threshold Function B is not implemented for given indices");
       }
 
+      /**
+       * @brief Fermionic Matsubara sum with `nf` propagators at chemical potential \f$\mu\f$.
+       *
+       * \f[
+       *   F_{n}(m^2) = k^{2n-1}\, T \sum_{j} \frac{1}{\big((\nu_j + i\mu)^2 + k^2 \epsilon^2\big)^{n}}\,,
+       *   \qquad F_1 = \frac{\tanh\frac{k\epsilon - \mu}{2T} + \tanh\frac{k\epsilon + \mu}{2T}}{4\epsilon}\,,
+       *   \qquad F_{n+1} = -\frac{1}{n} \frac{\partial F_n}{\partial (m^2/k^2)}\,.
+       * \f]
+       * Implemented for \f$1 \le\f$ `nf` \f$\le 3\f$.
+       *
+       * @param mf2 dimensionless fermion mass \f$m^2/k^2\f$
+       * @param k RG scale
+       * @param T temperature
+       * @param mu chemical potential
+       */
       template <int nf, typename NT> NT F(const NT &mf2, const double &k, const double &T, const double &mu)
       {
         if constexpr (nf == 1)
@@ -78,6 +119,20 @@ namespace DiFfRG
           throw std::runtime_error("Threshold Function F is not implemented for given indices");
       }
 
+      /**
+       * @brief Bosonic Matsubara sum with two different masses.
+       *
+       * \f[
+       *   BB_{n_1 n_2} = k^{2(n_1+n_2)-1}\, T \sum_{j}
+       *   \frac{1}{\big(\omega_j^2 + k^2 \epsilon_1^2\big)^{n_1} \big(\omega_j^2 + k^2 \epsilon_2^2\big)^{n_2}}\,.
+       * \f]
+       * Equal masses fall back to \f$B_{n_1+n_2}\f$. Otherwise only \f$n_1 = n_2 = 2\f$ is implemented. The result type
+       * `NT` must be given explicitly.
+       *
+       * @param mb12, mb22 dimensionless boson masses \f$m_1^2/k^2\f$, \f$m_2^2/k^2\f$
+       * @param k RG scale
+       * @param T temperature
+       */
       template <int nb1, int nb2, typename NT, typename NT1, typename NT2>
       NT BB(const NT1 &mb12, const NT2 &mb22, const double &k, const double &T)
       {
@@ -96,6 +151,18 @@ namespace DiFfRG
           throw std::runtime_error("Threshold Function BB is not implemented for given indices");
       }
 
+      /**
+       * @brief Mixed Matsubara sum with `nf` fermion and `nb` boson propagators, at external fermion momentum
+       * \f$p = (\pi T, \vec 0)\f$ (the lowest fermionic frequency).
+       *
+       * Implemented for (`nf`, `nb`) = (1, 2) and (2, 1). The result type `NT` must be given explicitly.
+       *
+       * @param mf2 dimensionless fermion mass \f$m_f^2/k^2\f$
+       * @param mb2 dimensionless boson mass \f$m_b^2/k^2\f$
+       * @param k RG scale
+       * @param T temperature
+       * @param mu chemical potential
+       */
       template <int nf, int nb, typename NT, typename NTf, typename NTb>
       NT FBFermiPiT(const NTf &mf2, const NTb &mb2, const double &k, const double &T, const double &mu)
       {
@@ -359,11 +426,19 @@ namespace DiFfRG
           throw std::runtime_error("Threshold Function FBFermiPiT is not implemented for given indices");
       }
 
-      /** This is lB_nb which contains nb bosonic propagators in the loop.
+      /**
+       * @brief Bosonic threshold function with anomalous dimension.
        *
-       * @param mb2 boson mass
-       * @param etab boson eta
-       * @param mi an instance of a model0
+       * \f[
+       *   l^{B}_{n} = \frac{2}{d-1} \Big(1 - \frac{\eta_b}{d+1}\Big) \max(n, 1)\, B_{n+1}(m^2)\,,
+       * \f]
+       * with \f$n\f$ = `lev` and \f$B\f$ from B().
+       *
+       * @param mb2 dimensionless boson mass \f$m^2/k^2\f$
+       * @param etab boson anomalous dimension \f$\eta_b\f$
+       * @param k RG scale
+       * @param T temperature
+       * @param d spacetime dimension
        */
       template <unsigned lev, typename NT1, typename NT2>
       auto lB(const NT1 &mb2, const NT2 &etab, const double &k, const double &T, const double &d)
@@ -372,22 +447,33 @@ namespace DiFfRG
         return pref * B<lev + 1>(mb2, k, T);
       }
 
-      /** This is lB_nb which contains nb bosonic propagators in the loop,
-       * runs without etas for LPA.
+      /**
+       * @brief lB() at \f$\eta_b = 0\f$ (local potential approximation).
        *
-       * @param mb2 boson mass
-       * @param mi an instance of a model
+       * @param mb2 dimensionless boson mass \f$m^2/k^2\f$
+       * @param k RG scale
+       * @param T temperature
+       * @param d spacetime dimension
        */
       template <unsigned lev, typename NT> auto lB(const NT &mb2, const double &k, const double &T, const double &d)
       {
         return lB<lev>(mb2, 0., k, T, d);
       }
 
-      /** This is lF_nf which contains nf fermionic propagators in the loop.
+      /**
+       * @brief Fermionic threshold function with anomalous dimension.
        *
-       * @param mf2 fermion mass
-       * @param etaf fermion eta
-       * @param mi an instance of a model
+       * \f[
+       *   l^{F}_{n} = \frac{2}{d-1} \Big(1 - \frac{\eta_f}{d}\Big) \max(n, 1)\, F_{n+1}(m^2)\,,
+       * \f]
+       * with \f$n\f$ = `lev` and \f$F\f$ from F().
+       *
+       * @param mf2 dimensionless fermion mass \f$m^2/k^2\f$
+       * @param etaf fermion anomalous dimension \f$\eta_f\f$
+       * @param k RG scale
+       * @param T temperature
+       * @param mu chemical potential
+       * @param d spacetime dimension
        */
       template <unsigned lev, typename NT1, typename NT2>
       auto lF(const NT1 &mf2, const NT2 &etaf, const double &k, const double &T, const double &mu, const double &d)
@@ -396,11 +482,14 @@ namespace DiFfRG
         return pref * F<lev + 1>(mf2, k, T, mu);
       }
 
-      /** This is lF_nf which contains nf fermionic propagators in the loop,
-       * runs without etas for LPA.
+      /**
+       * @brief lF() at \f$\eta_f = 0\f$ (local potential approximation).
        *
-       * @param mf2 fermion mass
-       * @param mi an instance of a model
+       * @param mf2 dimensionless fermion mass \f$m^2/k^2\f$
+       * @param k RG scale
+       * @param T temperature
+       * @param mu chemical potential
+       * @param d spacetime dimension
        */
       template <unsigned lev, typename NT>
       auto lF(const NT &mf2, const double &k, const double &T, const double &mu, const double &d)
@@ -408,14 +497,24 @@ namespace DiFfRG
         return lF<lev>(mf2, 0., k, T, mu, d);
       }
 
-      /** This is L_nf_nb which contains nf fermionic and nb bosonic propagators in
-       * the loop, with the external (fermionic) momentum set to p = (pi T, 0).
+      /**
+       * @brief Mixed fermion-boson threshold function at external fermion momentum \f$p = (\pi T, \vec 0)\f$.
        *
-       * @param mf2 fermion mass
-       * @param mb2 boson mass
-       * @param etaf fermion eta
-       * @param etab boson eta
-       * @param mi an instance of a model
+       * \f[
+       *   L^{FB}_{1,1} = \frac{2}{d-1} \Big[ \Big(1 - \frac{\eta_f}{d}\Big) FB_{2,1}
+       *   + \Big(1 - \frac{\eta_b}{d+1}\Big) FB_{1,2} \Big]\,,
+       * \f]
+       * with \f$FB_{n_f n_b}\f$ from FBFermiPiT(). Only `levf` = `levb` = 1 is implemented. The result type `NT` must
+       * be given explicitly.
+       *
+       * @param mf2 dimensionless fermion mass \f$m_f^2/k^2\f$
+       * @param mb2 dimensionless boson mass \f$m_b^2/k^2\f$
+       * @param etaf fermion anomalous dimension \f$\eta_f\f$
+       * @param etab boson anomalous dimension \f$\eta_b\f$
+       * @param k RG scale
+       * @param T temperature
+       * @param mu chemical potential
+       * @param d spacetime dimension
        */
       template <unsigned levf, unsigned levb, typename NT, typename NT1, typename NT2, typename NT3, typename NT4>
       NT LFB(const NT1 &mf2, const NT2 &mb2, const NT3 &etaf, const NT4 &etab, const double &k, const double &T,
@@ -431,13 +530,15 @@ namespace DiFfRG
           throw std::runtime_error("Threshold function not implemented.");
       }
 
-      /** This is L_nf_nb which contains nf fermionic and nb bosonic propagators in
-       * the loop, with the external (fermionic) momentum set to p = (pi T, 0); runs
-       * without etas for LPA.
+      /**
+       * @brief LFB() at \f$\eta_f = \eta_b = 0\f$ (local potential approximation).
        *
-       * @param mf2 fermion mass
-       * @param mb2 boson mass
-       * @param mi an instance of a model
+       * @param mf2 dimensionless fermion mass \f$m_f^2/k^2\f$
+       * @param mb2 dimensionless boson mass \f$m_b^2/k^2\f$
+       * @param k RG scale
+       * @param T temperature
+       * @param mu chemical potential
+       * @param d spacetime dimension
        */
       template <unsigned levf, unsigned levb, typename NT, typename NT1, typename NT2>
       auto LFB(const NT1 &mf2, const NT2 &mb2, const double &k, const double &T, const double &mu, const double &d)

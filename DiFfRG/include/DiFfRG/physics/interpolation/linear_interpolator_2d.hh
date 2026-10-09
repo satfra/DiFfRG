@@ -44,8 +44,9 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief What a kernel receives in place of a LinearInterpolator2D: read-only views of its device
-   * and host buffers plus its coordinates, in one precision. See has_kernel_handle.
+   * @brief Read-only view of a LinearInterpolator2D, as passed to integration kernels.
+   *
+   * Obtained from LinearInterpolator2D::handle(); offers the same index(), at() and operator(). See has_kernel_handle.
    */
   template <typename NT, typename Coordinates, typename Layout> class LinearInterpolator2DHandle
   {
@@ -83,15 +84,17 @@ namespace DiFfRG
   };
 
   /**
-   * @brief A linear interpolator for 2D data, callable from host AND device code.
+   * @brief Bilinear interpolation of data given on a 2D grid, usable in host and device code.
    *
-   * See LinearInterpolator1D for the host/device dispatch rationale.
+   * Each axis is interpolated linearly in its fractional grid index (Coordinates::backward). Outside the grid the
+   * value at the nearest boundary point is used (constant extrapolation); periodic axes wrap around instead. Every
+   * bounded axis needs at least 2 points.
    *
-   * Like SplineInterpolator1D, a double-precision interpolator keeps a single-precision copy for
-   * single-precision kernels.
+   * The data is zero after construction; set it with update(). Host and device copies are kept in sync. A
+   * double-precision interpolator also keeps a single-precision copy for single-precision kernels (see handle()).
    *
-   * @tparam NT input data type
-   * @tparam Coordinates coordinate system of the input data
+   * @tparam NT value type of the data (real, complex or autodiff)
+   * @tparam Coordinates 2D coordinate system of the grid, e.g. CoordinatePackND of two 1D coordinate systems
    */
   template <typename NT, typename Coordinates> class LinearInterpolator2D
   {
@@ -115,7 +118,7 @@ namespace DiFfRG
     static constexpr size_t dim = 2;
 
     /**
-     * @brief Construct a LinearInterpolator2D with internal, zeroed data and a coordinate system.
+     * @brief Allocate zeroed data on the grid of `coordinates`.
      *
      * @param coordinates coordinate system of the data
      */
@@ -141,22 +144,19 @@ namespace DiFfRG
       }
     }
 
-    /// Shallow copy of BOTH views, valid in host and in device code. See LinearInterpolator1D.
+    /// Shallow copy: the copy shares the data, so later update() calls are seen by both.
     KOKKOS_DEFAULTED_FUNCTION LinearInterpolator2D(const LinearInterpolator2D &) = default;
 
     /**
-     * @brief Replace the data, leaving host AND device current. The only mutator.
+     * @brief Replace the data. Host and device copies are both current when this returns.
      *
-     * `in_data` is row-major. The fill indexes the mirror through operator() rather than
-     * memcpy'ing into it, which makes that contract explicit and independent of the mirror's own
-     * layout -- the device view is pinned to GPU_memory, whose default layout is LayoutLeft, so a
-     * flat copy would transpose the data.
-     *
-     * See LinearInterpolator1D::update() for why the host fill is a plain loop and why the single
-     * trailing fence is not optional.
+     * @param in_data values at the grid points in row-major order, `in_data[i * n1 + j]` for grid point (i, j), with
+     * `n1 = get_coordinates().sizes()[1]`; converted to NT
      */
     template <typename NT2> void update(const NT2 *in_data)
     {
+      // Filled element-wise: the views' storage layout need not be row-major. See
+      // LinearInterpolator1D::update() for the copy and fence.
       for (size_t i = 0; i < sizes[0]; ++i)
         for (size_t j = 0; j < sizes[1]; ++j)
           host_data(i, j) = in_data[i * sizes[1] + j];
@@ -175,8 +175,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief The compact view of this interpolator a kernel computing in CT receives, see
-     * has_kernel_handle: the single-precision copy for a float kernel, the data itself otherwise.
+     * @brief The read-only view a kernel computing in precision CT receives (see has_kernel_handle).
+     *
+     * For CT = float and double data this reads the single-precision copy, otherwise the data itself.
      */
     template <typename CT> auto handle() const
     {
@@ -190,27 +191,20 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Host-side element access, in the row-major order update() takes its input in.
+     * @brief Value at flat row-major index i, the order update() takes (host only).
      */
     NT operator[](size_t i) const { return host_data(i / sizes[1], i % sizes[1]); }
 
     /**
-     * @brief Map physical coordinates onto grid indices.
+     * @brief Fractional grid indices of the point (x, y), i.e. Coordinates::backward(x, y).
      *
-     * Split out of operator() because it is the expensive half: Coordinates::backward is a fp64
-     * log/log1p per logarithmic axis, ~200 fp64 instructions each on current NVIDIA parts against
-     * ~10 for the interpolation. A generated kernel evaluating several dressings at the SAME point
-     * otherwise pays it once per dressing -- the compiler cannot CSE it, because each interpolator
-     * owns its own `coordinates` members and cannot be proven to agree with another's.
+     * `f(x, y) == f.at(f.index(x, y))`. Several interpolators on the same coordinate system can share one index()
+     * call, which saves the (possibly expensive) coordinate transform.
      *
-     * Depends only on the coordinate system, so the result may be shared across interpolators that
-     * share one. Clamping and stencil resolution stay in at(), since they are size dependent and
-     * would otherwise make an index untransferable between interpolators of different extent.
-     *
-     * The return type is spelled out rather than deduced: nvcc loses `decltype(var)` when the
-     * initializer has a deduced return type inside a class-template member, and the consumer stores
-     * this in a `const auto`.
+     * @param x first physical coordinate
+     * @param y second physical coordinate
      */
+    // Return type spelled out: nvcc loses decltype(var) of a deduced return type inside a class-template member.
     device::array<typename Coordinates::ctype, 2> KOKKOS_FUNCTION
     index(const typename Coordinates::ctype x, const typename Coordinates::ctype y) const
     {
@@ -218,7 +212,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Interpolate at grid indices previously obtained from index().
+     * @brief Interpolate at fractional grid indices, as returned by index().
+     *
+     * @param idx fractional grid indices; out-of-range values are clamped (or wrapped, on periodic axes)
      */
     NT KOKKOS_FUNCTION at(const device::array<typename Coordinates::ctype, 2> &idx) const
     {
@@ -227,7 +223,10 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Interpolate the data at a given point.
+     * @brief Interpolate the data at the point (x, y).
+     *
+     * @param x first physical coordinate
+     * @param y second physical coordinate
      */
     NT KOKKOS_FUNCTION operator()(const typename Coordinates::ctype x,
                                   const typename Coordinates::ctype y) const
@@ -243,10 +242,9 @@ namespace DiFfRG
     const Coordinates &get_coordinates() const { return coordinates; }
 
     /**
-     * @brief Read-only handle to the host values, in the mirror's storage order.
+     * @brief Pointer to the host copy of the values (read-only).
      *
-     * NOTE the storage order is NOT the row-major order update() takes: the device view is pinned
-     * to GPU_memory, hence LayoutLeft. Use operator[] for row-major access.
+     * The storage order depends on the backend and need not be row-major; use operator[] for row-major access.
      */
     const NT *data() const { return host_data.data(); }
 

@@ -2,6 +2,7 @@
 
 // DiFfRG
 #include <DiFfRG/common/math.hh>
+#include <DiFfRG/physics/integration/optimize.hh>
 #include <DiFfRG/physics/integration/quadrature_integrator.hh>
 
 // standard libraries
@@ -45,19 +46,30 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief Integrator_p2_1ang integrates a kernel \f$K(p,\cos,\ldots)\f$ depending on the radial momentum \f$p\f$ and
-   * the cosine of the single polar angle between the loop and external momentum as
-   * $$
-   * \frac{S_{d-1}}{(2\pi)^{d}}\,\int_{-1}^1 dc\,(1-c^2)^{\frac{d-3}{2}}\,\int_0^\infty dp\, p^{d-1} K(p,c,\ldots)
-   * $$
-   * in \f$d\f$ dimensions, where \f$S_{d-1}\f$ is the solid angle of the \f$(d-2)\f$-sphere remaining after the polar
-   * angle is singled out. The zonal measure \f$(1-c^2)^{(d-3)/2}\f$ is supplied exactly by a Gauss-Jacobi angular
-   * quadrature, so it does not appear in the kernel.
+   * @brief Integrates a kernel over a \f$d\f$-dimensional momentum when it depends on \f$|q|\f$ and one angle.
    *
-   * @tparam dim dimension of the momentum space, i.e. $d$ in the above equation
+   * \f[
+   *   I = \texttt{constant}(\ldots) + \frac{S_{d-1}}{(2\pi)^d} \int_{-1}^{1} dc\, (1-c^2)^{\frac{d-3}{2}}
+   *   \int_0^{q_\text{max}} dq\, q^{d-1}\, K(q, c, \ldots)\,,
+   * \f]
+   * where \f$c\f$ is the cosine of the angle between \f$q\f$ and a fixed direction (usually the external momentum),
+   * and \f$S_{d-1} = 2\pi^{(d-1)/2}/\Gamma((d-1)/2)\f$ is the surface of the unit sphere in \f$d-1\f$ dimensions.
+   * Here
+   * \f$q_\text{max} = \sqrt{x_\text{extent}}\, k\f$, with \f$x_\text{extent}\f$ in units of \f$k^2\f$ and the RG scale
+   * \f$k\f$ set by set_k() (initially 1). The weight \f$(1-c^2)^{(d-3)/2}\f$ is built into the angular (Gauss-Jacobi)
+   * quadrature, so the kernel does not include it. The `_p2` in the name is historical: the kernel receives \f$|q|\f$,
+   * not \f$q^2\f$.
+   *
+   * Kernel interface:
+   * - get(): `KERNEL::kernel(q, c, args...)` and `KERNEL::constant(args...)`
+   * - map(): `KERNEL::kernel(q, c, pos..., args...)` and `KERNEL::constant(pos..., args...)`
+   *
+   * @see QuadratureIntegrator for the kernel interface, Integrator_p2 for an example.
+   *
+   * @tparam dim momentum-space dimension \f$d\f$, 2 to 8
    * @tparam NT numerical type of the result
-   * @tparam KERNEL kernel to be integrated, which must provide the static methods `kernel` and `constant`
-   * @tparam ExecutionSpace can be any execution space, e.g. GPU_exec, TBB_exec, or KokkosHost_exec.
+   * @tparam KERNEL kernel to be integrated, providing static `kernel` and `constant`
+   * @tparam ExecutionSpace GPU_exec, TBB_exec or KokkosHost_exec
    */
   template <int dim, typename NT, typename KERNEL, typename ExecutionSpace>
   class Integrator_p2_1ang
@@ -87,6 +99,12 @@ namespace DiFfRG
      */
     using execution_space = ExecutionSpace;
 
+    /**
+     * @brief Construct from the parameter file.
+     *
+     * Reads the quadrature orders from `/integration/x_order` (for \f$q\f$) and `/integration/cos1_order` (for
+     * \f$c\f$), and finds \f$x_\text{extent}\f$ with optimize_x_extent() for `KERNEL::Regulator`.
+     */
     Integrator_p2_1ang(QuadratureProvider &quadrature_provider, const ConfigTree &config)
       requires provides_regulator<KERNEL>
         : Integrator_p2_1ang(quadrature_provider, internal::make_int_grid<2, NT>(config, {"x_order", "cos1_order"}),
@@ -94,6 +112,11 @@ namespace DiFfRG
     {
     }
 
+    /**
+     * @param quadrature_provider source of the quadrature rules
+     * @param grid_size number of quadrature points per axis, in the order of the kernel arguments
+     * @param x_extent upper limit of the radial integral, \f$q_\text{max}^2 / k^2\f$
+     */
     Integrator_p2_1ang(QuadratureProvider &quadrature_provider, const std::array<size_t, 2> grid_size,
                        ctype x_extent = 2.)
         : Base(quadrature_provider, grid_size, {0, 0.}, {std::sqrt(x_extent), 1.},
@@ -102,12 +125,14 @@ namespace DiFfRG
     {
     }
 
+    /// Set \f$x_\text{extent}\f$, so that \f$q_\text{max} = \sqrt{x_\text{extent}}\, k\f$.
     void set_x_extent(ctype x_extent)
     {
       this->x_extent = x_extent;
       Base::set_grid_extents({0, 0.}, {std::sqrt(x_extent) * k, 1.});
     }
 
+    /// Set the RG scale \f$k\f$, which moves the upper limit \f$q_\text{max} = \sqrt{x_\text{extent}}\, k\f$.
     void set_k(ctype k)
     {
       this->k = k;

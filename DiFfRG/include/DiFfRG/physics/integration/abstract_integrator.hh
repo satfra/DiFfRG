@@ -34,9 +34,13 @@ namespace DiFfRG
     }
   } // namespace internal
 
+  /// A kernel that names its regulator as `using Regulator = ...;`. Integrator constructors taking a ConfigTree need
+  /// it to choose the radial cutoff (see optimize_x_extent()).
   template <typename KERNEL>
   concept provides_regulator = requires { typename KERNEL::Regulator; };
 
+  /// Calls `KERNEL::kernel` with `dim` default-constructed integration variables followed by `args`. Used to test the
+  /// kernel signature in provides_kernel.
   template <typename NT, typename KERNEL, typename ctype, int dim, typename... ARGS>
   NT multidim_kernel_call(const ARGS &...args)
   {
@@ -48,19 +52,44 @@ namespace DiFfRG
     }
   }
 
+  /**
+   * @brief The integrand interface every integrator expects from its `KERNEL` class.
+   *
+   * A kernel is a class with two static member functions,
+   * @code
+   * struct MyKernel {
+   *   static KOKKOS_FORCEINLINE_FUNCTION auto kernel(const double x1, ..., const double xdim, const auto &...args);
+   *   static KOKKOS_FORCEINLINE_FUNCTION auto constant(const auto &...args);
+   * };
+   * @endcode
+   * and an integrator computes
+   * \f[
+   *   I(\text{args}) = \texttt{constant}(\text{args}) + \int d\mu(x)\, \text{kernel}(x_1, \ldots, x_\text{dim},
+   *   \text{args}) \,,
+   * \f]
+   * where \f$d\mu(x)\f$ is the measure of the integrator. `constant` is added once and is not integrated.
+   * `kernel` is called with the `dim` integration variables first (of type `ctype`), then the extra arguments passed
+   * to `get()`; `map()` additionally inserts the grid position between the two, see QuadratureIntegrator. Both must
+   * return something convertible to `NT` and be callable on the device (`KOKKOS_FUNCTION` or similar).
+   *
+   * provides_kernel checks `kernel`, provides_constant checks `constant`, is_valid_kernel checks both.
+   */
   template <typename NT, typename KERNEL, typename ctype, int dim, typename... ARGS>
   concept provides_kernel =
       requires(const ARGS &...args) { multidim_kernel_call<NT, KERNEL, ctype, dim, ARGS...>(args...); };
 
+  /// `KERNEL::constant(args...)` exists and returns something convertible to `NT`. See provides_kernel.
   template <typename NT, typename KERNEL, typename... ARGS>
   concept provides_constant = requires(const ARGS &...args) {
     { KERNEL::constant(args...) } -> std::convertible_to<NT>;
   };
 
+  /// `KERNEL` provides both `kernel` and `constant` for these arguments. See provides_kernel.
   template <typename NT, typename KERNEL, typename ctype, int dim, typename... ARGS>
   concept is_valid_kernel =
       (provides_kernel<NT, KERNEL, ctype, dim, ARGS...> && provides_constant<NT, KERNEL, ARGS...>);
 
+  /// Fails compilation with a readable message if `KERNEL` does not satisfy is_valid_kernel.
   template <typename NT, typename KERNEL, typename ctype, int dim, typename... ARGS>
   consteval void check_kernel_requirements()
   {
@@ -73,9 +102,8 @@ namespace DiFfRG
   /**
    * @brief Common base of every integrator, carrying the identity MapScheduler needs.
    *
-   * There is deliberately no MPI-related setter here. Distribution is decided automatically by
-   * MapScheduler from the size of each map() call, so the feature has no user-facing API at all:
-   * an application scales across ranks without a single line of change.
+   * There is no MPI-related setter: MapScheduler decides from the size of each map() call whether and how to spread
+   * it over ranks, so an application runs on several ranks without changes.
    */
   class AbstractIntegrator
   {

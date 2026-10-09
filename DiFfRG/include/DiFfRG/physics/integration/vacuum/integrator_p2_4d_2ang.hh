@@ -2,6 +2,7 @@
 
 // DiFfRG
 #include <DiFfRG/common/math.hh>
+#include <DiFfRG/physics/integration/optimize.hh>
 #include <DiFfRG/physics/integration/quadrature_integrator.hh>
 
 // standard libraries
@@ -46,17 +47,30 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief Integrator_p2_4D_2ang integrates a kernel \f$K(p,\cos_1,\cos_2,\ldots)\f$ depending on the radial momentum
-   * \f$p\f$ and two angles on \f$[0,\pi]\f$ as
-   * $$
-   * \frac{2\pi}{(2\pi)^{d}} \,\int_0^\pi d\cos_1\,\int_0^\pi d\cos_2\,\int_0^\infty dp^2 p^{d-2}
-   * K(p,\cos_1,\cos_2,\ldots)
-   * $$
-   * in \f$d=4\f$ dimensions.
+   * @brief Integrates a kernel over a 4-dimensional momentum when it depends on \f$|q|\f$ and two angles.
    *
+   * \f[
+   *   I = \texttt{constant}(\ldots) + \frac{2\pi}{(2\pi)^4} \int_{-1}^{1} dc_1\, \sqrt{1-c_1^2}
+   *   \int_{-1}^{1} dc_2 \int_0^{q_\text{max}} dq\, q^3\, K(q, c_1, c_2, \ldots)\,,
+   * \f]
+   * where \f$c_1 = \cos\theta_1\f$ and \f$c_2 = \cos\theta_2\f$ are the cosines of the first two polar angles of
+   * 4-dimensional spherical coordinates, \f$\vec q = q\,(c_1,\, \sqrt{1-c_1^2}\, c_2,\, \ldots)\f$; the third angle is
+   * integrated out (factor \f$2\pi\f$). Here
+   * \f$q_\text{max} = \sqrt{x_\text{extent}}\, k\f$, with \f$x_\text{extent}\f$ in units of \f$k^2\f$ and the RG scale
+   * \f$k\f$ set by set_k() (initially 1). The weight \f$\sqrt{1-c_1^2}\f$ is built into the \f$c_1\f$ (Gauss-Chebyshev)
+   * quadrature, so the kernel does not include it. The `_p2` in the name is historical: the kernel receives \f$|q|\f$,
+   * not \f$q^2\f$.
+   *
+   * Kernel interface:
+   * - get(): `KERNEL::kernel(q, c1, c2, args...)` and `KERNEL::constant(args...)`
+   * - map(): `KERNEL::kernel(q, c1, c2, pos..., args...)` and `KERNEL::constant(pos..., args...)`
+   *
+   * @see QuadratureIntegrator for the kernel interface, Integrator_p2 for an example.
+   *
+   * @tparam dim momentum-space dimension, must be 4
    * @tparam NT numerical type of the result
-   * @tparam KERNEL kernel to be integrated, which must provide the static methods `kernel` and `constant`
-   * @tparam ExecutionSpace can be any execution space, e.g. GPU_exec, TBB_exec, or KokkosHost_exec.
+   * @tparam KERNEL kernel to be integrated, providing static `kernel` and `constant`
+   * @tparam ExecutionSpace GPU_exec, TBB_exec or KokkosHost_exec
    */
   template <int dim, typename NT, typename KERNEL, typename ExecutionSpace>
     requires(dim == 4)
@@ -75,6 +89,12 @@ namespace DiFfRG
      */
     using execution_space = ExecutionSpace;
 
+    /**
+     * @brief Construct from the parameter file.
+     *
+     * Reads the quadrature orders from `/integration/x_order`, `/integration/cos1_order` and
+     * `/integration/cos2_order`, and finds \f$x_\text{extent}\f$ with optimize_x_extent() for `KERNEL::Regulator`.
+     */
     Integrator_p2_4D_2ang(QuadratureProvider &quadrature_provider, const ConfigTree &config)
       requires provides_regulator<KERNEL>
         : Integrator_p2_4D_2ang(quadrature_provider,
@@ -83,6 +103,11 @@ namespace DiFfRG
     {
     }
 
+    /**
+     * @param quadrature_provider source of the quadrature rules
+     * @param grid_size number of quadrature points per axis, in the order of the kernel arguments
+     * @param x_extent upper limit of the radial integral, \f$q_\text{max}^2 / k^2\f$
+     */
     Integrator_p2_4D_2ang(QuadratureProvider &quadrature_provider, const std::array<size_t, 3> grid_size,
                           ctype x_extent = 2.)
         : Base(quadrature_provider, grid_size, {0, 0, -1.}, {std::sqrt(x_extent), 1, 1},
@@ -91,12 +116,14 @@ namespace DiFfRG
     {
     }
 
+    /// Set \f$x_\text{extent}\f$, so that \f$q_\text{max} = \sqrt{x_\text{extent}}\, k\f$.
     void set_x_extent(ctype x_extent)
     {
       this->x_extent = x_extent;
       Base::set_grid_extents({0, 0, -1}, {std::sqrt(x_extent) * k, 1, 1});
     }
 
+    /// Set the RG scale \f$k\f$, which moves the upper limit \f$q_\text{max} = \sqrt{x_\text{extent}}\, k\f$.
     void set_k(ctype k)
     {
       this->k = k;

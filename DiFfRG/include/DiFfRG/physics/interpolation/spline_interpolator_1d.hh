@@ -45,8 +45,9 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief What a kernel receives in place of a SplineInterpolator1D: read-only views of its device
-   * and host buffers plus its coordinates, in one precision. See has_kernel_handle.
+   * @brief Read-only view of a SplineInterpolator1D, as passed to integration kernels.
+   *
+   * Obtained from SplineInterpolator1D::handle(); offers the same index(), at() and operator(). See has_kernel_handle.
    */
   template <typename NT, typename Coordinates> class SplineInterpolator1DHandle
   {
@@ -83,16 +84,21 @@ namespace DiFfRG
   };
 
   /**
-   * @brief A spline interpolator for 1D data, callable from host AND device code.
+   * @brief Cubic-spline interpolation of data given on a 1D grid, usable in host and device code.
    *
-   * See LinearInterpolator1D for the host/device dispatch rationale.
+   * The spline is cubic in the fractional grid index \f$i(x)\f$ (Coordinates::backward), with the grid points at
+   * integer \f$i\f$. It is therefore a cubic in \f$x\f$ only for linear coordinates; on e.g. logarithmic coordinates
+   * it is a cubic in the logarithmic grid variable. The boundary conditions are set in update().
    *
-   * A double-precision interpolator also keeps a single-precision copy of its data and coordinates,
-   * refreshed by update() from the double data (so the spline itself is always solved in double).
-   * A single-precision kernel that takes handles (see has_kernel_handle) reads that copy.
+   * Outside the grid the boundary value is returned (constant extrapolation). The grid needs at least 2 points;
+   * periodic coordinate systems are not supported (use LinearInterpolator1D).
    *
-   * @tparam NT input data type
-   * @tparam Coordinates coordinate system of the input data
+   * The data is zero after construction; set it with update(). Host and device copies are kept in sync. A
+   * double-precision interpolator also keeps a single-precision copy (spline solved in double) for single-precision
+   * kernels, see handle().
+   *
+   * @tparam NT value type of the data (real, complex or autodiff)
+   * @tparam Coordinates 1D, non-periodic coordinate system of the grid
    */
   template <typename NT, typename Coordinates> class SplineInterpolator1D
   {
@@ -123,9 +129,9 @@ namespace DiFfRG
     static constexpr size_t dim = 1;
 
     /**
-     * @brief Construct a SplineInterpolator1D with internal, zeroed data and a coordinate system.
+     * @brief Allocate zeroed data on the grid of `coordinates`.
      *
-     * @param coordinates coordinate system of the data
+     * @param coordinates coordinate system of the data; its size() is the number of grid points
      */
     SplineInterpolator1D(const Coordinates &coordinates)
         : coordinates(coordinates), size(coordinates.size()),
@@ -148,15 +154,20 @@ namespace DiFfRG
       }
     }
 
-    /// Shallow copy of ALL views, valid in host and in device code. See LinearInterpolator1D.
+    /// Shallow copy: the copy shares the data, so later update() calls are seen by both.
     KOKKOS_DEFAULTED_FUNCTION SplineInterpolator1D(const SplineInterpolator1D &) = default;
 
     /**
-     * @brief Replace the data, leaving host AND device current. The only mutator.
+     * @brief Replace the data and recompute the spline. Host and device copies are both current when this returns.
      *
-     * See LinearInterpolator1D::update() for why the host fill is a plain copy and why the single
-     * trailing fence is not optional.
+     * The end conditions are given as first derivatives \f$df/di\f$ with respect to the grid index (not to x). If a
+     * value is left at its default (or is not finite), that end gets a natural boundary condition, \f$f'' = 0\f$.
+     *
+     * @param in_data values at the grid points, `get_coordinates().size()` entries, converted to NT
+     * @param lower_y1 derivative \f$df/di\f$ at the first grid point
+     * @param upper_y1 derivative \f$df/di\f$ at the last grid point
      */
+    // See LinearInterpolator1D::update() for the copy and fence.
     template <typename NT2>
     void update(const NT2 *in_data, const ctype lower_y1 = std::numeric_limits<ctype>::max(),
                 const ctype upper_y1 = std::numeric_limits<ctype>::max())
@@ -190,8 +201,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief The compact view of this interpolator a kernel computing in CT receives, see
-     * has_kernel_handle: the single-precision copy for a float kernel, the data itself otherwise.
+     * @brief The read-only view a kernel computing in precision CT receives (see has_kernel_handle).
+     *
+     * For CT = float and double data this reads the single-precision copy, otherwise the data itself.
      */
     template <typename CT> auto handle() const
     {
@@ -206,31 +218,24 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Host-side element access. Always valid, including on a copy.
+     * @brief Value at grid point i (host only).
      */
     NT operator[](size_t i) const { return host_values(i); }
 
     /**
-     * @brief Map a physical coordinate onto the (clamped) grid index.
+     * @brief Fractional grid index of the point x, i.e. Coordinates::backward(x).
      *
-     * Split out of operator() because it is the expensive half: for a logarithmic axis
-     * Coordinates::backward is a fp64 log1p, which costs ~200 fp64 instructions on current NVIDIA
-     * parts, against ~10 for the spline evaluation itself. A generated kernel that evaluates many
-     * dressings at the SAME momentum pays that log1p once per dressing, because each interpolator
-     * owns its own `coordinates` members and the compiler cannot prove they are equal across
-     * objects -- so it cannot CSE the transform. Hoisting index() lets the caller pay it once.
+     * `f(x) == f.at(f.index(x))`. Several interpolators on the same coordinate system can share one index() call,
+     * which saves the (possibly expensive) coordinate transform.
      *
-     * The returned index is only meaningful for interpolators sharing this coordinate system.
+     * @param x physical coordinate
      */
     ctype KOKKOS_FUNCTION index(const typename Coordinates::ctype x) const { return coordinates.backward(x); }
 
     /**
-     * @brief Interpolate at a grid index previously obtained from index().
+     * @brief Interpolate at a fractional grid index, as returned by index().
      *
-     * Clamping lives here, not in index(), so that index() depends ONLY on the coordinate system.
-     * That is exactly the precondition under which a caller may share one index across several
-     * interpolators; folding a size-dependent clamp into it would silently break sharing between
-     * interpolators of different length.
+     * @param raw_idx fractional grid index; values outside [0, size-1] are clamped
      */
     NT KOKKOS_FUNCTION at(const ctype raw_idx) const
     {
@@ -239,10 +244,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Interpolate the data at a given point.
+     * @brief Interpolate the data at the point x.
      *
-     * @param x the point at which to interpolate
-     * @return NT the interpolated value
+     * @param x physical coordinate
      */
     NT KOKKOS_FUNCTION operator()(const typename Coordinates::ctype x) const { return at(index(x)); }
 
@@ -254,10 +258,7 @@ namespace DiFfRG
     const Coordinates &get_coordinates() const { return coordinates; }
 
     /**
-     * @brief Read-only handle to the host values.
-     *
-     * Deliberately const: a host-side write would leave both the device buffers and the spline
-     * coefficients stale, and there is no public way to push it. Route mutations through update().
+     * @brief Pointer to the host copy of the values (read-only; change the data with update()).
      */
     const NT *data() const { return host_values.data(); }
 

@@ -21,60 +21,93 @@
 
 namespace DiFfRG
 {
-  // True iff the kernel declares `static constexpr bool matsubara_even = true`. Such a
-  // kernel was generated as the EVEN part in the Matsubara frequency, so the ±frequency
-  // sum kernel(+xt)+kernel(-xt) == 2*kernel(xt) and the kernel is evaluated only once.
-  // If the trait is absent or false, the integrator falls back to the explicit two-call
-  // form (always correct — an even kernel also satisfies kernel(xt)==kernel(-xt)).
+  /**
+   * @brief Whether `K` declares `static constexpr bool matsubara_even = true`.
+   *
+   * Promises that the kernel is even in the frequency \f$q_0\f$. The integrator then evaluates it once per
+   * frequency pair \f$\pm q_0\f$ instead of twice. Without the trait both signs are evaluated, which is always
+   * correct.
+   */
   template <class K> inline constexpr bool kernel_is_matsubara_even = requires { requires K::matsubara_even; };
 
-  // True iff the kernel declares `static constexpr bool matsubara_finite_extent = true`, i.e. every
-  // term it sums carries a dR/dt insertion whose argument confines the loop FREQUENCY, so the
-  // summand vanishes identically outside |p0| <= the frequency cutoff the integrator is given.
-  // Such a sum is finite and exact: enumerating the modes beats approximating the infinite sum
-  // with a Gaussian rule. If the trait is absent or false, the integrator keeps the Monien/vacuum
-  // rule, which is always correct -- a summand of finite extent is also an integrable one.
+  /**
+   * @brief Whether `K` declares `static constexpr bool matsubara_finite_extent = true`.
+   *
+   * Promises that the kernel vanishes for \f$|q_0|\f$ above the frequency cutoff (see
+   * QuadratureIntegrator_fT::set_frequency_cutoff), e.g. because every term carries a \f$\partial_t R\f$ of a
+   * regulator with compact support. The integrator may then sum the finitely many Matsubara modes exactly when that
+   * is cheaper than the approximate rule. Without the trait the approximate rule is used, which is always correct.
+   */
   template <class K>
   inline constexpr bool kernel_has_finite_matsubara_extent = requires { requires K::matsubara_finite_extent; };
 
-  // True iff the kernel declares `static constexpr bool matsubara_split = true`, i.e. it was
-  // generated as a MIXED flow and offers two entry points, `kernel_finite_extent` (the terms whose
-  // dR/dt insertion confines p0) and `kernel_tail` (the rest), which sum to `kernel`.
-  //
-  // The integrator then runs ONE launch over the concatenated axis [tail nodes | finite-extent
-  // nodes], evaluating only the matching half at each node. That is where the mixed case pays: a
-  // term's cost is dominated by the single trace it calls, and the generator's CSE is per-function,
-  // so each half's body computes only the traces it uses. On QCD_Nf2's ZA4 the one unbounded term
-  // carries a 313-line trace while the five confined ones carry 2918 + 609 + ... -- so the cheap
-  // half is what runs the full Gaussian rule and the expensive half runs a handful of exact modes.
+  /**
+   * @brief Whether `K` declares `static constexpr bool matsubara_split = true`.
+   *
+   * Such a kernel also provides `kernel_finite_extent` and `kernel_tail`, with the same signature as `kernel` and
+   * summing to it. `kernel_finite_extent` must vanish above the frequency cutoff (as for
+   * kernel_has_finite_matsubara_extent); `kernel_tail` is everything else. The integrator sums the first exactly
+   * where that is cheaper and the second with the approximate rule, in one launch.
+   */
+  // Where the split pays: a term's cost is dominated by the trace it calls and the generator's CSE
+  // is per function, so each half computes only its own traces. On QCD_Nf2's ZA4 the one unbounded
+  // term carries a 313-line trace and the five confined ones 2918 + 609 + ... lines, so the cheap
+  // half runs the full Gaussian rule and the expensive half a handful of exact modes.
   template <class K> inline constexpr bool kernel_has_matsubara_split = requires { requires K::matsubara_split; };
 
+  /**
+   * @brief Like QuadratureIntegrator, with the last integration variable replaced by a sum over bosonic Matsubara
+   * frequencies.
+   *
+   * \f[
+   *   I(\text{args}) = \texttt{constant}(\text{args}) + \sum_{\text{box}} w\, \Delta \;
+   *     T \sum_{n \in \mathbb{Z}} \text{kernel}(x_1, \ldots, x_\text{sdim}, 2\pi n T, \text{args}) \,,
+   * \f]
+   * where the first `sdim` = `dim - 1` variables are integrated over a box exactly as in QuadratureIntegrator, and
+   * \f$T\f$ is the temperature. The frequency is passed after the box variables: `kernel(x..., q0, args...)` for
+   * get(), `kernel(x..., q0, p..., args...)` for map() with the external point \f$p\f$. `constant` is as in
+   * QuadratureIntegrator.
+   *
+   * Only bosonic frequencies \f$2\pi n T\f$ are summed; a fermionic loop must shift \f$q_0\f$ by \f$\pi T\f$
+   * inside the kernel. The sum is approximated by a Gaussian rule for sums sized from the scale of the summand
+   * (\f$k\f$, or set_typical_E()). At \f$T = 0\f$, or when that rule would need more than
+   * `/integration/max_matsubara_size` nodes, the sum is replaced by the integral \f$\int dq_0/(2\pi)\f$, its
+   * \f$T \to 0\f$ limit. For kernels with the matsubara_finite_extent or matsubara_split traits the modes below the
+   * frequency cutoff may instead be summed exactly.
+   *
+   * @tparam dim number of box variables plus one for the frequency
+   * @tparam NT type of the result
+   * @tparam KERNEL kernel class, see QuadratureIntegrator
+   * @tparam ExecutionSpace where the integrand is evaluated: GPU_exec, TBB_exec or KokkosHost_exec
+   */
   template <int dim, typename NT, typename KERNEL, typename ExecutionSpace>
     requires(dim > 0)
   class QuadratureIntegrator_fT : public AbstractIntegrator
   {
   public:
-    /**
-     * @brief Numerical type to be used for integration tasks e.g. the argument or possible jacobians.
-     */
+    /// Type of the integration variables: `NT` with complex and autodiff parts stripped, e.g. `double`.
     using ctype = typename get_type::ctype<NT>;
-    /**
-     * @brief Execution space to be used for the integration, e.g. GPU_exec, TBB_exec.
-     */
+    /// The execution space the integrand is evaluated in.
     using execution_space = ExecutionSpace;
 
-    /**
-     * @brief Spatial dimension of the integration problem.
-     *
-     */
+    /// Number of integration variables besides the frequency (not necessarily the physical spatial dimension).
     static constexpr int sdim = dim - 1;
 
+    /**
+     * @param quadrature_provider source of quadrature nodes and weights, shared between integrators
+     * @param _grid_size number of quadrature points per box axis
+     * @param grid_min lower end of each box axis
+     * @param grid_max upper end of each box axis
+     * @param quadrature_type quadrature rule per box axis
+     * @param T temperature
+     * @param k initial RG scale, see set_k()
+     */
     QuadratureIntegrator_fT(QuadratureProvider &quadrature_provider, const std::array<size_t, sdim> _grid_size,
                             std::array<ctype, sdim> grid_min, std::array<ctype, sdim> grid_max,
                             const std::array<QuadratureType, sdim> quadrature_type, const ctype T = 1,
-                            const ctype typical_E = 1)
+                            const ctype k = 1)
         : space(quadrature_provider.template next_execution_space<ExecutionSpace>()),
-          quadrature_provider(quadrature_provider), T(T), m_k(typical_E),
+          quadrature_provider(quadrature_provider), T(T), m_k(k),
           // A SPLIT kernel does not carry `matsubara_finite_extent` -- only its finite-extent HALF
           // has that property -- so it has to opt in here too, or its expensive half would keep
           // running the Gaussian rule and the split would be pure overhead.
@@ -92,6 +125,7 @@ namespace DiFfRG
       refresh_matsubara();
     }
 
+    /// Change the box, keeping the quadrature rules; see QuadratureIntegrator::set_grid_extents.
     void set_grid_extents(const std::array<ctype, sdim> grid_min, const std::array<ctype, sdim> grid_max)
     {
       for (int d = 0; d < sdim; ++d) {
@@ -104,6 +138,7 @@ namespace DiFfRG
       }
     }
 
+    /// Set the temperature and rebuild the frequency rule.
     void set_T(const ctype T)
     {
       this->T = T;
@@ -111,12 +146,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief The RG scale, which is the DEFAULT frequency scale.
+     * @brief Set the RG scale \f$k\f$, the scale the frequency rule is sized for unless set_typical_E() was given one.
      *
-     * Called by the wrappers on every RG step. It no longer overwrites a model-supplied
-     * `typical_E` -- it is only consulted when none was set -- so a model may set `typical_E`
-     * once, at construction, and have it survive. Before, it could not: `set_typical_E` was public
-     * on every wrapper but `set_k` clobbered it on the next RG step, with no diagnostic.
+     * Call it every RG step (all_set_k() does). Changes below a relative \f$10^{-6}\f$ are ignored.
      */
     void set_k(const ctype k)
     {
@@ -126,11 +158,10 @@ namespace DiFfRG
     }
 
     /**
-     * @brief The heaviest scale the summand carries, if the model knows it. Zero means "only k".
+     * @brief Set the energy scale the frequency rule is sized for, replacing \f$k\f$. Zero (default) means \f$k\f$.
      *
-     * This REPLACES `k` as the scale the frequency rule is built from; `k` is only the default
-     * for a model that never says. It sizes the Monien rule (which must reach past it), scales the
-     * vacuum rule's tangent map (which spends its nodes around it), and decides between the two.
+     * It decides how far the Matsubara rule must reach and where the \f$T = 0\f$ integral places its nodes, and so
+     * also whether the sum or the integral is used.
      *
      * Report the scale whose thermal content matters, not simply the largest one present: a
      * summand carrying a scale below `typical_E` has its thermal content silently discarded when
@@ -143,9 +174,7 @@ namespace DiFfRG
     void set_typical_E(const ctype typical_E)
     {
       // Relative to the quantity compared, and matched to the tolerance the provider's cache uses
-      // to decide two rules are the same. The old guard scaled with T, an unrelated scale: at
-      // small T it collapsed to ~1e-15 and rebuilt on every step, and at T >> typical_E it
-      // swallowed real changes and made typical_E a staircase in k.
+      // to decide two rules are the same.
       if (is_close(m_typical_E_user, typical_E, 1e-6 * std::fabs(typical_E))) return;
 
       m_typical_E_user = typical_E;
@@ -153,15 +182,13 @@ namespace DiFfRG
     }
 
     /**
-     * @brief The frequency beyond which the summand is known to vanish, enabling the exact sum.
+     * @brief Set the frequency \f$\Lambda_0\f$ above which the summand vanishes, enabling the exact sum.
      *
-     * Only meaningful for a kernel whose every term carries a `dR/dt` insertion that confines the
-     * loop frequency (see kernel_has_finite_matsubara_extent). For a 4D regulator of extent `x_extent`
-     * (in `q^2/k^2`) the summand's support is the ball `q0^2 + |q|^2 <= x_extent * k^2`, so the
-     * cutoff is `sqrt(x_extent) * k` -- the SAME number the spatial grid is already cut at, which
-     * is why the wrappers can supply it without any new configuration.
+     * Only used for kernels with the matsubara_finite_extent or matsubara_split trait. For a 4D regulator cut off at
+     * \f$q_0^2 + \vec q^{\,2} \le x_\text{extent}\, k^2\f$ this is \f$\Lambda_0 = \sqrt{x_\text{extent}}\, k\f$, the
+     * same value as the spatial cutoff; the wrappers set it that way.
      *
-     * Passing zero (the default) disables the exact sum and keeps the Monien/vacuum rule.
+     * Passing zero (the default) disables the exact sum and keeps the approximate rule.
      */
     void set_frequency_cutoff(const ctype freq_cutoff)
     {
@@ -171,12 +198,10 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Force the exact sum on (or off) regardless of the kernel's trait.
+     * @brief Allow (or forbid) the exact sum regardless of the kernel's traits.
      *
-     * The trait is generated from the diagram algebra and is the right default, but a model that
-     * knows better -- or a study that wants to price the exact sum against the Gaussian rule on the
-     * same kernel -- needs to be able to say so. Forcing it ON for a kernel whose summand does NOT
-     * vanish above the cutoff silently truncates the sum.
+     * The default follows the traits. Allowing it for a kernel that does not vanish above the frequency cutoff
+     * silently truncates the sum.
      */
     void set_allow_exact_matsubara_sum(const bool allow)
     {
@@ -185,6 +210,11 @@ namespace DiFfRG
       refresh_matsubara();
     }
 
+    /**
+     * @brief Sum exactly up to `margin` times the frequency cutoff, plus one mode \f$2\pi T\f$. Default 1.
+     *
+     * Values \f$\le 0\f$ are ignored.
+     */
     void set_matsubara_extent_margin(const ctype margin)
     {
       if (!(margin > ctype(0)) || is_close(m_extent_margin, margin)) return;
@@ -272,6 +302,11 @@ namespace DiFfRG
       return out;
     }
 
+    /**
+     * @brief Compute the integral for the extra kernel arguments @p t and write it to @p dest.
+     *
+     * Blocks until the result is available.
+     */
     template <typename... T> void get(NT &dest, const T &...t) const
     {
       if (!m_result_views_initialized) {
@@ -295,6 +330,7 @@ namespace DiFfRG
       dest = OT(result);
     }
 
+    /// Compute the integral into a Kokkos reduction target @p dest (e.g. a rank-0 View) without waiting.
     template <typename OT, typename... T>
       requires(!std::is_same_v<OT, NT> && !internal::is_widened_result<OT, NT>)
     void get(OT &dest, const T &...t) const
@@ -302,6 +338,7 @@ namespace DiFfRG
       get(space, dest, t...);
     }
 
+    /// Launch the integral on @p space into a Kokkos reduction target @p dest without waiting.
     template <typename OT, typename... Args>
       requires(!std::is_same_v<OT, NT> && !internal::is_widened_result<OT, NT>)
     void get(ExecutionSpace &space, OT &dest, const Args &...t) const
@@ -342,6 +379,8 @@ namespace DiFfRG
                               KokkosNDLambdaWrapperReduction<dim, decltype(functor)>(functor), dest);
     }
 
+    /// Launch the integrals for all points of @p coordinates into a device view, without waiting or MPI
+    /// distribution. `integral_view(i)` receives the result at `coordinates.forward(coordinates.from_linear_index(i))`.
     template <typename view_type, typename Coordinates, typename... Args>
     void map(ExecutionSpace &space, const view_type integral_view, const Coordinates &coordinates, const Args &...args)
     {
@@ -541,7 +580,7 @@ namespace DiFfRG
           });
     }
 
-    /// Points evaluated per external grid point. Half of the scheduler's cost score.
+    /// Number of quadrature points, i.e. kernel evaluations per integral (frequency nodes included).
     size_t quadrature_volume() const
     {
       size_t volume = 1;
@@ -564,6 +603,7 @@ namespace DiFfRG
       run_map_points(dest, PointArg<internal::point_arg_value_t<A>>(args)...);
     }
 
+    /// How a device map_points() distributes its work; see MapPointsPolicy.
     void set_map_points_policy(const MapPointsPolicy policy) { m_map_points_policy = policy; }
 
     /// The kernel launch of map_points(). Public only because nvcc rejects extended device lambdas
@@ -653,6 +693,11 @@ namespace DiFfRG
       }
     }
 
+    /**
+     * @brief Compute the integral at every point of a grid of external values; see QuadratureIntegrator::map.
+     *
+     * The kernel receives `(x..., q0, p..., args...)`, with \f$p\f$ the external point.
+     */
     template <typename OT, typename Coordinates, typename... Args>
       requires internal::is_map_result<OT, NT>
     auto map(OT *dest, const Coordinates &coordinates, const Args &...args)
@@ -873,6 +918,12 @@ namespace DiFfRG
     mutable bool m_result_views_initialized = false;
   };
 
+  /**
+   * @brief QuadratureIntegrator_fT on the host with TBB.
+   *
+   * Same interface and kernel requirements as the general class. Each integral is summed in a fixed order, so results
+   * do not depend on the number of threads.
+   */
   template <int dim, typename NT, typename KERNEL>
   class QuadratureIntegrator_fT<dim, NT, KERNEL, TBB_exec>
       : public QuadratureIntegrator_fT<dim, NT, KERNEL, KokkosHost_exec>
@@ -880,23 +931,24 @@ namespace DiFfRG
     using Base = QuadratureIntegrator_fT<dim, NT, KERNEL, KokkosHost_exec>;
 
   public:
-    /**
-     * @brief Numerical type to be used for integration tasks e.g. the argument or
-     * possible jacobians.
-     */
+    /// Type of the integration variables.
     using ctype = typename get_type::ctype<NT>;
+    /// The execution space, TBB_exec.
     using execution_space = TBB_exec;
 
-    static constexpr int sdim = dim - 1; // spatial dimension
+    /// Number of integration variables besides the frequency.
+    static constexpr int sdim = dim - 1;
 
+    /// See QuadratureIntegrator_fT::QuadratureIntegrator_fT.
     QuadratureIntegrator_fT(QuadratureProvider &quadrature_provider, const std::array<size_t, sdim> _grid_size,
                             std::array<ctype, sdim> grid_min, std::array<ctype, sdim> grid_max,
                             const std::array<QuadratureType, sdim> quadrature_type, const ctype T = 1,
-                            const ctype typical_E = 1)
-        : Base(quadrature_provider, _grid_size, grid_min, grid_max, quadrature_type, T, typical_E)
+                            const ctype k = 1)
+        : Base(quadrature_provider, _grid_size, grid_min, grid_max, quadrature_type, T, k)
     {
     }
 
+    /// See QuadratureIntegrator_fT::get.
     template <typename... Args>
       requires internal::accepts_args<NT, KERNEL, ctype, dim, Args...>
     void get(NT &dest, const Args &...t) const
@@ -954,6 +1006,7 @@ namespace DiFfRG
       internal::map_points_by_get(*this, dest, PointArg<internal::point_arg_value_t<A>>(args)...);
     }
 
+    /// map() without MPI distribution: computes all of @p coordinates on this rank and waits for the result.
     template <typename OT, typename Coordinates, typename... Args>
       requires internal::is_map_result<OT, NT>
     void map(execution_space &, OT *dest, const Coordinates &coordinates, const Args &...args)
@@ -982,6 +1035,7 @@ namespace DiFfRG
       });
     }
 
+    /// See QuadratureIntegrator_fT::map.
     template <typename OT, typename Coordinates, typename... Args>
       requires internal::is_map_result<OT, NT>
     auto map(OT *dest, const Coordinates &coordinates, const Args &...args)
