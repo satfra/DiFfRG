@@ -82,7 +82,7 @@ namespace DiFfRG
   // d^3/de^3 cothS
   template <typename T1, typename T2> auto KOKKOS_FORCEINLINE_FUNCTION dddcothS(const T1 e, const T2 T)
   {
-    return -(ddcothS(e, T) * cothS(e, T) + powr<2>(dcothS(e, T)));
+    return -(ddcothS(e, T) * cothS(e, T) + powr<2>(dcothS(e, T))) / T;
   }
   // tanh(e/2T)
   template <typename T1, typename T2> auto KOKKOS_FORCEINLINE_FUNCTION tanhS(const T1 e, const T2 T)

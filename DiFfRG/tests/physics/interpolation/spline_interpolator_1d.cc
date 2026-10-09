@@ -154,3 +154,21 @@ TEMPLATE_TEST_CASE("Test GPU 1D spline interpolation", "[float][double][complex]
   CHECK(is_close(res_gpu, res_local, expected_precision));
 }
 
+
+TEST_CASE("Clamped 1D spline reproduces a cubic", "[interpolator]")
+{
+  DiFfRG::Init();
+
+  // On a unit-spaced grid with the exact end slopes, the clamped cubic spline is the cubic itself.
+  const auto f = [](double x) { return x * x * x - 2. * x * x; };
+  const size_t n = 11;
+  std::vector<double> in_data(n);
+  for (size_t j = 0; j < n; ++j)
+    in_data[j] = f(double(j));
+  LinearCoordinates1D<double> coords(n, 0., double(n - 1));
+  SplineInterpolator1D<double, LinearCoordinates1D<double>> interpolator(coords);
+  interpolator.update(in_data.data(), 0., 3. * 100. - 4. * 10.);
+
+  for (const double x : {0.1, 0.25, 3.25, 4.5, 6.7, 9.9})
+    CHECK(is_close(interpolator(x), f(x), 1e-10));
+}

@@ -88,7 +88,7 @@ namespace DiFfRG
       const auto mexp = exp(xb);
       const auto mexpm1 = expm1(xb);
       using T = std::decay_t<decltype(xb)>;
-      return T(b) * mexp * powr<b - 1>(q2 / k2) * (xb - mexpm1) / powr<2>(mexpm1);
+      return T(b) * powr<b - 1>(q2 / k2) * (mexpm1 - xb * mexp) / powr<2>(mexpm1);
     }
 
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RBdot(const NT1 k2, const NT2 q2)
@@ -658,7 +658,7 @@ namespace DiFfRG
     }
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RB(const NT1 k2, const NT2 q2)
     {
-      using std::exp;
+      using Kokkos::exp;
       const auto x = q2 / k2;
       const auto f = get_f(std::make_integer_sequence<int, order>{}, x);
       return k2 * exp(-f);
@@ -666,7 +666,7 @@ namespace DiFfRG
 
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RBdot(const NT1 k2, const NT2 q2)
     {
-      using std::exp;
+      using Kokkos::exp;
       const auto x = q2 / k2;
       const auto f = get_f(std::make_integer_sequence<int, order>{}, x);
       const auto df = get_df(std::make_integer_sequence<int, order>{}, x);
@@ -675,7 +675,7 @@ namespace DiFfRG
 
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto dq2RB(const NT1 k2, const NT2 q2)
     {
-      using std::exp;
+      using Kokkos::exp;
       const auto x = q2 / k2;
       const auto f = get_f(std::make_integer_sequence<int, order>{}, x);
       const auto df = get_df(std::make_integer_sequence<int, order>{}, x);

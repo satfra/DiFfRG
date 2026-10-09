@@ -72,7 +72,7 @@ namespace DiFfRG
                    2. * powr<2>(SechFiniteT(((mu + k * powr<1>(sqrt(1 + mf2)))), T)) *
                        (3. * k * (1. + mf2) * T +
                         ((1 + mf2) * powr<2>(k) - 3 * powr<2>(T) -
-                         3. * Cosh((mu + k * powr<1>(sqrt(1. + mf2))) / T * 0.5) * powr<2>(T)) *
+                         3. * Cosh((mu + k * powr<1>(sqrt(1. + mf2))) / T) * powr<2>(T)) *
                             powr<1>(sqrt(1. + mf2)) * TanhFiniteT(((mu + k * powr<1>(sqrt(1. + mf2)))), T))));
         else
           throw std::runtime_error("Threshold Function F is not implemented for given indices");

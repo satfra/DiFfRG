@@ -58,7 +58,7 @@ namespace DiFfRG
         const NT upper = values(sidx, uidx);
         const NT cl = coeffs(sidx, lidx);
         const NT cu = coeffs(sidx, uidx);
-        const NT cubic = t * tm1 * ((t + 1) * cl - (t - 2) * cu);
+        const NT cubic = t * tm1 * ((t + 1) * cu - (t - 2) * cl);
         if constexpr (std::is_arithmetic_v<NT>)
           return Kokkos::fma(t, upper, Kokkos::fma(-t, lower, lower)) + cubic; // linear + cubic
         else
