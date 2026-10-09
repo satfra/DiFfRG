@@ -63,7 +63,7 @@ jobs:
           cmake -S DiFfRG -B "$HOME/diffrg-smoke-build" \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUNDLED_DIR="$HOME/diffrg-smoke/bundled" \
-            -DDiFfRG_TEST=ON -DDiFfRG_DOCUMENTATION=OFF -DMARCH=none
+            -DDIFFRG_TEST=ON -DDIFFRG_DOCS=OFF -DMARCH=none
           cmake --build "$HOME/diffrg-smoke-build" -j 3
           if [[ "${{ inputs.run_smoke }}" == quick-tests ]]; then
             ctest --test-dir "$HOME/diffrg-smoke-build" -LE slow -j1 --output-on-failure

@@ -38,8 +38,8 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/superbuild.cmake)
 # DiFfRG
 # ##############################################################################
 
-option(DiFfRG_TEST "Build DiFfRG tests" OFF)
-option(DiFfRG_DOCUMENTATION "Build DiFfRG documentation" ON)
+diffrg_option(DIFFRG_TEST DiFfRG_TEST "Build DiFfRG tests" OFF)
+diffrg_option(DIFFRG_DOCS DiFfRG_DOCUMENTATION "Build DiFfRG documentation" ON)
 
 # Only forward a CUDA compiler if one was resolved; passing an empty value would pin the
 # cache entry to nothing and break the sub-build's own detection.
@@ -87,8 +87,8 @@ ExternalProject_Add(
     -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
     -DNATIVE:BOOL=${NATIVE}
     -DMARCH:STRING=${MARCH}
-    -DDiFfRG_TEST:BOOL=${DiFfRG_TEST}
-    -DDiFfRG_DOCUMENTATION:BOOL=${DiFfRG_DOCUMENTATION}
+    -DDIFFRG_TEST:BOOL=${DIFFRG_TEST}
+    -DDIFFRG_DOCS:BOOL=${DIFFRG_DOCS}
     # lib/ never lib64/ (see general_dep): keeps DiFfRGConfig.cmake at
     # <prefix>/lib/cmake/DiFfRG on every distro, as the docs advertise.
     -DCMAKE_INSTALL_LIBDIR:STRING=lib
@@ -98,8 +98,7 @@ ExternalProject_Add(
 # Forwarding DiFfRG tests for CTest to discover them
 # ##############################################################################
 
-option(DiFfRG_TEST "Build tests" OFF)
-if(DiFfRG_TEST)
+if(DIFFRG_TEST)
   enable_testing()
   add_subdirectory(DiFfRG/tests)
 endif()

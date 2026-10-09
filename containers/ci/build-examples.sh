@@ -40,8 +40,8 @@ cmake -S "${workspace}/DiFfRG" -B "${library_build_dir}" \
   -DBUNDLED_DIR="${bundle_dir}" \
   -DCMAKE_INSTALL_PREFIX="${install_prefix}" \
   -DCMAKE_BUILD_TYPE=Release \
-  -DDiFfRG_TEST=OFF \
-  -DDiFfRG_DOCUMENTATION=OFF \
+  -DDIFFRG_TEST=OFF \
+  -DDIFFRG_DOCS=OFF \
   -DMARCH=none >> "${library_log}" 2>&1
 cmake --build "${library_build_dir}" --target install -j "${build_jobs}" >> "${library_log}" 2>&1
 

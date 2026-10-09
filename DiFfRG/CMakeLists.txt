@@ -31,7 +31,9 @@ set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${BUNDLED_DIR})
 # Documentation
 # ##############################################################################
 
-option(DiFfRG_DOCUMENTATION "Build documentation" ON)
+diffrg_option(DIFFRG_DOCS DiFfRG_DOCUMENTATION "Build documentation" ON)
+diffrg_option(DIFFRG_DOCS_ONLY DiFfRG_ONLY_DOCUMENTATION
+              "Configure only the documentation, not the library" OFF)
 
 # The documentation is a single Sphinx site bundling the C++ (Doxygen via
 # doxysphinx), Python (sphinx-autoapi) and Mathematica (generated from ::usage
@@ -43,7 +45,7 @@ find_package(Doxygen)
 find_program(SPHINX_BUILD_EXECUTABLE sphinx-build)
 find_program(DOXYSPHINX_EXECUTABLE doxysphinx)
 
-if(DiFfRG_DOCUMENTATION AND DOXYGEN_FOUND AND SPHINX_BUILD_EXECUTABLE
+if(DIFFRG_DOCS AND DOXYGEN_FOUND AND SPHINX_BUILD_EXECUTABLE
    AND DOXYSPHINX_EXECUTABLE)
   message(STATUS "Documentation target configured (Doxygen + doxysphinx + Sphinx)")
 
@@ -62,7 +64,7 @@ if(DiFfRG_DOCUMENTATION AND DOXYGEN_FOUND AND SPHINX_BUILD_EXECUTABLE
     CODE "file(CREATE_LINK ${CMAKE_INSTALL_PREFIX}/documentation/html/index.html ${CMAKE_INSTALL_PREFIX}/Documentation.html SYMBOLIC)"
   )
 
-elseif(DiFfRG_DOCUMENTATION)
+elseif(DIFFRG_DOCS)
   # Report exactly which tools are missing so the user knows what to supply.
   set(_doc_missing "")
   if(NOT DOXYGEN_FOUND)
@@ -86,10 +88,10 @@ elseif(DiFfRG_DOCUMENTATION)
     "    then re-run cmake with that environment ACTIVE so the tools are on PATH.\n"
     "  Or skip cmake entirely and build the docs directly:\n"
     "        bash ${CMAKE_CURRENT_SOURCE_DIR}/documentation/build.sh\n"
-    "  Configure with -DDiFfRG_DOCUMENTATION=OFF to silence this warning.")
+    "  Configure with -DDIFFRG_DOCS=OFF to silence this warning.")
 endif()
 
-if(DiFfRG_ONLY_DOCUMENTATION)
+if(DIFFRG_DOCS_ONLY)
   return()
 endif()
 
@@ -111,8 +113,8 @@ add_subdirectory(src)
 # Testing
 # ##############################################################################
 
-option(DiFfRG_TEST "Build tests" OFF)
-if(DiFfRG_TEST)
+diffrg_option(DIFFRG_TEST DiFfRG_TEST "Build tests" OFF)
+if(DIFFRG_TEST)
   enable_testing()
   add_subdirectory(tests)
 

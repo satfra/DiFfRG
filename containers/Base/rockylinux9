@@ -28,7 +28,7 @@ COPY . /DiFfRG
 
 RUN cmake -S /DiFfRG -B /build \
         -DCMAKE_BUILD_TYPE=Release \
-        -DGPU=OFF -DMPI=OFF -DDiFfRG_DOCUMENTATION=OFF \
+        -DGPU=OFF -DMPI=OFF -DDIFFRG_DOCS=OFF \
     && cmake --build /build -j ${threads} \
-    && cmake -DDiFfRG_TEST=ON /build/DiFfRG/src/DiFfRG-build \
+    && cmake -DDIFFRG_TEST=ON /build/DiFfRG/src/DiFfRG-build \
     && cmake --build /build/DiFfRG/src/DiFfRG-build -j ${threads}

@@ -165,8 +165,8 @@ jobs:
           cmake -S DiFfRG -B DiFfRG/bin \
             -DBUNDLED_DIR="${DiFfRG_BUNDLED_DIR}" \
             -DCMAKE_BUILD_TYPE=Release \
-            -DDiFfRG_TEST=ON \
-            -DDiFfRG_DOCUMENTATION=OFF \
+            -DDIFFRG_TEST=ON \
+            -DDIFFRG_DOCS=OFF \
             -DMARCH=none
           cmake --build DiFfRG/bin -j "${{ env.DIFFRG_BUILD_JOBS }}"
 

@@ -112,3 +112,21 @@ macro(diffrg_resolve_march out_march out_flag)
     set(${out_flag} "-march=${${out_march}}")
   endif()
 endmacro()
+
+# ##############################################################################
+# Options with a deprecated spelling
+# ##############################################################################
+#
+# Like option(<name> <doc> <default>), but if the deprecated <old_name> was set
+# (e.g. -DDiFfRG_TEST=ON) and <name> was not, <name> takes its value. The old
+# spellings must keep working: the release recipes in containers/release/ pass
+# them, and editing those recipes would change the dependency-bundle hash.
+function(diffrg_option name old_name doc default)
+  if(DEFINED ${old_name} AND NOT DEFINED ${name})
+    message(DEPRECATION "${old_name} is deprecated, use ${name} instead.")
+    set(${name}
+        ${${old_name}}
+        CACHE BOOL "${doc}")
+  endif()
+  option(${name} "${doc}" ${default})
+endfunction()

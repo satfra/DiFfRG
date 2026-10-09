@@ -179,7 +179,7 @@ for distro in ${distros}; do
       cmake -S /src/DiFfRG -B /work/build \
           -DCMAKE_BUILD_TYPE=Release \
           -DBUNDLED_DIR=/work/diffrg/bundled \
-          -DDiFfRG_TEST=ON -DDiFfRG_DOCUMENTATION=OFF -DMARCH=none >/work/configure.log 2>&1 \
+          -DDIFFRG_TEST=ON -DDIFFRG_DOCS=OFF -DMARCH=none >/work/configure.log 2>&1 \
         || { cat /work/configure.log; exit 1; }
       cat /work/configure.log
       grep -q 'MPI support has been set to $([[ ${mpi} == none ]] && echo OFF || echo ON)' /work/configure.log

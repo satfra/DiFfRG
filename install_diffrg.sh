@@ -765,7 +765,7 @@ if [[ ${mode} == prebuilt ]]; then
     -DCMAKE_INSTALL_LIBDIR=lib \
     ${mathematica_dir:+-DDiFfRG_MATHEMATICA_INSTALL_DIR="${mathematica_dir}"} \
     ${cuda_arch:+-DDiFfRG_CUDA_ARCH="${cuda_arch}"} \
-    -DDiFfRG_DOCUMENTATION="$([[ ${opt_docs} -eq 1 ]] && echo ON || echo OFF)"
+    -DDIFFRG_DOCS="$([[ ${opt_docs} -eq 1 ]] && echo ON || echo OFF)"
   cmake --build "${build_dir}/library-build" -j "${threads}"
   cmake --install "${build_dir}/library-build"
 else
@@ -788,7 +788,7 @@ else
     -DMPI="$([[ ${opt_mpi} -eq 1 ]] && echo ON || echo OFF)" \
     -DGPU="$([[ ${opt_gpu} -eq 1 ]] && echo ON || echo OFF)" \
     -DPETSC_MUMPS="$([[ ${opt_mumps} -eq 1 ]] && echo ON || echo OFF)" \
-    -DDiFfRG_DOCUMENTATION="$([[ ${opt_docs} -eq 1 ]] && echo ON || echo OFF)" \
+    -DDIFFRG_DOCS="$([[ ${opt_docs} -eq 1 ]] && echo ON || echo OFF)" \
     -DMARCH="${march}" \
     ${cuda_arch:+-DDiFfRG_CUDA_ARCH="${cuda_arch}"} \
     ${kokkos_arch:+-DKokkos_ARCH="${kokkos_arch}" -DKokkos_ARCH_LIST="${kokkos_arch}"} \

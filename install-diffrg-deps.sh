@@ -448,7 +448,7 @@ if [[ $build_library -eq 1 ]]; then
     -DBUNDLED_DIR="$prefix/bundled" \
     -DCMAKE_INSTALL_PREFIX="$prefix" \
     -DCMAKE_INSTALL_LIBDIR=lib \
-    -DDiFfRG_DOCUMENTATION=OFF
+    -DDIFFRG_DOCS=OFF
   cmake --build "$prefix/library-build" -j "$threads"
   cmake --install "$prefix/library-build"
   info "DiFfRG installed to $prefix"
