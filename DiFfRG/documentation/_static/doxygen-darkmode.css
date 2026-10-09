@@ -106,3 +106,20 @@ html[data-mode="dark"] .doxygen-content img.footer {
   border-radius: 0;
   padding: 0;
 }
+
+/*
+ * Class diagrams are Graphviz SVGs (dark lines and text on a transparent
+ * background), embedded as <iframe>. In dark mode, invert them and rotate the
+ * hue back so the accent colours keep their meaning. `color-scheme: light`
+ * matches the iframe's own document; with a mismatch the browser paints an
+ * opaque canvas behind it.
+ */
+html[data-theme="dark"] .doxygen-content .dotgraph iframe,
+html[data-theme="dark"] .doxygen-content div.dyncontent iframe,
+html[data-theme="dark"] .doxygen-content div.center iframe,
+html[data-mode="dark"] .doxygen-content .dotgraph iframe,
+html[data-mode="dark"] .doxygen-content div.dyncontent iframe,
+html[data-mode="dark"] .doxygen-content div.center iframe {
+  filter: invert(1) hue-rotate(180deg) brightness(0.9);
+  color-scheme: light;
+}
