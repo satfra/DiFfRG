@@ -118,11 +118,17 @@ namespace DiFfRG
       virtual IndexSet get_differential_indices() const override
       {
         ComponentMask component_mask(model.template differential_components<dim>());
+        IndexSet differential = DoFTools::extract_dofs(dof_handler, component_mask);
+        // A constrained dof (hanging node, model affine constraint) has an empty residual row: its value is fixed by
+        // the constraints, not by an equation, see constrained().
+        IndexSet constrained_dofs(dof_handler.n_dofs());
+        for (const auto &line : discretization.get_constraints().get_lines())
+          constrained_dofs.add_index(line.index);
+        differential.subtract_set(constrained_dofs);
         // Restricted to owned rows under the distributed policy: deal.II writes every index of this set into a
         // distributed vector and compresses with VectorOperation::insert, so an unrestricted set has every rank
         // inserting into every entry.
-        return restrict_to_owned<VectorType>(DoFTools::extract_dofs(dof_handler, component_mask),
-                                             discretization.get_locally_owned_dofs());
+        return restrict_to_owned<VectorType>(differential, discretization.get_locally_owned_dofs());
       }
 
       virtual SnapshotSpatialState capture_snapshot_state(const VectorType &spatial_replica) const override
@@ -157,12 +163,13 @@ namespace DiFfRG
           names_dot.push_back(name + "_dot");
           names_residual.push_back(name + "_residual");
         }
+        const VectorType u = constrained(solution);
         auto fe_out = data_out.fields();
-        fe_out.attach(dof_handler, solution, names);
-        if (dt_solution.size() > 0) fe_out.attach(dof_handler, dt_solution, names_dot);
+        fe_out.attach(dof_handler, u, names);
+        if (dt_solution.size() > 0) fe_out.attach(dof_handler, constrained_dot(solution, dt_solution), names_dot);
         if (residual.size() > 0) fe_out.attach(dof_handler, residual, names_residual);
 
-        readouts(data_out, solution, variables);
+        readouts(data_out, u, variables);
       }
 
       /// The model's dt_variables, with the extractors at the EoM.
@@ -172,7 +179,7 @@ namespace DiFfRG
         Timer timer;
         Extractors extracted{};
         if constexpr (Components::count_extractors() > 0)
-          extract(extracted, spatial_solution, variables, true, false, false);
+          extract(extracted, constrained(spatial_solution), variables, true, false, false);
         model.dt_variables(residual, v_tie(variables, std::as_const(extracted)));
         Kokkos::fence();
         timings_variable_residual.push_back(timer.wall_time());
@@ -184,7 +191,7 @@ namespace DiFfRG
         Timer timer;
         Extractors extracted{};
         if constexpr (Components::count_extractors() > 0)
-          extract(extracted, spatial_solution, variables, true, false, false);
+          extract(extracted, constrained(spatial_solution), variables, true, false, false);
         model.template jacobian_variables<0>(jacobian, v_tie(variables, std::as_const(extracted)));
         Kokkos::fence();
         timings_variable_jacobian.push_back(timer.wall_time());
@@ -491,6 +498,31 @@ namespace DiFfRG
       static double average(const std::vector<double> &t)
       {
         return t.empty() ? 0. : std::accumulate(t.begin(), t.end(), 0.) / t.size();
+      }
+
+      /**
+       * @brief @p u with the constraints applied: hanging-node values from their masters, and the model's affine
+       * constraints. The timesteppers do not apply them, so the constrained entries of their vectors are stale, and
+       * the assembly reads this instead.
+       */
+      VectorType constrained(const VectorType &u) const
+      {
+        VectorType result(u);
+        discretization.get_constraints().distribute(result);
+        return result;
+      }
+
+      /**
+       * @brief The time derivative of the constrained solution: @p u_dot with the homogeneous constraints applied.
+       * Applying the constraints is affine, D(x) = C x + g, so this is D(u + u_dot) - D(u) = C u_dot.
+       */
+      VectorType constrained_dot(const VectorType &u, const VectorType &u_dot) const
+      {
+        VectorType result(u);
+        result += u_dot;
+        discretization.get_constraints().distribute(result);
+        result -= constrained(u);
+        return result;
       }
 
       Discretization &discretization;
