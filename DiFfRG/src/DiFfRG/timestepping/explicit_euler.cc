@@ -16,6 +16,7 @@ namespace DiFfRG
   void TimeStepperExplicitEuler_impl<VectorType, SparseMatrixType, dim>::run_segment(
       AbstractFlowingVariables<NumberType, VectorType> &initial_condition, double start, double stop)
   {
+    this->require_no_variables(initial_condition, "TimeStepperExplicitEuler");
 
     const SparseMatrixType &mass_matrix = assembler.get_mass_matrix();
     InverseSparseMatrixType inverse_mass_matrix;

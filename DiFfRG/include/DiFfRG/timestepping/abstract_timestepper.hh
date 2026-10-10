@@ -63,8 +63,8 @@
  * | TimeStepperImplicitEuler             | backward Euler                                 | \f$u\f$ only            | adaptive         | yes          | no  |
  * | TimeStepperTRBDF2                    | TR-BDF2 (trapezoidal + BDF2 stage)             | \f$u\f$ only            | adaptive         | yes          | no  |
  *
- * Steppers that integrate only \f$u\f$ keep the variables \f$v\f$ fixed at their initial values. Steppers without mesh adaptor
- * support accept one in the constructor but never call it. IDA is the default choice: it handles stiff flows,
+ * Steppers that integrate only \f$u\f$ throw if the flow has variables \f$v\f$; steppers without mesh adaptation throw
+ * when constructed with an adaptor other than NoAdaptivity. IDA is the default choice: it handles stiff flows,
  * algebraic constraints (\f$m\f$ independent of \f$\dot u\f$ for some components) and distributed runs.
  *
  * ### Parameters
@@ -466,6 +466,22 @@ namespace DiFfRG
     bool is_explicit() const { return m_is_explicit; }
 
   protected:
+    /// Throw unless the mesh adaptor is NoAdaptivity; for steppers that cannot adapt the mesh.
+    void require_no_adaptor(const std::string &stepper) const
+    {
+      if (dynamic_cast<const NoAdaptivity<VectorType> *>(&adaptor) == nullptr)
+        throw std::invalid_argument(stepper + " does not support mesh adaptation; construct it without an adaptor.");
+    }
+
+    /// Throw if the flow has variables; for steppers that integrate only the FE/FV unknowns.
+    void require_no_variables(const AbstractFlowingVariables<NumberType, VectorType> &state,
+                              const std::string &stepper) const
+    {
+      if (state.data().n_blocks() > 1 && state.variable_data().size() != 0)
+        throw std::invalid_argument(stepper + " does not integrate variables; use a SUNDIALS IDA stepper (with or "
+                                              "without an explicit part) instead.");
+    }
+
     /**
      * @brief Any derived class must implement this method to run the timestepping algorithm.
      *

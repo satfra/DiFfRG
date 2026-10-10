@@ -24,6 +24,10 @@ publish the draft in the Releases UI, or download the artifact into
 ever see *published* releases -- the GitHub API hides drafts -- so nothing is
 user-visible until that manual step.
 
+`dispatch-release-builds.sh -v <X.Y.Z> [-r <ref>] [-n]` triggers all five
+variants at once into a single draft `deps-v<X.Y.Z>` (`-n` prints the `gh`
+commands without running them).
+
 ## Release walkthrough
 
 ```bash

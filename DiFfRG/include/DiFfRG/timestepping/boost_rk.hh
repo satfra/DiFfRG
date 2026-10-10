@@ -36,7 +36,8 @@ namespace DiFfRG
    * detect_stuck the run aborts if the time stops advancing.
    *
    * Handles FE problems with or without variables and pure-variables systems (`dim == 0`). Output frames are linearly
-   * interpolated between steps. Serial only; the mesh adaptor is not called.
+   * interpolated between steps. Serial only; no mesh adaptation (constructing with an adaptor other than NoAdaptivity
+   * throws).
    *
    * @tparam VectorType vector type of the assembler.
    * @tparam SparseMatrixType sparse matrix type of the assembler.
@@ -78,6 +79,7 @@ namespace DiFfRG
                             OutputSession_impl<dim, VectorType> &data_out, AbstractAdaptor<VectorType> &adaptor)
         : Base(config, assembler, data_out, adaptor, /*implicit=*/false, /*explicit=*/true)
     {
+      this->require_no_adaptor("TimeStepperBoostRK");
     }
     using Base::output_dt, Base::impl, Base::expl;
 

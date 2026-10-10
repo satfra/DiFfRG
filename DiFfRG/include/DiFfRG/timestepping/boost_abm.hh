@@ -26,7 +26,8 @@ namespace DiFfRG
    * the step size doubles, up to the base step. Without error control every step is the base step.
    *
    * Handles FE problems with or without variables and pure-variables systems (`dim == 0`). Output frames are linearly
-   * interpolated between steps. Serial only; the mesh adaptor is not called.
+   * interpolated between steps. Serial only; no mesh adaptation (constructing with an adaptor other than NoAdaptivity
+   * throws).
    */
   template <typename VectorType, typename SparseMatrixType = dealii::SparseMatrix<get_type::NumberType<VectorType>>,
             uint dim = 0>
@@ -64,6 +65,7 @@ namespace DiFfRG
                              OutputSession_impl<dim, VectorType> &data_out, AbstractAdaptor<VectorType> &adaptor)
         : Base(config, assembler, data_out, adaptor, /*implicit=*/false, /*explicit=*/true)
     {
+      this->require_no_adaptor("TimeStepperBoostABM");
     }
     using Base::output_dt, Base::impl, Base::expl;
 

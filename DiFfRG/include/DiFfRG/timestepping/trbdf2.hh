@@ -37,7 +37,7 @@ namespace DiFfRG
    * [implicit/minimal_dt, implicit/maximal_dt]; at minimal_dt a step is accepted even if Newton did not converge.
    * A frame is written at the first step past each multiple of output_dt, and at the end.
    *
-   * Only the FE part is integrated: variables keep their initial values. Serial only; the mesh adaptor is called
+   * Only the FE part is integrated; a flow with variables throws. Serial only; the mesh adaptor is called
    * before every step.
    *
    * @tparam LinearSolver solver for the Newton systems; see DefaultLinearSolver.

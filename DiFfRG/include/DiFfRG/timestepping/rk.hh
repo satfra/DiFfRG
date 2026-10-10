@@ -55,6 +55,7 @@ namespace DiFfRG
                        OutputSession_impl<dim, VectorType> &data_out, AbstractAdaptor<VectorType> &adaptor)
         : Base(config, assembler, data_out, adaptor, /*implicit=*/false, /*explicit=*/true)
     {
+      this->require_no_adaptor("TimeStepperRK");
     }
     using Base::output_dt, Base::impl, Base::expl;
 

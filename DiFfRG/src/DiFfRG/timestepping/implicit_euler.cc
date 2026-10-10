@@ -22,6 +22,7 @@ namespace DiFfRG
   void TimeStepperImplicitEuler_impl<VectorType, SparseMatrixType, dim, LinearSolver>::run_segment(
       AbstractFlowingVariables<NumberType, VectorType> &initial_condition, double start, double stop)
   {
+    this->require_no_variables(initial_condition, "TimeStepperImplicitEuler");
 
     // make some local copies of the initial condition which we use for stepping
     VectorType old_solution = initial_condition.spatial_data();

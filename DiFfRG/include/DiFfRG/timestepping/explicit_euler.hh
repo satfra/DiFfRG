@@ -17,8 +17,8 @@ namespace DiFfRG
    * \f[
    *   u_{n+1} = u_n - \Delta t\, M^{-1} R(u_n)\,, \qquad \Delta t = \text{/timestepping/explicit/dt}\,,
    * \f]
-   * with the last step shortened to end on the final time. Only the FE part is integrated: variables keep their initial
-   * values. Output is written once at least output_dt has passed since the last frame. Serial only; the mesh adaptor is
+   * with the last step shortened to end on the final time. Only the FE part is integrated; a flow with variables
+   * throws. Output is written once at least output_dt has passed since the last frame. Serial only; the mesh adaptor is
    * called before every step.
    */
   template <typename VectorType, typename SparseMatrixType = dealii::SparseMatrix<get_type::NumberType<VectorType>>,

@@ -38,6 +38,7 @@ namespace DiFfRG
   void TimeStepperTRBDF2_impl<VectorType, SparseMatrixType, dim, LinearSolver>::run_segment(
       AbstractFlowingVariables<NumberType, VectorType> &initial_condition, double start, double stop)
   {
+    this->require_no_variables(initial_condition, "TimeStepperTRBDF2");
 
     const double gamma = 2. - std::sqrt(2.);
 
