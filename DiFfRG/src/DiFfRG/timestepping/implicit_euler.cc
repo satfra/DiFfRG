@@ -14,6 +14,7 @@
 #include <DiFfRG/timestepping/solver/kinsol.hh>
 #include <DiFfRG/timestepping/solver/newton.hh>
 #include <DiFfRG/timestepping/timestep_control/local_error.hh>
+#include <DiFfRG/timestepping/timestep_control/output_grid.hh>
 #include <DiFfRG/timestepping/timestep_control/pi.hh>
 #include <limits>
 #include <string>
@@ -120,17 +121,13 @@ namespace DiFfRG
 
     newton.reinit(solution);
 
-    // saving and stepping helper functions
-    auto save_data = [&](double t) {
+    // Frames on the grid start + n output_dt, linearly interpolated within the step that reaches them.
+    VectorType frame_state;
+    auto save_data = [&](double t, const VectorType &u) {
       assembler.set_time(t);
-
-      data_out.write_frame(t, [&](auto &frame) {
-        if (t > start)
-          assembler.attach_data_output(frame, solution, VectorType(), VectorType(), newton.get_residual());
-        else
-          assembler.attach_data_output(frame, solution);
-      });
+      data_out.write_frame(t, [&](auto &frame) { assembler.attach_data_output(frame, u); });
     };
+    internal::OutputGrid output_grid(start, output_dt);
     // R(u) without the mass term, at the start (R_old) and end (R_new) of a step.
     VectorType R_old, R_new, error_rhs, error;
     bool R_old_valid = false;
@@ -160,12 +157,20 @@ namespace DiFfRG
       if (error_estimate > 1. && dt > impl.minimal_dt * (1. + 1e-10))
         throw internal::StepRejected("ImplicitEuler: local error estimate " + std::to_string(error_estimate) + " > 1");
 
+      output_grid.advance_to(t + dt, [&](const double t_out) {
+        const double theta = (t_out - t) / dt;
+        frame_state = old_solution;
+        frame_state.sadd(1. - theta, theta, solution);
+        save_data(t_out, frame_state);
+      });
+
       old_solution = solution;
       std::swap(R_old, R_new);
     };
 
     // the actual time loop
-    save_data(start);
+    save_data(start, old_solution);
+    const auto no_controller_output = [](double) {};
     while (!tc.finished()) {
       if (adaptor(tc.get_t(), old_solution)) {
         solution = old_solution;
@@ -175,7 +180,7 @@ namespace DiFfRG
       }
       const double t_before_attempt = tc.get_t();
       const double attempted_h = tc.get_dt();
-      tc.advance(dt_step, save_data);
+      tc.advance(dt_step, no_controller_output);
       this->jacobian_diagnostics_state.finish_attempt(tc.get_t() > t_before_attempt, attempted_h);
     }
 

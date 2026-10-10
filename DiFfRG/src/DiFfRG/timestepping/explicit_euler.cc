@@ -9,6 +9,7 @@
 #include <DiFfRG/common/types.hh>
 #include <DiFfRG/discretization/data/output_session.hh>
 #include <DiFfRG/timestepping/explicit_euler.hh>
+#include <DiFfRG/timestepping/timestep_control/output_grid.hh>
 
 namespace DiFfRG
 {
@@ -30,7 +31,9 @@ namespace DiFfRG
 
     data_out.write_frame(start, [&](auto &frame) { assembler.attach_data_output(frame, solution); });
 
-    double last_save = start;
+    // Frames on the grid start + n output_dt, linearly interpolated within the step that reaches them.
+    internal::OutputGrid output_grid(start, output_dt);
+    VectorType frame_state;
     double t = start;
     // Not `t < stop`: the rounding in t += dt must not leave a last step of size ~1e-17.
     while (stop - t > 1e-10 * expl.dt) {
@@ -50,11 +53,14 @@ namespace DiFfRG
       inverse_mass_matrix.solve(solution);
       solution += old_solution;
 
+      output_grid.advance_to(t + dt, [&](const double t_out) {
+        const double theta = (t_out - t) / dt;
+        frame_state = old_solution;
+        frame_state.sadd(1. - theta, theta, solution);
+        assembler.set_time(t_out);
+        data_out.write_frame(t_out, [&](auto &frame) { assembler.attach_data_output(frame, frame_state); });
+      });
       t += dt;
-      if ((t - last_save + 1e-4 * expl.dt) >= output_dt) {
-        data_out.write_frame(t, [&](auto &frame) { assembler.attach_data_output(frame, solution); });
-        last_save = t;
-      }
       old_solution.swap(solution);
 
       this->log.progress({.topic = progress_topics::explicit_residual,

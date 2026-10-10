@@ -17,6 +17,7 @@
 #include <DiFfRG/timestepping/solver/kinsol.hh>
 #include <DiFfRG/timestepping/solver/newton.hh>
 #include <DiFfRG/timestepping/timestep_control/local_error.hh>
+#include <DiFfRG/timestepping/timestep_control/output_grid.hh>
 #include <DiFfRG/timestepping/timestep_control/pi.hh>
 #include <DiFfRG/timestepping/trbdf2.hh>
 
@@ -185,11 +186,14 @@ namespace DiFfRG
     };
     newton_BDF2.reinit(u_n);
 
-    // saving and stepping helper functions
-    auto save_data = [&](double t) {
+    // Frames on the grid start + n output_dt, interpolated quadratically through u_n, u_gamma and u_np1 within the
+    // step that reaches them (second order, like the method).
+    VectorType frame_state;
+    auto save_data = [&](double t, const VectorType &u) {
       assembler.set_time(t);
-      data_out.write_frame(t, [&](auto &frame) { assembler.attach_data_output(frame, u_n); });
+      data_out.write_frame(t, [&](auto &frame) { assembler.attach_data_output(frame, u); });
     };
+    internal::OutputGrid output_grid(start, output_dt);
     // R(u) without the mass term at t_n (R_n), t_n + gamma dt (R_gamma) and t_n + dt (R_np1).
     VectorType R_n, R_gamma, R_np1, error_rhs, error;
     bool R_n_valid = false;
@@ -226,12 +230,25 @@ namespace DiFfRG
       if (error_estimate > 1. && dt > impl.minimal_dt * (1. + 1e-10))
         throw internal::StepRejected("TRBDF2: local error estimate " + std::to_string(error_estimate) + " > 1");
 
+      output_grid.advance_to(t + dt, [&](const double t_out) {
+        const double theta = (t_out - t) / dt;
+        // Lagrange polynomials on the nodes theta = 0, gamma, 1.
+        const double l_n = (theta - gamma) * (theta - 1.) / gamma;
+        const double l_gamma = theta * (theta - 1.) / (gamma * (gamma - 1.));
+        const double l_np1 = theta * (theta - gamma) / (1. - gamma);
+        frame_state.reinit(u_n);
+        frame_state.add(l_n, u_n, l_gamma, u_npgamma);
+        frame_state.add(l_np1, u_np1);
+        save_data(t_out, frame_state);
+      });
+
       u_n = u_np1;
       std::swap(R_n, R_np1);
     };
 
     // the actual time loop
-    save_data(start);
+    save_data(start, u_n);
+    const auto no_controller_output = [](double) {};
     while (!tc.finished()) {
       if (adaptor(tc.get_t(), u_n)) {
         u_np1 = u_n;
@@ -244,7 +261,7 @@ namespace DiFfRG
       this->log.progress({.topic = progress_topics::timestep, .time = tc.get_t(), .minimum_verbosity = 1});
       const double t_before_attempt = tc.get_t();
       const double attempted_h = tc.get_dt();
-      tc.advance(dt_step, save_data);
+      tc.advance(dt_step, no_controller_output);
       this->jacobian_diagnostics_state.finish_attempt(tc.get_t() > t_before_attempt, attempted_h);
     }
 

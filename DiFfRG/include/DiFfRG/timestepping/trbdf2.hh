@@ -42,7 +42,8 @@ namespace DiFfRG
    * /timestepping/implicit/abs_tol, rel_tol (which also set Newton's tolerance). Steps stay in
    * [implicit/minimal_dt, implicit/maximal_dt]; at minimal_dt a step is accepted regardless of the error estimate
    * and of Newton convergence.
-   * A frame is written at the first step past each multiple of output_dt, and at the end.
+   * Frames are written at \f$t_\text{start} + n\,\f$output_dt, interpolated within the step that reaches them
+   * (quadratically through \f$u_n\f$, \f$u_\gamma\f$ and \f$u_{n+1}\f$).
    *
    * Only the FE part is integrated; a flow with variables throws. Serial only; the mesh adaptor is called
    * before every step.
