@@ -7,6 +7,10 @@
 #include <DiFfRG/discretization/mesh/rectangular_mesh.hh>
 #include <boilerplate/models.hh>
 
+#include <algorithm>
+#include <cmath>
+#include <set>
+
 using namespace DiFfRG;
 using namespace dealii;
 
@@ -25,7 +29,21 @@ namespace
     }
   };
 
-  ConfigTree make_config(const uint refine, const uint level)
+  /// Refines at a front x = front_position that the test moves between adaptations.
+  class FrontModel : public Testing::ModelBurgers<1>
+  {
+  public:
+    using Testing::ModelBurgers<1>::ModelBurgers;
+    double front_position = 0.2;
+
+    template <int dim, typename NumberType, typename Solution>
+    void cell_indicator(NumberType &indicator, const Point<dim> &p, const Solution &) const
+    {
+      indicator = std::exp(-std::pow((p[0] - front_position) / 0.03, 2));
+    }
+  };
+
+  ConfigTree make_config(const uint refine, const uint level, const uint coarsen_buffer = 2, const uint coarsen_age = 2)
   {
     return json::value({{"physical", {}},
                         {"discretization",
@@ -39,7 +57,9 @@ namespace
                             {"adapt_dt", 1e-1},
                             {"level", level},
                             {"refine_percent", 0.3},
-                            {"coarsen_percent", 0.3}}}}},
+                            {"coarsen_percent", 0.3},
+                            {"coarsen_buffer", coarsen_buffer},
+                            {"coarsen_age", coarsen_age}}}}},
                         {"output", {{"verbosity", 0}}}});
   }
 
@@ -93,4 +113,63 @@ TEST_CASE("HAdaptivity keeps the levels between the initial mesh and adaptivity/
     CHECK(lowest == 1);
     CHECK(highest == 3);
   }
+}
+
+namespace
+{
+  /// Move a refinement front across the mesh; returns (cells coarsened right after their creation, any coarsening).
+  std::pair<uint, bool> sweep_front(const uint coarsen_buffer, const uint coarsen_age)
+  {
+    using Discretization = CG::Discretization<FrontModel, RectangularMeshSerial<1>>;
+    const auto config = make_config(0, 4, coarsen_buffer, coarsen_age);
+    Testing::PhysicalParameters prm;
+    prm.initial_x0 = {{0.2, 0., 0.}};
+    prm.initial_x1 = {{1., 0., 0.}};
+    FrontModel model(prm);
+    RectangularMeshSerial<1> mesh{Config::ConfigurationMesh<1>(config)};
+    Discretization discretization(mesh, config);
+    CG::Assembler<Discretization> assembler(discretization, model, config);
+    FE::FlowingVariables<Discretization> state(discretization);
+    state.interpolate(model);
+    typename Discretization::VectorType u(state.spatial_data());
+    HAdaptivity<CG::Assembler<Discretization>> adaptor(assembler, config);
+
+    const auto active = [&]() {
+      std::set<CellId> ids;
+      for (const auto &cell : discretization.get_triangulation().active_cell_iterators())
+        ids.insert(cell->id());
+      return ids;
+    };
+    std::set<CellId> before = active(), created_last;
+    uint coarsened_fresh = 0;
+    bool coarsened = false;
+    for (uint i = 0; i < 12; ++i) {
+      model.front_position = 0.2 + 0.03 * i;
+      if (!adaptor.adapt(u)) continue;
+      const auto after = active();
+      // A cell created by the previous adaptation may be refined further, but not coarsened away.
+      for (const auto &id : created_last)
+        coarsened_fresh += std::none_of(after.begin(), after.end(),
+                                        [&](const CellId &a) { return a == id || id.is_ancestor_of(a); });
+      created_last.clear();
+      for (const auto &id : after)
+        if (!before.contains(id)) created_last.insert(id);
+      // A new cell that is the parent of a previously active one is the result of coarsening.
+      for (const auto &id : created_last)
+        for (const auto &old : before)
+          coarsened |= id.is_parent_of(old);
+      before = after;
+    }
+    return {coarsened_fresh, coarsened};
+  }
+} // namespace
+
+TEST_CASE("HAdaptivity does not coarsen right behind a moving front", "[discretization][adaptivity]")
+{
+  DiFfRG::Init();
+  const auto [fresh_protected, coarsened_protected] = sweep_front(2, 2);
+  CHECK(fresh_protected == 0);
+  CHECK(coarsened_protected); // the mesh far behind the front is still coarsened
+  const auto [fresh_unprotected, coarsened_unprotected] = sweep_front(0, 0);
+  CHECK(fresh_unprotected > 0); // without the protection, the same sweep coarsens fresh cells
 }

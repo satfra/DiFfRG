@@ -4,6 +4,7 @@
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/dofs/dof_tools.h>
 #include <deal.II/grid/grid_refinement.h>
+#include <deal.II/grid/grid_tools.h>
 #include <deal.II/grid/tria.h>
 #include <deal.II/lac/vector.h>
 #include <deal.II/numerics/derivative_approximation.h>
@@ -13,6 +14,8 @@
 // standard library
 #include <algorithm>
 #include <limits>
+#include <map>
+#include <set>
 #include <vector>
 
 // DiFfRG
@@ -45,6 +48,8 @@ namespace DiFfRG
       adapt_level = config.get_uint("/discretization/adaptivity/level", 0);
       adapt_upper = config.get_double("/discretization/adaptivity/refine_percent", 1e-1);
       adapt_lower = config.get_double("/discretization/adaptivity/coarsen_percent", 5e-2);
+      coarsen_buffer = config.get_uint("/discretization/adaptivity/coarsen_buffer", 2);
+      coarsen_age = config.get_uint("/discretization/adaptivity/coarsen_age", 2);
       min_level = std::numeric_limits<uint>::max();
       for (const auto &cell : discretization.get_triangulation().active_cell_iterators())
         min_level = std::min(min_level, uint(cell->level()));
@@ -118,6 +123,7 @@ namespace DiFfRG
         if (uint(cell->level()) >= adapt_level) cell->clear_refine_flag();
         if (uint(cell->level()) <= min_level) cell->clear_coarsen_flag();
       }
+      protect_from_coarsening(triangulation);
 
       bool any_refined = false;
       for (const auto &cell : triangulation.active_cell_iterators())
@@ -141,9 +147,27 @@ namespace DiFfRG
         view.refresh(*v);
         previous.push_back(view.get());
       }
+      // The timesteppers leave the constrained entries (hanging nodes) stale; interpolating them onto the new mesh
+      // would carry that into the unconstrained dofs. For a time derivative this applies the inhomogeneities too,
+      // which only touches dofs that are constrained again after the transfer.
+      for (auto &v : previous)
+        constraints.distribute(v);
       triangulation.prepare_coarsening_and_refinement();
       solution_trans.prepare_for_coarsening_and_refinement(previous);
+      std::set<CellId> active_before;
+      for (const auto &cell : triangulation.active_cell_iterators())
+        active_before.insert(cell->id());
       triangulation.execute_coarsening_and_refinement();
+      ++n_adaptations;
+      std::map<CellId, uint> still_active;
+      for (const auto &cell : triangulation.active_cell_iterators()) {
+        const auto id = cell->id();
+        if (!active_before.contains(id))
+          still_active[id] = n_adaptations;
+        else if (const auto found = created_at.find(id); found != created_at.end())
+          still_active.insert(*found);
+      }
+      created_at = std::move(still_active);
 
       discretization.reinit();
       assembler.reinit();
@@ -167,6 +191,40 @@ namespace DiFfRG
     }
 
   protected:
+    /**
+     * @brief Clear the coarsening flags near a moving front: within coarsen_buffer layers of active neighbours of a
+     * cell flagged for refinement, and on cells created by one of the last coarsen_age adaptations. Coarsening
+     * re-interpolates the solution, which right behind a steep front can overshoot by more than the scheme tolerates.
+     */
+    template <typename Tria> void protect_from_coarsening(Tria &triangulation) const
+    {
+      using Iterator = typename Tria::active_cell_iterator;
+      std::vector<Iterator> frontier;
+      std::set<CellId> seen;
+      for (const auto &cell : triangulation.active_cell_iterators()) {
+        if (cell->refine_flag_set()) {
+          frontier.push_back(cell);
+          seen.insert(cell->id());
+        }
+        if (const auto found = created_at.find(cell->id());
+            found != created_at.end() && n_adaptations - found->second < coarsen_age)
+          cell->clear_coarsen_flag();
+      }
+      for (uint layer = 0; layer < coarsen_buffer && !frontier.empty(); ++layer) {
+        std::vector<Iterator> next;
+        for (const auto &cell : frontier) {
+          std::vector<Iterator> neighbors;
+          GridTools::get_active_neighbors<Tria>(cell, neighbors);
+          for (const auto &neighbor : neighbors)
+            if (seen.insert(neighbor->id()).second) {
+              neighbor->clear_coarsen_flag();
+              next.push_back(neighbor);
+            }
+        }
+        frontier = std::move(next);
+      }
+    }
+
     Assembler &assembler;
     Discretization &discretization;
 
@@ -176,5 +234,9 @@ namespace DiFfRG
     uint adapt_level;
     /// Level of the coarsest active cell at construction.
     uint min_level;
+    uint coarsen_buffer, coarsen_age;
+    /// Number of adaptations so far, and for each active cell the adaptation that created it (if any did).
+    uint n_adaptations = 0;
+    std::map<CellId, uint> created_at;
   };
 } // namespace DiFfRG
