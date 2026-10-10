@@ -20,13 +20,13 @@ TEST_CASE("Test optimization of x_extent", "[integration][quadrature integration
 
   SECTION("Litim")
   {
-    const auto x_extent = DiFfRG::optimize_x_extent<DiFfRG::LitimRegulator<>>(jv);
+    const auto x_extent = DiFfRG::optimize_x_extent<DiFfRG::LitimRegulator<>, 4>(jv);
     REQUIRE(abs(x_extent - 1.) / 1. < 1e-10);
   }
 
   SECTION("PolyExp")
   {
-    const auto x_extent = DiFfRG::optimize_x_extent<DiFfRG::PolynomialExpRegulator<>>(jv);
+    const auto x_extent = DiFfRG::optimize_x_extent<DiFfRG::PolynomialExpRegulator<>, 4>(jv);
     REQUIRE(abs(x_extent - 1.52) / 1.52 < 1e-2);
   }
 

@@ -123,3 +123,31 @@ html[data-mode="dark"] .doxygen-content div.center iframe {
   filter: invert(1) hue-rotate(180deg) brightness(0.9);
   color-scheme: light;
 }
+
+/*
+ * Parameter tables: doxygen-awesome makes every table body horizontally
+ * scrollable, which also turns on a vertical scrollbar as soon as inline math
+ * reaches a few pixels below the row. These tables are short, so let them grow.
+ * (!important: the doxygen-awesome selector chains four :not() clauses.)
+ */
+.doxygen-content dl.params table tbody,
+.doxygen-content dl.tparams table tbody,
+.doxygen-content dl.retval table tbody,
+.doxygen-content dl.exception table tbody {
+  overflow: visible !important;
+}
+
+/* "Parameters", "Returns", ... headings: doxygen.css hard-codes black, and is loaded after this file. */
+.doxygen-content div.memitem div.memdoc dl.params dt,
+.doxygen-content div.memitem div.memdoc dl.tparams dt,
+.doxygen-content div.memitem div.memdoc dl.retval dt,
+.doxygen-content div.memitem div.memdoc dl.exception dt,
+.doxygen-content div.memitem div.memdoc dl.return dt,
+.doxygen-content div.memitem div.memdoc dl.see dt {
+  color: inherit !important;
+}
+
+/* Function prototypes: Doxygen puts no space between a parameter's type cell and its name cell. */
+.doxygen-content table.memname td.paramtype {
+  padding-right: 0.6em;
+}

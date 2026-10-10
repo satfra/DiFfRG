@@ -66,12 +66,13 @@ namespace DiFfRG
    *
    * @see QuadratureIntegrator for the kernel interface, Integrator_p2 for an example.
    *
-   * @tparam dim momentum-space dimension \f$d\f$, 2 to 8
+   * @tparam dim momentum-space dimension \f$d \geq 2\f$
    * @tparam NT numerical type of the result
    * @tparam KERNEL kernel to be integrated, providing static `kernel` and `constant`
    * @tparam ExecutionSpace GPU_exec, TBB_exec or KokkosHost_exec
    */
   template <int dim, typename NT, typename KERNEL, typename ExecutionSpace>
+    requires(dim >= 2)
   class Integrator_p2_1ang
       : public QuadratureIntegrator<2, NT, internal::Transform_p2_1ang<dim, NT, KERNEL>, ExecutionSpace>
   {
@@ -108,7 +109,7 @@ namespace DiFfRG
     Integrator_p2_1ang(QuadratureProvider &quadrature_provider, const ConfigTree &config)
       requires provides_regulator<KERNEL>
         : Integrator_p2_1ang(quadrature_provider, internal::make_int_grid<2, NT>(config, {"x_order", "cos1_order"}),
-                             optimize_x_extent<typename KERNEL::Regulator>(config))
+                             optimize_x_extent<typename KERNEL::Regulator, dim>(config))
     {
     }
 

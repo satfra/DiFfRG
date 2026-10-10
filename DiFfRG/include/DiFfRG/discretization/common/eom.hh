@@ -142,7 +142,7 @@ namespace DiFfRG
 
   /** @brief Evaluating an unread potential: the same three slots, all inert. */
   struct UnusedPotentialEvaluation {
-    UnusedPotential value, gradient, hessian;
+    UnusedPotential value, gradient, mass_hessian;
   };
 
   template <int dim>

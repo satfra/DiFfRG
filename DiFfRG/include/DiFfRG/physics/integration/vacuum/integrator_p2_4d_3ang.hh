@@ -100,7 +100,7 @@ namespace DiFfRG
         : Integrator_p2_4D_3ang(
               quadrature_provider,
               internal::make_int_grid<4, NT>(config, {"x_order", "cos1_order", "cos2_order", "phi_order"}),
-              optimize_x_extent<typename KERNEL::Regulator>(config))
+              optimize_x_extent<typename KERNEL::Regulator, dim>(config))
     {
     }
 

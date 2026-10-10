@@ -142,7 +142,7 @@ namespace DiFfRG
       requires provides_regulator<KERNEL>
         : Integrator_fT_p2_4D_2ang(
               quadrature_provider, internal::make_int_grid<3, NT>(config, {"x_order", "cos1_order", "phi_order"}),
-              optimize_x_extent<typename KERNEL::Regulator>(config), config.get_double("/physical/T", 1.0))
+              optimize_x_extent<typename KERNEL::Regulator, dim>(config), config.get_double("/physical/T", 1.0))
     {
       apply_matsubara_overrides(config);
     }

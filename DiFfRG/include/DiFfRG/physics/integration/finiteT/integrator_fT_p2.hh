@@ -112,12 +112,13 @@ namespace DiFfRG
    * integrator.get(result, k, m2);
    * @endcode
    *
-   * @tparam dim spacetime dimension \f$d\f$, 2 to 8
+   * @tparam dim spacetime dimension \f$d \geq 2\f$
    * @tparam NT numerical type of the result
    * @tparam KERNEL kernel to be integrated, providing static `kernel` and `constant`
    * @tparam ExecutionSpace GPU_exec, TBB_exec or KokkosHost_exec
    */
   template <int dim, typename NT, typename KERNEL, typename ExecutionSpace>
+    requires(dim >= 2)
   class Integrator_fT_p2
       : public QuadratureIntegrator_fT<2, NT, internal::Transform_fT_p2<dim, NT, KERNEL>, ExecutionSpace>
   {
@@ -159,7 +160,7 @@ namespace DiFfRG
     Integrator_fT_p2(QuadratureProvider &quadrature_provider, const ConfigTree &config)
       requires provides_regulator<KERNEL>
         : Integrator_fT_p2(quadrature_provider, internal::make_int_grid<1, NT>(config, {"x_order"}),
-                           optimize_x_extent<typename KERNEL::Regulator>(config), config.get_double("/physical/T", 1.0))
+                           optimize_x_extent<typename KERNEL::Regulator, dim>(config), config.get_double("/physical/T", 1.0))
     {
       apply_matsubara_overrides(config);
     }
