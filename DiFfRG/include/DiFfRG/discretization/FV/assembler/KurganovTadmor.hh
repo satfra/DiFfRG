@@ -213,18 +213,25 @@ namespace DiFfRG
           return result;
         }
 
+        /**
+         * @brief The KT numerical flux of a face with unit normal @p normal pointing from the u^- to the u^+ side:
+         * \f$H_d = \tfrac12 (F^+_d + F^-_d) - \tfrac12 a_d n_d (u^+ - u^-)\f$ per component, so that
+         * \f$H\cdot n = \tfrac12 (F^+ + F^-)\cdot n - \tfrac12 a_n (u^+ - u^-)\f$ with the speed
+         * \f$a_n = \sum_d a_d n_d^2\f$ along the (axis-aligned) normal.
+         */
         template <int dim, typename NumberType, size_t n_components>
         std::array<dealii::Tensor<1, dim, NumberType>, n_components>
         compute_numerical_flux(const std::array<dealii::Tensor<1, dim, NumberType>, n_components> &F_plus,
                                const std::array<dealii::Tensor<1, dim, NumberType>, n_components> &F_minus,
                                const std::array<dealii::Tensor<1, dim, NumberType>, n_components> &a_half,
                                const std::array<NumberType, n_components> &u_plus,
-                               const std::array<NumberType, n_components> &u_minus)
+                               const std::array<NumberType, n_components> &u_minus,
+                               const dealii::Tensor<1, dim> &normal)
         {
           std::array<dealii::Tensor<1, dim, NumberType>, n_components> H{};
-          for (size_t c = 0; c < n_components; ++c) {
-            H[c] = (F_plus[c] + F_minus[c]) * 0.5 - a_half[c] * (u_plus[c] - u_minus[c]) * 0.5;
-          }
+          for (size_t c = 0; c < n_components; ++c)
+            for (size_t d = 0; d < dim; ++d)
+              H[c][d] = (F_plus[c][d] + F_minus[c][d]) * 0.5 - a_half[c][d] * normal[d] * (u_plus[c] - u_minus[c]) * 0.5;
           return H;
         }
 
@@ -239,14 +246,15 @@ namespace DiFfRG
 
         /**
          * @brief d(numerical flux)/d(trace values and trace gradients) of a face from the flux derivatives on both
-         * traces (FluxDerivativeData: J, H, grad_J, mixed_H; F is not read).
+         * traces (FluxDerivativeData: J, H, grad_J, mixed_H; F is not read). @p normal as in compute_numerical_flux.
          */
         template <typename WaveSpeedStrategy, typename Model, typename NumberType, int dim, size_t n_components>
         KTNumFluxJacobianData<dim, NumberType, n_components>
         kt_numflux_jacobian_from_derivatives(const FluxDerivativeData<NumberType, dim, n_components> &plus,
                                              const FluxDerivativeData<NumberType, dim, n_components> &minus,
                                              const std::array<NumberType, n_components> &u_plus,
-                                             const std::array<NumberType, n_components> &u_minus, const Model &model)
+                                             const std::array<NumberType, n_components> &u_minus,
+                                             const dealii::Tensor<1, dim> &normal, const Model &model)
         {
           // One wave speed per block, and its derivative, from the flux jacobian restricted to
           // that block. This has to mirror kt_flux_from_traces exactly -- a residual and a
@@ -283,12 +291,14 @@ namespace DiFfRG
                 const NumberType delta_ic = (i == c) ? NumberType(1) : NumberType(0);
 
                 // dH_i^d / du_minus_c
-                j_numflux.u[0](i, c)[d] = NumberType(0.5) * minus.J[d][i][c] + NumberType(0.5) * a[i][d] * delta_ic -
-                                          NumberType(0.5) * du_i * da_minus[d][c];
+                j_numflux.u[0](i, c)[d] =
+                    NumberType(0.5) * minus.J[d][i][c] +
+                    NumberType(0.5) * normal[d] * (a[i][d] * delta_ic - du_i * da_minus[d][c]);
 
                 // dH_i^d / du_plus_c
-                j_numflux.u[1](i, c)[d] = NumberType(0.5) * plus.J[d][i][c] - NumberType(0.5) * a[i][d] * delta_ic -
-                                          NumberType(0.5) * du_i * da_plus[d][c];
+                j_numflux.u[1](i, c)[d] =
+                    NumberType(0.5) * plus.J[d][i][c] -
+                    NumberType(0.5) * normal[d] * (a[i][d] * delta_ic + du_i * da_plus[d][c]);
               }
             }
           }
@@ -306,10 +316,12 @@ namespace DiFfRG
                 const NumberType du_i = u_plus[i] - u_minus[i];
                 const auto &[da_grad_plus, da_grad_minus] = da_grad[i];
                 for (size_t c = 0; c < n_components; ++c) {
-                  j_numflux.grad[0](i, c)[d_out][d_in] = NumberType(0.5) * minus.grad_J[i][c][d_out][d_in] -
-                                                         NumberType(0.5) * du_i * da_grad_minus[d_out][c];
-                  j_numflux.grad[1](i, c)[d_out][d_in] = NumberType(0.5) * plus.grad_J[i][c][d_out][d_in] -
-                                                         NumberType(0.5) * du_i * da_grad_plus[d_out][c];
+                  j_numflux.grad[0](i, c)[d_out][d_in] =
+                      NumberType(0.5) * minus.grad_J[i][c][d_out][d_in] -
+                      NumberType(0.5) * normal[d_out] * du_i * da_grad_minus[d_out][c];
+                  j_numflux.grad[1](i, c)[d_out][d_in] =
+                      NumberType(0.5) * plus.grad_J[i][c][d_out][d_in] -
+                      NumberType(0.5) * normal[d_out] * du_i * da_grad_plus[d_out][c];
                 }
               }
           }
@@ -1244,14 +1256,14 @@ namespace DiFfRG
             });
         }
 
-        /// The KT numerical flux H of trace face p, as the face's u^- cell sees it.
-        TraceFlux numerical_flux(const size_t p, const FaceReconstructionState &state) const
+        /// The KT numerical flux H of trace face p, as the face's u^- cell, with outward normal @p n, sees it.
+        TraceFlux numerical_flux(const size_t p, const FaceReconstructionState &state, const Tensor<1, dim> &n) const
         {
           const size_t minus = 2 * p, plus = 2 * p + 1;
           const auto [F_plus, F_minus, a_half] =
               internal::kt_flux_from_traces<WaveSpeedStrategy, Model, NumberType, dim, n_components>(
                   trace_F[plus], trace_F[minus], trace_J[plus], trace_J[minus], model);
-          return internal::compute_numerical_flux(F_plus, F_minus, a_half, state.u_plus, state.u_minus);
+          return internal::compute_numerical_flux(F_plus, F_minus, a_half, state.u_plus, state.u_minus, n);
         }
 
         /// The diffusion flux D of trace face p: the average of its two traces' diffusion fluxes.
@@ -1363,7 +1375,7 @@ namespace DiFfRG
                   const auto &cell = active_cells[d.cell_index];
                   const auto n = face_normal_from_cell(cell, d.face_index);
                   const auto JxW = face_jxw(cell, d.face_index);
-                  const auto H = numerical_flux(p, cache.face_reconstructions[d.cell_index][d.face_index]);
+                  const auto H = numerical_flux(p, cache.face_reconstructions[d.cell_index][d.face_index], n);
                   const auto D = diffusion_flux(p);
                   for (uint c = 0; c < n_components; ++c)
                     face_values[p][c] = weight * JxW * (scalar_product(H[c], n) + scalar_product(D[c], n));
@@ -1523,7 +1535,7 @@ namespace DiFfRG
           const auto j_numflux =
               internal::kt_numflux_jacobian_from_derivatives<WaveSpeedStrategy, Model, NumberType, dim, n_components>(
                   trace_derivatives[2 * p + 1 - first_trace], trace_derivatives[2 * p - first_trace], state.u_plus,
-                  state.u_minus, model);
+                  state.u_minus, n_face, model);
           const std::array<const DiffusionSideJacobian *, 2> j_diffusion{
               &trace_diffusion_jacobians[2 * p - first_trace], &trace_diffusion_jacobians[2 * p + 1 - first_trace]};
 

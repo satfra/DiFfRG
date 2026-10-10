@@ -1863,7 +1863,7 @@ TEST_CASE("Test compute_numerical_flux in 1D with one component", "[FV][KT]")
     std::array<NumberType, n_components> u_plus = {1.0};
     std::array<NumberType, n_components> u_minus = {1.0};
 
-    const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus);
+    const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus, Tensor<1, dim>({1.0}));
     CHECK(H[0][0] == Catch::Approx(3.0));
   }
 
@@ -1877,7 +1877,7 @@ TEST_CASE("Test compute_numerical_flux in 1D with one component", "[FV][KT]")
     std::array<NumberType, n_components> u_plus = {3.0};
     std::array<NumberType, n_components> u_minus = {1.0};
 
-    const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus);
+    const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus, Tensor<1, dim>({1.0}));
     CHECK(H[0][0] == Catch::Approx(2.0));
   }
 
@@ -1890,7 +1890,7 @@ TEST_CASE("Test compute_numerical_flux in 1D with one component", "[FV][KT]")
     std::array<NumberType, n_components> u_plus = {5.0};
     std::array<NumberType, n_components> u_minus = {1.0};
 
-    const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus);
+    const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus, Tensor<1, dim>({1.0}));
     CHECK(H[0][0] == Catch::Approx(4.0));
   }
 }
@@ -1900,18 +1900,32 @@ TEST_CASE("Test compute_numerical_flux in 2D with one component", "[FV][KT]")
   constexpr int dim = 2;
   constexpr size_t n_components = 1;
 
-  // F_plus = (4, 1), F_minus = (2, 3), a = (1, 2), u_plus = 3, u_minus = 1
-  // H[0] = (4+2)/2 - 1*(3-1)/2 = 3 - 1 = 2
-  // H[1] = (1+3)/2 - 2*(3-1)/2 = 2 - 2 = 0
+  // F_plus = (4, 1), F_minus = (2, 3), a = (1, 2), u_plus = 3, u_minus = 1: the average is (3, 2), and only the
+  // direction of the normal is dissipated, with that direction's speed.
   std::array<Tensor<1, dim, NumberType>, n_components> F_plus{Tensor<1, dim, NumberType>({4.0, 1.0})};
   std::array<Tensor<1, dim, NumberType>, n_components> F_minus{Tensor<1, dim, NumberType>({2.0, 3.0})};
   std::array<Tensor<1, dim, NumberType>, n_components> a_half{Tensor<1, dim, NumberType>({1.0, 2.0})};
   std::array<NumberType, n_components> u_plus = {3.0};
   std::array<NumberType, n_components> u_minus = {1.0};
 
-  const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus);
-  CHECK(H[0][0] == Catch::Approx(2.0));
-  CHECK(H[0][1] == Catch::Approx(0.0));
+  SECTION("Normal +x: H.n = 3 - 1 * (3 - 1) / 2")
+  {
+    const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus, Tensor<1, dim>({1.0, 0.0}));
+    CHECK(H[0][0] == Catch::Approx(2.0));
+    CHECK(H[0][1] == Catch::Approx(2.0));
+  }
+  SECTION("Normal +y: H.n = 2 - 2 * (3 - 1) / 2")
+  {
+    const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus, Tensor<1, dim>({0.0, 1.0}));
+    CHECK(H[0][0] == Catch::Approx(3.0));
+    CHECK(H[0][1] == Catch::Approx(0.0));
+  }
+  SECTION("Normal -x: H.n = -3 - 1 * (3 - 1) / 2, still dissipative")
+  {
+    const Tensor<1, dim> n({-1.0, 0.0});
+    const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus, n);
+    CHECK(H[0] * n == Catch::Approx(-4.0));
+  }
 }
 
 TEST_CASE("Test compute_kt_flux_and_speeds with Burgers flux in 1D", "[FV][KT]")
@@ -1984,7 +1998,7 @@ TEST_CASE("Test compute_kt_flux_and_speeds with Burgers flux in 1D", "[FV][KT]")
 
     const auto [F_plus, F_minus, a_half] = DiFfRG::Testing::compute_kt_flux_and_speeds<WaveSpeedStrategy>(
         u_plus, u_minus, x_q, test_cell_width, test_cell_width, no_extractors, no_variables, model);
-    const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus);
+    const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus, Tensor<1, dim>({1.0}));
     CHECK(H[0][0] == Catch::Approx(0.75));
   }
 }

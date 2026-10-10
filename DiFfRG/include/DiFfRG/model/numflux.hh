@@ -63,7 +63,7 @@ namespace DiFfRG
                              du;
 
           for (uint d = 0; d < dim; ++d)
-            NF[i][d] = 0.5 * (F_s[i][d] + F_n[i][d]) - 0.5 * alpha * (u_n[i] - u_s[i]);
+            NF[i][d] = 0.5 * (F_s[i][d] + F_n[i][d]) - 0.5 * alpha * (u_n[i] - u_s[i]) * normal[d];
         }
       }
 
@@ -127,7 +127,7 @@ namespace DiFfRG
               const NT alpha = max(abs(df_s - f_s), abs(df_n - f_n)) / du[c * n + i];
               const NT jump = batch_n.values(c)[i] - batch_s.values(c)[i];
               for (int d = 0; d < dim; ++d)
-                out.flux(c, d)[i] = 0.5 * (at(0, d) + at(1, d)) - 0.5 * alpha * jump;
+                out.flux(c, d)[i] = 0.5 * (at(0, d) + at(1, d)) - 0.5 * alpha * jump * normals[i][d];
             }
         });
         stacked.clear_shared();

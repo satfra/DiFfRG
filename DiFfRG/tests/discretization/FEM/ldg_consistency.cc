@@ -22,6 +22,17 @@ TEST_CASE("LDG residual matches a plain mesh_loop assembly", "[discretization][l
     Setup<Model3<true>> s(fe_order);
     require_residual_matches_reference(s);
   }
+  // Level 2 is linear in level 1, but level 1 is not linear in u: level 2 cannot be a fixed matrix times u.
+  SECTION("two levels, constant second level on a nonlinear first level")
+  {
+    Setup<Model3<false, false, true>> s(fe_order);
+    require_residual_matches_reference(s);
+    // and again at another state, after the level jacobians have been built once
+    s.jacobian();
+    for (uint i = 0; i < s.u.size(); ++i)
+      s.u[i] += 0.05 * std::cos(0.9 * i);
+    require_residual_matches_reference(s);
+  }
 }
 
 // With a constant level jacobian the level is built as J_gu * u; every FE component has to reach it, not just
@@ -76,6 +87,15 @@ TEST_CASE("LDG jacobian matches finite differences of the residual", "[discretiz
   SECTION("two levels, assembled first level")
   {
     Setup<Model3<false>> s(fe_order);
+    require_jacobian_matches_finite_differences(s);
+  }
+  SECTION("two levels, constant second level on a nonlinear first level")
+  {
+    Setup<Model3<false, false, true>> s(fe_order);
+    require_jacobian_matches_finite_differences(s);
+    s.jacobian();
+    for (uint i = 0; i < s.u.size(); ++i)
+      s.u[i] += 0.05 * std::cos(0.9 * i);
     require_jacobian_matches_finite_differences(s);
   }
 }

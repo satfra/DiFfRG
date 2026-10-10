@@ -10,5 +10,6 @@ setup_test(limiter_tests.cc)
 setup_test(reconstructor_tests.cc)
 setup_test(wave_speed_tests.cc)
 setup_test(kt_batch_equivalence.cc)
+setup_test(kt_boundary_flux.cc)
 
 add_subdirectory(regression)

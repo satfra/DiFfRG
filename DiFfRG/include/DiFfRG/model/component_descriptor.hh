@@ -1,8 +1,12 @@
 #pragma once
 
 // standard library
+#include <algorithm>
 #include <array>
+#include <stdexcept>
+#include <string>
 #include <utility>
+#include <vector>
 
 // external libraries
 #include <deal.II/dofs/dof_tools.h>
@@ -156,53 +160,60 @@ namespace DiFfRG
     }
 
     /**
-     ** @brief Add a dependency between two FE subsystems, i.e. for LDG constructions.
+     * @brief LDG: declare that component @p dependent of level @p dependent_subsystem is built from component
+     * @p independent of level @p independent_subsystem = dependent_subsystem - 1. Level 0 holds the FE functions.
      *
-     * @param dependent_subsystem The subsystem that depends on the other.
-     * @param dependent The index of the dependent variable in the dependent subsystem.
-     * @param independent_subsystem The subsystem that is independent.
-     * @param independent The index of the independent variable on which the dependent depends.
+     * The couplings between non-adjacent levels follow by composition, whatever the order of the calls.
      */
     void add_dependency(uint dependent_subsystem, uint dependent, uint independent_subsystem, uint independent)
     {
-      if (dependent_subsystem >= n_fe_subsystems || independent_subsystem >= n_fe_subsystems)
-        throw std::runtime_error("The subsystems described by 'add_dependency' do not exist.");
+      check_adjacent_levels(dependent_subsystem, independent_subsystem, "add_dependency");
+      auto &adjacent = couplings[dependent_subsystem][independent_subsystem];
+      const std::array<uint, 2> coupling{{dependent, independent}};
+      if (std::find(adjacent.begin(), adjacent.end(), coupling) == adjacent.end()) adjacent.push_back(coupling);
 
-      if (dependent_subsystem != independent_subsystem + 1)
-        throw std::runtime_error(
-            "The model should only specify dependencies between fe subsystems at neighboring levels.");
-
-      couplings[dependent_subsystem][independent_subsystem].push_back({{dependent, independent}});
-
-      if (independent_subsystem > 0) {
-        for (const auto &dependency : couplings[independent_subsystem][independent_subsystem - 1])
-          if (dependency[0] == independent)
-            couplings[dependent_subsystem][independent_subsystem - 1].push_back({{dependent, dependency[1]}});
-      }
+      // Level dep couples to level dep - 2, dep - 3, ... through the adjacent couplings in between.
+      for (uint dep = 2; dep < n_fe_subsystems; ++dep)
+        for (int indep = int(dep) - 2; indep >= 0; --indep) {
+          auto &composed = couplings[dep][indep];
+          composed.clear();
+          for (const auto &outer : couplings[dep][dep - 1])
+            for (const auto &inner : couplings[dep - 1][indep])
+              if (outer[1] == inner[0]) {
+                const std::array<uint, 2> c{{outer[0], inner[1]}};
+                if (std::find(composed.begin(), composed.end(), c) == composed.end()) composed.push_back(c);
+              }
+        }
     }
 
+    /**
+     * @brief LDG: declare that level @p dependent_subsystem is a linear, homogeneous function of level
+     * @p independent_subsystem = dependent_subsystem - 1, i.e. \f$L_k = A\, L_{k-1}\f$ with a fixed matrix
+     * \f$A\f$: ldg_flux and ldg_source linear in their argument, no constant terms, also not on the boundary. The
+     * assembler then builds the matrix once. Wrong for anything else, see jacobians_constant.
+     */
     void set_jacobian_constant(uint dependent_subsystem, uint independent_subsystem)
     {
-      if (dependent_subsystem >= n_fe_subsystems || independent_subsystem >= n_fe_subsystems)
-        throw std::runtime_error("The subsystems described by 'add_dependency' do not exist.");
-
-      if (dependent_subsystem != independent_subsystem + 1)
-        throw std::runtime_error(
-            "The model should only specify dependencies between fe subsystems at neighboring levels.");
+      check_adjacent_levels(dependent_subsystem, independent_subsystem, "set_jacobian_constant");
       j_const[dependent_subsystem][independent_subsystem] = true;
-
-      if (independent_subsystem > 0)
-        if (j_const[independent_subsystem][independent_subsystem - 1])
-          j_const[dependent_subsystem][independent_subsystem - 1] = true;
     }
 
+    /// The (dependent, independent) component pairs coupling the two levels, see add_dependency.
     const CouplingList &ldg_couplings(uint dependent_subsystem, uint independent_subsystem) const
     {
       return couplings[dependent_subsystem][independent_subsystem];
     }
+
+    /**
+     * @brief Whether level @p dependent_subsystem is a fixed linear map of level @p independent_subsystem <
+     * dependent_subsystem, i.e. whether every level in between was declared constant with set_jacobian_constant.
+     */
     bool jacobians_constant(uint dependent_subsystem, uint independent_subsystem) const
     {
-      return j_const[dependent_subsystem][independent_subsystem];
+      if (independent_subsystem >= dependent_subsystem || dependent_subsystem >= n_fe_subsystems) return false;
+      for (uint level = independent_subsystem + 1; level <= dependent_subsystem; ++level)
+        if (!j_const[level][level - 1]) return false;
+      return true;
     }
 
     static constexpr uint count_fe_functions(uint subsystem = 0) { return n_components[subsystem]; }
@@ -217,6 +228,14 @@ namespace DiFfRG
     }
 
   private:
+    static void check_adjacent_levels(uint dependent_subsystem, uint independent_subsystem, const char *caller)
+    {
+      if (dependent_subsystem >= n_fe_subsystems || independent_subsystem >= n_fe_subsystems)
+        throw std::runtime_error(std::string(caller) + ": the subsystems do not exist.");
+      if (dependent_subsystem != independent_subsystem + 1)
+        throw std::runtime_error(std::string(caller) + ": only neighbouring levels can be coupled directly.");
+    }
+
     template <typename T> using SubsystemMatrix = std::array<std::array<T, n_fe_subsystems>, n_fe_subsystems>;
 
     SubsystemMatrix<CouplingList> couplings;

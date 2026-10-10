@@ -1,9 +1,12 @@
 #pragma once
 
 // standard library
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 
 // external libraries
 #include <deal.II/base/quadrature_lib.h>
@@ -239,6 +242,7 @@ namespace DiFfRG
             sol_vector[i].reinit(dofs_per_component);
             sol_vector_tmp[i].reinit(dofs_per_component);
             ldg_matrix_built[i] = false;
+            level_jacobian_built[i] = false;
           }
         };
 
@@ -489,7 +493,7 @@ namespace DiFfRG
           rebuild_ldg_vectors(solution_global);
         // The levels are current now, so the jacobians built from them are, too.
         constexpr_for<1, n_levels, 1>([&](auto k) {
-          if (!ldg_matrix_built[k] || !model.get_components().jacobians_constant(k, k - 1))
+          if (!ldg_matrix_built[k] || !model.get_components().jacobians_constant(k, 0))
             rebuild_ldg_jacobian<k>(solution_global);
         });
         phase.lap(&PhaseTimes::extract);
@@ -596,9 +600,10 @@ namespace DiFfRG
       mutable array<BlockSparseMatrix<NumberType>, Components::count_fe_subsystems()> j_wg;
       mutable array<BlockSparseMatrix<NumberType>, Components::count_fe_subsystems()> j_wg_tmp;
 
-      /// Whether j_gu[k] has been built; it is rebuilt on every jacobian unless the model declares level k's
-      /// jacobian constant.
+      /// Whether j_gu[k] has been built; it is rebuilt on every jacobian unless level k is a fixed linear map of u.
       mutable array<bool, Components::count_fe_subsystems()> ldg_matrix_built{};
+      /// Whether j_wg[k] has been built; it is rebuilt with j_gu[k] unless level k is constant in level k - 1.
+      mutable array<bool, Components::count_fe_subsystems()> level_jacobian_built{};
 
       using Base::extractor_dof_indices;
       using Base::jacobian_times;
@@ -1045,26 +1050,48 @@ namespace DiFfRG
                 w * s.shape_values[side][0][i] * scalar_product(Jq.j_extr_flux(s.comp[0][i], e), normal);
       }
 
+      /**
+       * @brief The LDG levels at @p sol. A level that is a fixed linear map of u (every level up to it declared
+       * constant, see ComponentDescriptor::set_jacobian_constant) is j_gu[k] u, the others are assembled.
+       */
       void rebuild_ldg_vectors(const VectorType &sol) const
       {
         constexpr_for<1, Components::count_fe_subsystems(), 1>([&](auto k) {
-          if (!model.get_components().jacobians_constant(k, k - 1)) {
+          const auto assemble = [&](auto &target, auto &tmp) {
             if constexpr (k == 1)
-              build_ldg_vector<k - 1, k>(sol, sol_vector[k], sol_vector_tmp[k]);
+              build_ldg_vector<k - 1, k>(sol, target, tmp);
             else
-              build_ldg_vector<k - 1, k>(sol_vector[k - 1], sol_vector[k], sol_vector_tmp[k]);
-          } else {
-            if (!ldg_matrix_built[k]) rebuild_ldg_jacobian<k>(sol);
-
-            // sol is a plain Vector; BlockSparseMatrix::vmult(BlockVector, Vector) only uses column block 0,
-            // i.e. FE component 0. Copy into the (component-wise) block structure so all couplings act.
-            sol_block = sol;
-            j_gu[k].vmult(sol_vector[k], sol_block);
+              build_ldg_vector<k - 1, k>(sol_vector[k - 1], target, tmp);
+          };
+          if (!model.get_components().jacobians_constant(k, 0)) {
+            assemble(sol_vector[k], sol_vector_tmp[k]);
+            return;
+          }
+          const bool first_use = !ldg_matrix_built[k];
+          if (first_use) rebuild_ldg_jacobian<k>(sol);
+          // sol is a plain Vector; BlockSparseMatrix::vmult(BlockVector, Vector) only uses column block 0,
+          // i.e. FE component 0. Copy into the (component-wise) block structure so all couplings act.
+          sol_block = sol;
+          j_gu[k].vmult(sol_vector[k], sol_block);
+          // A level declared constant that is not linear and homogeneous would be silently wrong from here on.
+          if (first_use) {
+            auto assembled = sol_vector[k];
+            assemble(assembled, sol_vector_tmp[k]);
+            const double scale = assembled.linfty_norm();
+            assembled -= sol_vector[k];
+            if (assembled.linfty_norm() > 1e-8 * std::max(scale, 1e-300))
+              throw std::runtime_error("LDG level " + std::to_string(k) +
+                                       " was declared constant (set_jacobian_constant), but it is not a fixed linear "
+                                       "map of the level below: check ldg_flux, ldg_source and the boundary fluxes "
+                                       "for nonlinear or constant terms.");
           }
         });
       }
 
-      /// j_gu[k] = d(level k)/du at the current levels: level k's own jacobian, chained through j_gu[k - 1].
+      /**
+       * @brief j_gu[k] = d(level k)/du at the current levels: level k's own jacobian j_wg[k], chained through
+       * j_gu[k - 1]. j_wg[k] is reused if level k was declared constant with respect to level k - 1.
+       */
       template <int k> void rebuild_ldg_jacobian(const VectorType &sol) const
       {
         static_assert(k > 0);
@@ -1073,7 +1100,10 @@ namespace DiFfRG
           build_ldg_jacobian<0, 1>(sol, j_gu[1], j_wg_tmp[1]);
         else {
           if (!ldg_matrix_built[k - 1]) rebuild_ldg_jacobian<k - 1>(sol);
-          build_ldg_jacobian<k - 1, k>(sol_vector[k - 1], j_wg[k], j_wg_tmp[k]);
+          if (!level_jacobian_built[k] || !model.get_components().jacobians_constant(k, k - 1)) {
+            build_ldg_jacobian<k - 1, k>(sol_vector[k - 1], j_wg[k], j_wg_tmp[k]);
+            level_jacobian_built[k] = true;
+          }
           // mmult adds into its target, which therefore has to start from zero.
           j_gu[k] = 0;
           for (const auto &c : model.get_components().ldg_couplings(k, 0))
