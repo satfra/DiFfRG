@@ -102,8 +102,9 @@ namespace DiFfRG
    * above).
    *
    * Starts from set_bounds() (no default; must be set) and evaluates at the midpoint of the current bracket, or at
-   * `next_x(x_lo, x_hi)` if set_next_x() was given. Stops when the bracket is narrower than `abs_tol` after a
-   * successful evaluation, and returns the last tested point. Throws if the last evaluation failed.
+   * `next_x(x_lo, x_hi)` if set_next_x() was given; the upper bound is assumed to succeed. Stops when the bracket is
+   * narrower than `abs_tol` and returns its upper end, the smallest point known to succeed. Throws if that takes more
+   * than `max_iter` evaluations.
    *
    * @code
    * BisectionRootFinder search([&](double x) { return flow_converges(x); }, 1e-6);
@@ -138,25 +139,20 @@ namespace DiFfRG
         throw std::runtime_error("BisectionRootFinder: search bounds were not set");
       double x_min = this->x_min;
       double x_max = this->x_max;
-      double x_test = 0.;
 
-      bool success = false;
-
-      for (uint i = 0; i < this->max_iter; i++) {
-        x_test = next_x(x_min, x_max);
-        success = this->f({{x_test}});
-        if (success)
+      // x_max is the smallest x known (or, initially, assumed) to succeed.
+      this->iter = 0;
+      while (std::abs(x_max - x_min) >= this->abs_tol) {
+        if (this->iter == this->max_iter)
+          throw std::runtime_error("BisectionRootFinder: bracket still wider than abs_tol after max_iter steps");
+        ++this->iter;
+        const double x_test = next_x(x_min, x_max);
+        if (this->f({{x_test}}))
           x_max = x_test;
         else
           x_min = x_test;
-
-        this->iter = i;
-        if (success && std::abs(x_max - x_min) < this->abs_tol) break;
       }
-
-      if (!success) throw std::runtime_error("BisectionRootFinder: search did not converge");
-
-      return {{x_test}};
+      return {{x_max}};
     }
 
     double x_min = std::numeric_limits<double>::quiet_NaN();
@@ -594,8 +590,8 @@ namespace DiFfRG
     void set_endpoint_standoff(const double v) { endpoint_standoff = v; }
     /// Fraction of the remaining distance to the critical point kept per approach step (default 0.1).
     void set_approach_factor(const double v) { approach_factor = v; }
-    /// Seed the exponent from a nearby earlier search. Currently it is only reported by
-    /// get_exponent() until the first fit; the fits do not use it.
+    /// Seed the exponent \f$\beta\f$, e.g. from a nearby earlier search: the convergent model is then fitted
+    /// from two successful points instead of three (the 3-point fit takes over as soon as it is valid).
     void seed_exponent(const double beta) { seeded_exponent = beta; }
     /** @} */
 
@@ -797,17 +793,35 @@ namespace DiFfRG
     std::vector<std::pair<double, double>> pts; // (obs, x)
     for (const auto &[x, obs] : S)
       if (!(target > 0. && obs_window > 0.) || obs <= obs_window * target) pts.emplace_back(obs, x);
-    if (pts.size() < 3) return;
     std::sort(pts.begin(), pts.end()); // ascending in obs: closest to criticality first
 
-    const auto k = select_triple(pts.size());
-    const std::array<double, 3> xs{{pts[k[0]].second, pts[k[1]].second, pts[k[2]].second}};
-    const std::array<double, 3> ys{{pts[k[0]].first, pts[k[1]].first, pts[k[2]].first}};
-    const auto fit = internal::fit_power_law_3(xs, ys);
-    if (!fit.valid) return;
-    if (!(fit.exponent >= beta_min && fit.exponent <= beta_max)) return;
-
-    const double x_c = *std::min_element(xs.begin(), xs.end()) - fit.shift;
+    // The fitted critical point, exponent and log amplitude, or NaN if no usable fit.
+    double x_c = NAN, beta = NAN, log_C = NAN;
+    if (pts.size() >= 3) {
+      const auto k = select_triple(pts.size());
+      const std::array<double, 3> xs{{pts[k[0]].second, pts[k[1]].second, pts[k[2]].second}};
+      const std::array<double, 3> ys{{pts[k[0]].first, pts[k[1]].first, pts[k[2]].first}};
+      const auto fit = internal::fit_power_law_3(xs, ys);
+      if (fit.valid && fit.exponent >= beta_min && fit.exponent <= beta_max) {
+        x_c = *std::min_element(xs.begin(), xs.end()) - fit.shift;
+        beta = fit.exponent;
+        log_C = fit.log_amplitude;
+      }
+    }
+    // With a seeded exponent two points determine x_c and C: (obs_1 / obs_2)^(1/beta) = (x_1 - x_c) / (x_2 - x_c).
+    const bool seeded = std::isfinite(seeded_exponent) && seeded_exponent >= beta_min && seeded_exponent <= beta_max;
+    if (!std::isfinite(x_c) && seeded && pts.size() >= 2) {
+      const auto [obs1, x1] = pts[0];
+      const auto [obs2, x2] = pts[1];
+      const double r = std::pow(obs1 / obs2, 1. / seeded_exponent);
+      if (std::isfinite(r) && r < 1.) {
+        x_c = (x1 - r * x2) / (1. - r);
+        beta = seeded_exponent;
+        log_C = std::log(obs1) - beta * std::log(x1 - x_c);
+        if (!(x_c < std::min(x1, x2)) || !std::isfinite(log_C)) x_c = NAN;
+      }
+    }
+    if (!std::isfinite(x_c)) return;
     if (!(x_c > x_lo_hard && x_c < x_hi)) return;
 
     // Two fits that disagree by an appreciable fraction of the bracket mean the model is still
@@ -817,8 +831,8 @@ namespace DiFfRG
 
     model_x_c_prev = model_x_c;
     model_x_c = x_c;
-    model_beta = fit.exponent;
-    model_log_C = fit.log_amplitude;
+    model_beta = beta;
+    model_log_C = log_C;
     model_valid = agrees;
   }
 
@@ -908,7 +922,7 @@ namespace DiFfRG
       cand = (target > 0.) ? extrapolate(model_x_c)
                            // Deep scaling: the target IS the singular point. Approach the fitted
                            // x_c geometrically from the convergent side and never land on it.
-                           : model_x_c + 0.1 * (x_hi - model_x_c);
+                           : model_x_c + approach_factor * (x_hi - model_x_c);
       if (std::isfinite(cand)) source = MODEL_OBS;
     }
 
@@ -1013,6 +1027,21 @@ namespace DiFfRG
     if (!(x_lo_init < x_hi_init))
       throw std::runtime_error("ScalingRootFinder: search bounds are not ordered (x_lo < x_hi)");
     if (!(target >= 0.)) throw std::runtime_error("ScalingRootFinder: target must be non-negative");
+
+    // Every search starts afresh; only the configuration carries over.
+    x_lo_soft = x_lo_hard = -std::numeric_limits<double>::infinity();
+    x_hi = std::numeric_limits<double>::infinity();
+    S.clear();
+    F.clear();
+    model_valid = divergent_valid = false;
+    model_x_c = model_beta = model_log_C = model_theta = model_x_c_prev = NAN;
+    divergent_x_c = divergent_shift = NAN;
+    best_x = best_obs = NAN;
+    have_success = false;
+    counts = Counts{};
+    w_prev = w_prevprev = std::numeric_limits<double>::infinity();
+    probed_hi_init = probed_lo_init = false;
+    expansions = 0;
 
     w_init = x_hi_init - x_lo_init;
     m_converged = false;

@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 using namespace DiFfRG;
 
@@ -456,4 +457,67 @@ TEST_CASE("ScalingRootFinder BelowTarget never returns a divergent point", "[com
   double obs = NAN, residual = NAN;
   REQUIRE(sc_probe(x, obs, residual));
   CHECK(std::isfinite(obs));
+}
+
+TEST_CASE("BisectionRootFinder converges whatever the last evaluation returned", "[common][root_finding]")
+{
+  // The final probe lands below the root for about half of these; that used to throw.
+  for (const double root : {0.1, 0.2347, 0.3, 0.5, 0.71, 0.9}) {
+    BisectionRootFinder search([&](const double x) { return x >= root; }, 1e-4, 100);
+    search.set_bounds(0., 1.);
+    double x = NAN;
+    REQUIRE_NOTHROW(x = search.search());
+    CHECK(x >= root);
+    CHECK(x - root < 1e-4);
+  }
+  BisectionRootFinder short_budget([](const double x) { return x >= 0.5; }, 1e-12, 5);
+  short_budget.set_bounds(0., 1.);
+  CHECK_THROWS_AS(short_budget.search(), std::runtime_error);
+}
+
+TEST_CASE("ScalingRootFinder uses a seeded exponent", "[common][root_finding]")
+{
+  // Failures without a residual, so that no divergent fit can stand in: then the seed lets the convergent model
+  // extrapolate from two points instead of three.
+  const auto run = [](const double seed) {
+    uint calls = 0;
+    ScalingRootFinder search(
+        [&](const double x, double &obs, double &) -> bool {
+          ++calls;
+          double residual;
+          return sc_probe(x, obs, residual);
+        },
+        sc_target, 1e-3, 40);
+    search.set_bounds(0., 3.);
+    search.set_residual_window(0.);
+    if (std::isfinite(seed)) search.seed_exponent(seed);
+    const double x = search.search();
+    CHECK(search.converged());
+    CHECK(std::abs(x - sc_x_star()) < 1e-6);
+    return calls;
+  };
+  const uint plain = run(NAN);
+  const uint seeded = run(sc_beta);
+  INFO("evaluations without seed: " << plain << ", with seed: " << seeded);
+  CHECK(seeded < plain);
+}
+
+TEST_CASE("ScalingRootFinder searches afresh every time", "[common][root_finding]")
+{
+  uint calls = 0;
+  ScalingRootFinder search(
+      [&](const double x, double &obs, double &residual) -> bool {
+        ++calls;
+        return sc_probe(x, obs, residual);
+      },
+      sc_target, 1e-3, 40);
+  search.set_bounds(0., 3.);
+  search.set_residual_window(0.);
+
+  const double first = search.search();
+  const uint first_calls = std::exchange(calls, 0);
+  const double second = search.search();
+  CHECK(second == first);
+  CHECK(calls == first_calls);
+  CHECK(search.get_counts().total == first_calls);
 }
