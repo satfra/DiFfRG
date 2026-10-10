@@ -9,21 +9,23 @@ namespace DiFfRG
 {
   namespace internal
   {
+    namespace
+    {
+      /// Whether two cache keys (temperatures, energies, cutoffs) agree to a relative 1e-6.
+      bool same_key(const double a, const double b)
+      {
+        return std::abs(a - b) <= 1e-6 * std::max(std::abs(a), std::abs(b));
+      }
+    } // namespace
+
     MatsubaraStorage::TemperatureIterator<double> MatsubaraStorage::find_T_d(const double T)
     {
       // search for T
       auto it = quadratures_d.lower_bound(T);
 
-      if (it != quadratures_d.end()) {
-        bool it_found_T = (is_close(it->first, T, 1e-6 * T));
-
-        if (it_found_T) return it;
-
-        if (it != quadratures_d.begin()) {
-          bool itp_found_T = (std::prev(it) != quadratures_d.end()) && (is_close(std::prev(it)->first, T, 1e-6 * T));
-          if (itp_found_T) return std::prev(it);
-        }
-      }
+      // Either neighbour of the insertion point may match; lower_bound returns end() for a key above all others.
+      if (it != quadratures_d.end() && same_key(it->first, T)) return it;
+      if (it != quadratures_d.begin() && same_key(std::prev(it)->first, T)) return std::prev(it);
 
       // create new entry in quadratures_d
       return quadratures_d.insert(std::make_pair(T, SubStorageType<double>())).first;
@@ -37,16 +39,9 @@ namespace DiFfRG
       // search for E
       auto it = map.lower_bound(E);
 
-      if (it != map.end()) {
-        bool it_found_T = (is_close(it->first, E, 1e-6 * E));
-
-        if (it_found_T) return it;
-
-        if (it != map.begin()) {
-          bool itp_found_T = (std::prev(it) != map.end()) && (is_close(std::prev(it)->first, E, 1e-6 * E));
-          if (itp_found_T) return std::prev(it);
-        }
-      }
+      // Either neighbour of the insertion point may match; lower_bound returns end() for a key above all others.
+      if (it != map.end() && same_key(it->first, E)) return it;
+      if (it != map.begin() && same_key(std::prev(it)->first, E)) return std::prev(it);
 
       // create new entry in quadratures_d
       auto new_it = map.insert(std::make_pair(E, MatsubaraQuadrature<double>())).first;
@@ -66,16 +61,9 @@ namespace DiFfRG
       // search for T
       auto it = quadratures_f.lower_bound(T);
 
-      if (it != quadratures_f.end()) {
-        bool it_found_T = (is_close(it->first, T, 1e-6 * T));
-
-        if (it_found_T) return it;
-
-        if (it != quadratures_f.begin()) {
-          bool itp_found_T = (std::prev(it) != quadratures_f.end()) && (is_close(std::prev(it)->first, T, 1e-6 * T));
-          if (itp_found_T) return std::prev(it);
-        }
-      }
+      // Either neighbour of the insertion point may match; lower_bound returns end() for a key above all others.
+      if (it != quadratures_f.end() && same_key(it->first, T)) return it;
+      if (it != quadratures_f.begin() && same_key(std::prev(it)->first, T)) return std::prev(it);
 
       // create new entry in quadratures_f
       return quadratures_f.insert(std::make_pair(T, SubStorageType<float>())).first;
@@ -88,16 +76,9 @@ namespace DiFfRG
       // search for E
       auto it = map.lower_bound(E);
 
-      if (it != map.end()) {
-        bool it_found_T = (is_close(it->first, E, 1e-6 * E));
-
-        if (it_found_T) return it;
-
-        if (it != map.begin()) {
-          bool itp_found_T = (std::prev(it) != map.end()) && (is_close(std::prev(it)->first, E, 1e-6 * E));
-          if (itp_found_T) return std::prev(it);
-        }
-      }
+      // Either neighbour of the insertion point may match; lower_bound returns end() for a key above all others.
+      if (it != map.end() && same_key(it->first, E)) return it;
+      if (it != map.begin() && same_key(std::prev(it)->first, E)) return std::prev(it);
 
       // create new entry in quadratures_f
       auto new_it = map.insert(std::make_pair(E, MatsubaraQuadrature<float>())).first;
@@ -116,10 +97,9 @@ namespace DiFfRG
     {
       auto it = exact_sums_d.lower_bound(T);
 
-      if (it != exact_sums_d.end()) {
-        if (is_close(it->first, T, 1e-6 * T)) return it;
-        if (it != exact_sums_d.begin() && is_close(std::prev(it)->first, T, 1e-6 * T)) return std::prev(it);
-      }
+      // Either neighbour of the insertion point may match; lower_bound returns end() for a key above all others.
+      if (it != exact_sums_d.end() && same_key(it->first, T)) return it;
+      if (it != exact_sums_d.begin() && same_key(std::prev(it)->first, T)) return std::prev(it);
 
       return exact_sums_d.insert(std::make_pair(T, std::map<int, MatsubaraQuadrature<double>>())).first;
     }
@@ -148,10 +128,9 @@ namespace DiFfRG
     {
       auto it = exact_sums_f.lower_bound(T);
 
-      if (it != exact_sums_f.end()) {
-        if (is_close(it->first, (double)T, 1e-6 * T)) return it;
-        if (it != exact_sums_f.begin() && is_close(std::prev(it)->first, (double)T, 1e-6 * T)) return std::prev(it);
-      }
+      // Either neighbour of the insertion point may match; lower_bound returns end() for a key above all others.
+      if (it != exact_sums_f.end() && same_key(it->first, (double)T)) return it;
+      if (it != exact_sums_f.begin() && same_key(std::prev(it)->first, (double)T)) return std::prev(it);
 
       return exact_sums_f.insert(std::make_pair((double)T, std::map<int, MatsubaraQuadrature<float>>())).first;
     }
@@ -187,10 +166,9 @@ namespace DiFfRG
       auto &map = o_it->second;
 
       auto it = map.lower_bound(cutoff);
-      if (it != map.end()) {
-        if (is_close(it->first, cutoff, 1e-6 * cutoff)) return it->second;
-        if (it != map.begin() && is_close(std::prev(it)->first, cutoff, 1e-6 * cutoff)) return std::prev(it)->second;
-      }
+      // Either neighbour of the insertion point may match; lower_bound returns end() for a key above all others.
+      if (it != map.end() && same_key(it->first, cutoff)) return it->second;
+      if (it != map.begin() && same_key(std::prev(it)->first, cutoff)) return std::prev(it)->second;
 
       auto new_it = map.insert(std::make_pair(cutoff, MatsubaraQuadrature<double>())).first;
       new_it->second.reinit_finite_interval(cutoff, n, w);
@@ -216,11 +194,9 @@ namespace DiFfRG
       auto &map = o_it->second;
 
       auto it = map.lower_bound((double)cutoff);
-      if (it != map.end()) {
-        if (is_close(it->first, (double)cutoff, 1e-6 * cutoff)) return it->second;
-        if (it != map.begin() && is_close(std::prev(it)->first, (double)cutoff, 1e-6 * cutoff))
-          return std::prev(it)->second;
-      }
+      // Either neighbour of the insertion point may match; lower_bound returns end() for a key above all others.
+      if (it != map.end() && same_key(it->first, (double)cutoff)) return it->second;
+      if (it != map.begin() && same_key(std::prev(it)->first, (double)cutoff)) return std::prev(it)->second;
 
       auto new_it = map.insert(std::make_pair((double)cutoff, MatsubaraQuadrature<float>())).first;
       new_it->second.reinit_finite_interval(cutoff, n, w);

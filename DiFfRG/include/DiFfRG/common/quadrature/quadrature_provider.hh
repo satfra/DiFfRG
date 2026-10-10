@@ -1,5 +1,8 @@
 #pragma once
 
+// standard library
+#include <atomic>
+
 // DiFfRG
 #include <DiFfRG/common/config_tree.hh>
 #include <DiFfRG/common/kokkos.hh>
@@ -361,7 +364,7 @@ namespace DiFfRG
           const std::vector<int> weights(pool_size, 1);
           return Kokkos::Experimental::partition_space(ExecutionSpace(), weights);
         }();
-        static size_t next = 0;
+        static std::atomic<size_t> next = 0;
         return pool[next++ % pool_size];
       }
     }

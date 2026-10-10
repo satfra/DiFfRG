@@ -149,3 +149,19 @@ TEST_CASE("Quadrature provider reports into the run log", "[quadrature][output]"
     CHECK_THAT(contents, Catch::Matchers::ContainsSubstring("session marker"));
   }
 }
+
+TEST_CASE("The quadrature cache matches keys to a relative 1e-6", "[double][quadrature]")
+{
+  DiFfRG::Init();
+  QuadratureProvider provider;
+
+  // Large temperatures are distinct once they differ by more than 1e-6 relative.
+  const auto &hot = provider.matsubara_rule(1000., 10.);
+  CHECK(&provider.matsubara_rule(1000. * (1. + 1e-8), 10.) == &hot);
+  CHECK(provider.matsubara_rule(1000.5, 10.).get_T() == 1000.5);
+  CHECK(hot.get_T() == 1000.);
+
+  // A repeated key returns the same rule, also for small values.
+  const auto &cold = provider.matsubara_rule(1e-3, 1e-2);
+  CHECK(&provider.matsubara_rule(1e-3, 1e-2) == &cold);
+}
