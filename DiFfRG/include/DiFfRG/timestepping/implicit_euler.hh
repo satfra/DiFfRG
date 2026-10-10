@@ -13,8 +13,28 @@
 
 namespace DiFfRG
 {
-  template <typename VectorType, typename SparseMatrixType, uint dim,
-            template <typename...> typename LinearSolver>
+  /**
+   * @brief Backward Euler with adaptive step size.
+   *
+   * Each step solves, by Newton's method with the matrix \f$M + \Delta t\, \partial R/\partial u\f$,
+   * \f[
+   *   m(u_{n+1}) - m(u_n) + \Delta t\, R(u_{n+1}) = 0\,,
+   * \f]
+   * which is \f$M(u_{n+1} - u_n) + \Delta t\, R(u_{n+1}) = 0\f$ for the usual linear mass term (notation of
+   * abstract_timestepper.hh). First order in \f$\Delta t\f$.
+   *
+   * The step size is chosen by a PI controller (TC_PI) from the Newton convergence measure of the last step (see
+   * Newton), not from an estimate of the time discretization error: /timestepping/implicit/abs_tol and rel_tol set how
+   * accurately each step's equation is solved, and the step grows as long as Newton converges easily. Steps stay in
+   * [implicit/minimal_dt, implicit/maximal_dt]; at minimal_dt a step is accepted even if Newton did not converge.
+   * A frame is written at the first step past each multiple of output_dt, and at the end.
+   *
+   * Only the FE part is integrated: variables keep their initial values. Serial only; the mesh adaptor is called
+   * before every step.
+   *
+   * @tparam LinearSolver solver for the Newton systems; see DefaultLinearSolver.
+   */
+  template <typename VectorType, typename SparseMatrixType, uint dim, template <typename...> typename LinearSolver>
   class TimeStepperImplicitEuler_impl : public AbstractTimestepper<VectorType, SparseMatrixType, dim>
   {
     static_assert(!is_distributed_la<VectorType>,
@@ -32,17 +52,21 @@ namespace DiFfRG
     using Base::assembler, Base::data_out, Base::config, Base::adaptor;
 
     /// The public entry point, which handles snapshots and restarts; see AbstractTimestepper::run.
-
     using Base::run;
-    /// Forwards to the base with this stepper's kind. Not `using Base::Base;`: the base needs to
-    /// know which /timestepping/ section to read, and it cannot ask a virtual function for that
-    /// from inside its own constructor.
-    TimeStepperImplicitEuler_impl(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
+
+    // Not `using Base::Base;`: the base needs to know which /timestepping/ section to read, and it
+    // cannot ask a virtual function for that from inside its own constructor.
+
+    /// Construct without mesh adaptation; see AbstractTimestepper.
+    TimeStepperImplicitEuler_impl(const ConfigTree &config,
+                                  AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                                   OutputSession_impl<dim, VectorType> &data_out)
         : Base(config, assembler, data_out, /*implicit=*/true, /*explicit=*/false)
     {
     }
-    TimeStepperImplicitEuler_impl(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
+    /// Construct with a mesh adaptor; see AbstractTimestepper.
+    TimeStepperImplicitEuler_impl(const ConfigTree &config,
+                                  AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                                   OutputSession_impl<dim, VectorType> &data_out, AbstractAdaptor<VectorType> &adaptor)
         : Base(config, assembler, data_out, adaptor, /*implicit=*/true, /*explicit=*/false)
     {
@@ -62,14 +86,10 @@ namespace DiFfRG
   // assembler would explode that set into one instantiation per model. Applications name the
   // assembler instead and let these aliases project it onto that fixed parameter list.
   //
-  // The argument is anything exposing VectorType, SparseMatrixType and dim -- an Assembler, or a
-  // Discretization where the assembler type is not a single type (e.g. a test that runs one
-  // discretization against several models).
-  //
-  // The solver defaults to DefaultLinearSolver, which follows the linear algebra: UMFPack when it
-  // is serial, a distributed direct solve when it is not. Note that <Assembler> and
-  // <Assembler, UMFPack> are *different types* even in a serial build -- see the comment on
-  // DefaultLinearSolver -- so both need their own explicit instantiation.
+  // Note that <Assembler> and <Assembler, UMFPack> are *different types* even in a serial build --
+  // see the comment on DefaultLinearSolver -- so both need their own explicit instantiation.
+
+  /// Backward-Euler timestepper for an assembler; see TimeStepperImplicitEuler_impl.
   template <typename Assembler, template <typename...> typename LinearSolver = DefaultLinearSolver>
   using TimeStepperImplicitEuler =
       TimeStepperImplicitEuler_impl<typename Assembler::VectorType, typename Assembler::SparseMatrixType,

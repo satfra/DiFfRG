@@ -325,7 +325,6 @@ namespace DiFfRG
 
     using namespace boost::numeric::odeint;
     auto stepper = make_controlled<error_stepper_type>(expl.abs_tol, expl.rel_tol);
-    // integrate_adaptive(stepper, residual, y_eigen, t_start, t_stop, expl.dt, output_step);
 
     uint step = 0;
     double cur_dt = expl.dt;

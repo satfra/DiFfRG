@@ -1,6 +1,8 @@
 #pragma once
 
-// Deprecated header. The class formerly known as DiFfRG::JSONValue is now
-// DiFfRG::ConfigTree, which reads both JSON and TOML parameter files.
-// Include <DiFfRG/common/config_tree.hh> instead.
+/**
+ * @file json.hh
+ * @deprecated Include config_tree.hh instead. DiFfRG::JSONValue is now DiFfRG::ConfigTree, which reads both JSON and
+ * TOML parameter files.
+ */
 #include <DiFfRG/common/config_tree.hh>

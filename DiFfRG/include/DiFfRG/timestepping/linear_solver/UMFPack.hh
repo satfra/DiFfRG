@@ -115,6 +115,13 @@ namespace DiFfRG
     };
   } // namespace internal
 
+  /**
+   * @brief Serial direct solve by LU factorization (UMFPACK); the default for serial linear algebra.
+   *
+   * invert() factorizes the matrix, solve() is a forward and back substitution and ignores `tol`. For a
+   * dealii::SparseMatrix<double>, entries that are exactly zero are dropped before factorizing, which saves fill-in
+   * without changing the result beyond rounding. See abstract_linear_solver.hh for the interface.
+   */
   template <typename SparseMatrixType, typename VectorType>
   class UMFPack : public AbstractLinearSolver<SparseMatrixType, VectorType>
   {
@@ -125,8 +132,9 @@ namespace DiFfRG
 
     void init(const SparseMatrixType &matrix) { this->matrix = &matrix; }
 
-    /// @see TimeStepperSUNDIALS_IDA's /timestepping/implicit/iterative_refinement. Only for the zero-dropping
-    /// factorization of a SparseMatrix<double>; deal.II's (block matrices) always refines.
+    /// Iterative refinement of every solve (up to two steps), set from /timestepping/implicit/iterative_refinement.
+    /// Switching it off makes solves cheaper and less accurate. Only for dealii::SparseMatrix<double>; block
+    /// matrices always refine.
     void set_iterative_refinement(const bool on)
     {
       if constexpr (requires { solver.set_iterative_refinement(on); }) solver.set_iterative_refinement(on);
@@ -146,6 +154,7 @@ namespace DiFfRG
       return -1;
     }
 
+    /// Solve \f$A^T x = b\f$ with the existing factorization.
     void solve_transpose(const VectorType &src, VectorType &dst) const
     {
       if (!matrix) throw std::runtime_error("UMFPack::solve_transpose: matrix not initialized");
@@ -153,6 +162,7 @@ namespace DiFfRG
       solver.solve(dst, true);
     }
 
+    /// Estimate of the reciprocal condition number \f$1/(\|A\|_1 \|A^{-1}\|_1)\f$, in [0, 1].
     double estimate_rcond(const SparseMatrixType &input_matrix, const unsigned int max_iterations = 5) const
     {
       if (!matrix) throw std::runtime_error("UMFPack::estimate_rcond: matrix not initialized");
@@ -170,6 +180,7 @@ namespace DiFfRG
       return std::clamp(1. / (one_norm * inverse_one_norm), 0., 1.);
     }
 
+    /// As estimate_rcond(), for the matrix with rows and columns scaled to unit maximum.
     double estimate_scaled_rcond(const SparseMatrixType &input_matrix, const unsigned int max_iterations = 5) const
     {
       if (!matrix) throw std::runtime_error("UMFPack::estimate_scaled_rcond: matrix not initialized");

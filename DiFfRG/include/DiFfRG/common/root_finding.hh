@@ -11,8 +11,27 @@
 
 #include <spdlog/spdlog.h>
 
+/**
+ * @file root_finding.hh
+ * @brief Bracketing searches for the point \f$x^*\f$ where a yes/no test switches, e.g. the value of a coupling at
+ * which a flow stops diverging.
+ *
+ * The bisection finders call a user function at trial points \f$x\f$. It returns `true` if \f$x\f$ lies at or above
+ * \f$x^*\f$ and `false` if below; the search shrinks the bracket \f$[x_\text{lo}, x_\text{hi}]\f$ around \f$x^*\f$
+ * accordingly. ScalingRootFinder works differently, see its class documentation.
+ * - BisectionRootFinder stops when the bracket is narrower than `abs_tol`.
+ * - BisectionRootFinderTarget stops when an observable computed at successive successful points has converged.
+ * - ScalingRootFinder solves \f$\text{obs}(x) = \text{target}\f$ for an observable that vanishes like a power law at a
+ *   critical point, and uses that power law to propose trial points.
+ */
+
 namespace DiFfRG
 {
+  /**
+   * @brief Common interface of the bracketing searches in \f$d\f$ variables.
+   *
+   * @tparam dim number of variables; for 1 the test function takes a plain `double`.
+   */
   template <int dim> class AbstractRootFinder
   {
   protected:
@@ -42,7 +61,7 @@ namespace DiFfRG
     virtual std::array<double, dim> search_impl() = 0;
   };
 
-  // explicit specialization for 1D search
+  /// One variable: the test function takes a `double`, search() returns a `double`.
   template <> class AbstractRootFinder<1>
   {
   protected:
@@ -78,6 +97,20 @@ namespace DiFfRG
     virtual std::array<double, 1> search_impl() = 0;
   };
 
+  /**
+   * @brief Bisection for the point \f$x^*\f$ where the test `f(x)` switches from `false` (below) to `true` (at or
+   * above).
+   *
+   * Starts from set_bounds() (no default; must be set) and evaluates at the midpoint of the current bracket, or at
+   * `next_x(x_lo, x_hi)` if set_next_x() was given. Stops when the bracket is narrower than `abs_tol` after a
+   * successful evaluation, and returns the last tested point. Throws if the last evaluation failed.
+   *
+   * @code
+   * BisectionRootFinder search([&](double x) { return flow_converges(x); }, 1e-6);
+   * search.set_bounds(0., 1.);
+   * const double x_star = search.search();
+   * @endcode
+   */
   class BisectionRootFinder : public AbstractRootFinder<1>
   {
   public:
@@ -95,11 +128,14 @@ namespace DiFfRG
       this->x_max = x_max;
     }
 
+    /// Replace the midpoint rule by `next_x(x_lo, x_hi)`, which must return a point inside the bracket.
     void set_next_x(const std::function<double(double, double)> &next_x) { this->next_x = next_x; }
 
   protected:
     std::array<double, 1> search_impl() override
     {
+      if (!(std::isfinite(this->x_min) && std::isfinite(this->x_max)))
+        throw std::runtime_error("BisectionRootFinder: search bounds were not set");
       double x_min = this->x_min;
       double x_max = this->x_max;
       double x_test = 0.;
@@ -123,8 +159,8 @@ namespace DiFfRG
       return {{x_test}};
     }
 
-    double x_min;
-    double x_max;
+    double x_min = std::numeric_limits<double>::quiet_NaN();
+    double x_max = std::numeric_limits<double>::quiet_NaN();
 
     std::function<double(double, double)> next_x = [](const double x_min, const double x_max) {
       return (x_min + x_max) / 2.;
@@ -147,7 +183,7 @@ namespace DiFfRG
    * @code
    * BisectionRootFinderTarget search(
    *     [&](const double x, double &target) -> bool {
-   *       config.set_double("/physical/m2A", x);
+   *       config.set_double("/physical/coupling", x);
    *       return run_at(x, target); // writes the observable into target
    *     },
    *     tol, 100);
@@ -291,7 +327,7 @@ namespace DiFfRG
     };
   };
 
-  namespace detail
+  namespace internal
   {
     /**
      * @brief Result of a three-point power-law fit @f$ y = C (x - x_c)^\beta @f$.
@@ -438,29 +474,26 @@ namespace DiFfRG
       fit.log_amplitude = std::log(y3) - beta * std::log(s);
       return fit;
     }
-  } // namespace detail
+  } // namespace internal
 
   /**
    * @brief Bracketed root find accelerated by the critical scaling of the observable.
    *
-   * Solves obs(x) == target where obs is smooth and monotone on the convergent side of a
-   * critical point x_c < x, obeying obs = C (x - x_c)^beta, and where probes below x_c fail but
-   * expose a residual that grows as x_c is approached, r(x) = a - ln(x_c - x)/theta. Neither
-   * exponent is assumed; both are fitted from three points, and the same solve serves both
-   * branches (the divergent one via x -> -x, y -> exp(-r), which is why only the residual
-   * *differences* ever enter and no exponentials are formed).
+   * Solves \f$\text{obs}(x) = \text{target}\f$ where, above a critical point \f$x_c\f$, the observable behaves as
+   * \f$\text{obs} = C (x - x_c)^\beta\f$, and below \f$x_c\f$ the evaluation fails with a residual that grows as
+   * \f$x_c\f$ is approached, \f$r(x) = a - \ln(x_c - x)/\theta\f$, with fitted constants \f$C, a\f$. Neither exponent
+   * is assumed; both are fitted
+   * from three points, and the same solve serves both sides (the failing one via \f$x \to -x\f$,
+   * \f$y \to e^{-r}\f$, so only differences of residuals enter and no exponentials are formed).
    *
    * Every model-based proposal is bracket-safeguarded Brent-style, so a wrong model costs at
    * most a factor two over plain bisection and can never move the answer.
    *
-   * The callback reports three outcomes, not two:
-   *   - returns true and writes a finite @c obs: a usable evaluation. Whether it lies above or
-   *     below the target is the finder's business, not the callback's.
-   *   - returns false and writes a finite @c residual: the evaluation ran away; the residual
-   *     says how far it got.
-   *   - returns false and writes nothing: it failed some other way and carries no information
-   *     beyond its own x. Both @c obs and @c residual are NaN-initialised before every call, so
-   *     "wrote nothing" needs no separate signal.
+   * The callback `f(x, obs, residual)` reports its outcome through what it writes; its return value is ignored.
+   * Both outputs are NaN before every call.
+   *   - a finite @c obs: a usable evaluation, above or below the target.
+   *   - a finite @c residual (and no obs): the evaluation ran away; the residual says how far it got.
+   *   - neither: it failed some other way and only tells that \f$x\f$ lies below \f$x_c\f$.
    *
    * @code
    * ScalingRootFinder search(
@@ -469,7 +502,7 @@ namespace DiFfRG
    *     },
    *     zc_target, 1e-3, 40);
    * search.set_bounds(lower, upper);          // hypotheses; expanded if they do not straddle
-   * search.set_residual_window(0.4 * final_time);
+   * search.set_residual_window(0.4 * final_time);  // residuals: RG time reached before diverging
    * const double x = search.search();
    * @endcode
    */
@@ -481,10 +514,8 @@ namespace DiFfRG
      *
      * AtTarget converges obs onto the target to within rel_tol. BelowTarget accepts the first
      * evaluation that lands anywhere strictly between the critical point and the target
-     * crossing, which is a far easier thing to hit: on a cold Yang-Mills tune that interval is
-     * ~600x wider in the search variable than the AtTarget window, i.e. about nine bisections
-     * cheaper, and it lets a merely decent fit succeed on its first attempt instead of being
-     * refined until it is accurate to rel_tol.
+     * crossing. That interval is typically much wider in \f$x\f$ than the AtTarget window, so a
+     * merely decent fit can succeed on its first attempt instead of being refined to rel_tol.
      */
     enum class Acceptance { AtTarget, BelowTarget };
 
@@ -552,8 +583,8 @@ namespace DiFfRG
       beta_max = hi;
     }
     /// Bounds on the divergent-branch exponent. theta is an inverse unstable RG eigenvalue and
-    /// sits near the tuned parameter's mass dimension -- 2 for a mass squared, measured 1.92 on
-    /// a cold Yang-Mills tune -- so it is far more tightly constrained a priori than beta.
+    /// sits near the tuned parameter's mass dimension (2 for a mass squared), so it is far more
+    /// tightly constrained a priori than beta.
     void set_theta_bounds(const double lo, const double hi)
     {
       theta_min = lo;
@@ -561,10 +592,10 @@ namespace DiFfRG
     }
     /// Fraction of the bracket width kept clear of either endpoint when clamping a proposal.
     void set_endpoint_standoff(const double v) { endpoint_standoff = v; }
-    /// Fraction of the remaining distance to the critical point kept per approach step.
+    /// Fraction of the remaining distance to the critical point kept per approach step (default 0.1).
     void set_approach_factor(const double v) { approach_factor = v; }
-    /// Seed the exponent from a nearby earlier search (another simplex step, a coarser
-    /// fidelity). Exponents are far more portable than amplitudes; do not seed the latter.
+    /// Seed the exponent from a nearby earlier search. Currently it is only reported by
+    /// get_exponent() until the first fit; the fits do not use it.
     void seed_exponent(const double beta) { seeded_exponent = beta; }
     /** @} */
 
@@ -596,7 +627,7 @@ namespace DiFfRG
 
     double search();
 
-  protected:
+  private:
     /// The value actually aimed at. With one-sided acceptance the admissible window is
     /// [target, target(1+rel_tol)]; aiming at its centre rather than its lower edge keeps
     /// rounding in the extrapolation from landing just below and costing an extra evaluation.
@@ -618,9 +649,8 @@ namespace DiFfRG
      *
      * Spreading the triple across the whole admissible range is better conditioned in principle
      * -- a bisecting search leaves the closest points tightly clustered -- but measures worse:
-     * the far points are not asymptotic enough, the fit is rejected outright more often, and a
-     * cold SP tune stopped converging inside its budget. Both laws are asymptotic, so the fit
-     * stays in the asymptote.
+     * the far points are not asymptotic enough and the fit is rejected outright more often. Both
+     * laws are asymptotic, so the fit stays in the asymptote.
      */
     static std::array<std::size_t, 3> select_triple(const std::size_t) { return {{0, 1, 2}}; }
 
@@ -773,7 +803,7 @@ namespace DiFfRG
     const auto k = select_triple(pts.size());
     const std::array<double, 3> xs{{pts[k[0]].second, pts[k[1]].second, pts[k[2]].second}};
     const std::array<double, 3> ys{{pts[k[0]].first, pts[k[1]].first, pts[k[2]].first}};
-    const auto fit = detail::fit_power_law_3(xs, ys);
+    const auto fit = internal::fit_power_law_3(xs, ys);
     if (!fit.valid) return;
     if (!(fit.exponent >= beta_min && fit.exponent <= beta_max)) return;
 
@@ -802,7 +832,7 @@ namespace DiFfRG
     if (pts.size() < 3) return;
     std::sort(pts.begin(), pts.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
 
-    // Largest residual (closest to the critical point) plus two spread across the rest.
+    // The three largest residuals (closest to the critical point), see select_triple().
     // Order them by x ascending, so x3 is the closest from below and r3 the largest.
     const auto k = select_triple(pts.size());
     std::array<std::pair<double, double>, 3> t{{pts[k[0]], pts[k[1]], pts[k[2]]}}; // (r, x)
@@ -816,7 +846,7 @@ namespace DiFfRG
     // so the exponentials are never formed and a large final_time cannot underflow the fit.
     const double A = r2 - r1, B = r3 - r2;
     const double d1 = x3 - x1, d2 = x3 - x2;
-    const double s = detail::solve_scaling_shift(A, B, d1, d2);
+    const double s = internal::solve_scaling_shift(A, B, d1, d2);
     if (!std::isfinite(s)) return;
 
     const double beta = A / std::log((s + d1) / (s + d2));
@@ -908,15 +938,16 @@ namespace DiFfRG
 
     // 5. A critical point is known but nothing convergent lies inside the scaling window yet.
     // This is the approach phase, and it is where a bisection is worst: the target can sit a
-    // billionth of x_c away (measured: 1.4e-9 relative on a cold SP tune), so halving the bracket
+    // billionth of x_c away, so halving the bracket
     // needs ~30 flows to cover ground a geometric ladder covers in a handful. Step a fixed
     // fraction of the remaining distance to x_c -- one decade per flow -- from the safe side.
     if (source == NONE && target > 0. && std::isfinite(get_x_critical())) {
       const double x_c = get_x_critical();
       if (x_hi > x_c) {
-        // Never take a step a bisection would beat: capping at the midpoint means the bracket
-        // still halves every iteration, so this cannot stall and cannot trip the stagnation
-        // rule, while a good critical point makes it cover a decade instead of a factor two.
+        // Never step past the midpoint: a probe there that lands at or above the target halves
+        // the bracket like a bisection would, while a good critical point makes it cover a
+        // decade instead of a factor two. A probe below the target shrinks it less, and the
+        // stagnation rule then forces a bisection.
         cand = std::min(x_c + approach_factor * (x_hi - x_c), 0.5 * (x_lo_soft + x_hi));
         if (std::isfinite(cand)) source = APPROACH;
       }
@@ -945,8 +976,8 @@ namespace DiFfRG
       if (!(cand > x_lo_soft && cand < x_hi) || cand <= x_lo_hard)
         source = NONE; // outside the live bracket, or contradicts a known-divergent point
       else if (std::isfinite(w_prevprev) && w > 0.5 * w_prevprev) {
-        // If the bracket has not halved over the last two steps the model is not earning its
-        // place. One forced bisection caps its cost at a factor two over plain bisection.
+        // If the last step did not halve the bracket the model is not earning its place. One
+        // forced bisection caps its cost at a factor two over plain bisection.
         source = NONE;
         counts.forced_bisect++;
       } else
@@ -1030,8 +1061,8 @@ namespace DiFfRG
         }
       }
 
-      // Three consecutive successes whose observable does not move: obs is insensitive to x
-      // here, so no amount of further bracketing will resolve the target.
+      // The three successes with the largest x have the same observable: obs is insensitive to
+      // x here, so no amount of further bracketing will resolve the target.
       if (S.size() >= 3) {
         const double y1 = S[S.size() - 1].second, y2 = S[S.size() - 2].second, y3 = S[S.size() - 3].second;
         const double scale = std::max(std::abs(y1), 1e-300);

@@ -59,7 +59,7 @@ namespace DiFfRG
           if constexpr (sizeof...(_descriptors) > 1)
             for (size_t i : {I...})
               for (size_t j : {I...})
-                if (i != j && strings_equal(names[i], names[j])) return false;
+                if (i != j && internal::strings_equal(names[i], names[j])) return false;
           return true;
         }(std::make_index_sequence<sizeof...(_descriptors)>{}),
         "Names of a SubDescriptor must be unique!");
@@ -68,8 +68,7 @@ namespace DiFfRG
     {
       size_t running_sum = 0;
       for (size_t i = 0; i < names.size(); ++i) {
-        // if (0 == std::strcmp(names[i], name)) return running_sum;
-        if(strings_equal(names[i], name)) return running_sum;
+        if (internal::strings_equal(names[i], name)) return running_sum;
         running_sum += sizes[i];
       }
       // produce a compile-time error if the name is not found in the list
@@ -81,8 +80,14 @@ namespace DiFfRG
     template <unsigned N> consteval size_t operator[](FixedString<N> name) const { return get(name); }
     template <unsigned N> consteval size_t operator()(FixedString<N> name) const { return get(name); }
 
-    template <unsigned N> consteval size_t operator[](char const(&arr)[N]) const { return get( FixedString<N-1>(arr) ); }
-    template <unsigned N> consteval size_t operator()(char const(&arr)[N]) const { return get( FixedString<N-1>(arr) ); }
+    template <unsigned N> consteval size_t operator[](char const (&arr)[N]) const
+    {
+      return get(FixedString<N - 1>(arr));
+    }
+    template <unsigned N> consteval size_t operator()(char const (&arr)[N]) const
+    {
+      return get(FixedString<N - 1>(arr));
+    }
 
     consteval char const *name(size_t index) const { return names[index]; }
 
@@ -103,11 +108,10 @@ namespace DiFfRG
       return result;
     }
 
-    template<unsigned N>
-    consteval size_t size(char const(&arr)[N]) const
+    template <unsigned N> consteval size_t size(char const (&arr)[N]) const
     {
       for (size_t i = 0; i < names.size(); ++i)
-        if(strings_equal(names[i], arr)) return sizes[i];
+        if (internal::strings_equal(names[i], arr)) return sizes[i];
       throw std::invalid_argument(
           "SubDescriptor::size: Name \"" + std::string(arr) +
           "\" not found. Available names are: " + ((std::string(_descriptors::name) + "; ") + ...));

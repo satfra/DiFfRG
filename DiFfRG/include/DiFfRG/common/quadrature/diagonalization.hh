@@ -7,7 +7,7 @@
 #include <cmath>
 #include <limits>
 
-namespace DiFfRG
+namespace DiFfRG::internal
 {
   /**
    * @brief Diagonalizes a symmetric tridiagonal matrix.
@@ -139,4 +139,4 @@ namespace DiFfRG
       }
     }
   }
-} // namespace DiFfRG
+} // namespace DiFfRG::internal

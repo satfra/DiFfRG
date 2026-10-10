@@ -7,11 +7,20 @@
 namespace DiFfRG
 {
   /**
-   * @brief A simple PI controller which adjusts time steps in a smooth fashion depending on how well the solver
-   * performs, taking into account the most recent time step, too.
+   * @brief Proportional-integral step-size control from the solver's error measure.
    *
-   * @tparam NEWT the used solver type which should at least explose the methods set_ignore_nonconv(bool)->void and
-   * get_error()->double.
+   * With the error \f$E_n\f$ = `newton.get_error()` of the accepted step and the one before, \f$E_{n-1}\f$, the next
+   * step is \f$\Delta t_{n+1} = \Delta t_n / q\f$ with
+   * \f[
+   *   q = \frac{1}{0.9}\, \frac{E_n^{\beta_1}}{E_{n-1}^{\beta_2}}\,, \qquad \beta_1 = \frac{0.7}{p}\,, \quad
+   *   \beta_2 = \frac{0.4}{p}\,,
+   * \f]
+   * where \f$p\f$ is the order of the method, \f$q\f$ is clipped to [0.1, 5] and set to 1 within [0.99, 1.2].
+   * \f$E_{n-1}\f$ is floored at \f$10^{-4}\f$. A failed step is retried with at most half the step size. The
+   * coefficients are close to the PI defaults of OrdinaryDiffEq.jl. For the Newton-based steppers \f$E\f$ is Newton's
+   * convergence measure, not a time discretization error estimate; see Newton.
+   *
+   * @tparam NEWT the solver; must provide set_ignore_nonconv(bool) and get_error().
    */
   template <typename NEWT> class TC_PI : public TC_Default<NEWT>
   {
@@ -21,8 +30,8 @@ namespace DiFfRG
           double output_dt_)
         : Base(newton_, alg_order_, t_, max_t_, dt_, min_dt_, max_dt_, output_dt_)
     {
-      // these are magic numbers, inspired by the implementation of the PI controller in DifferentialEquations.jl,
-      // although a tad more conservative (i.e. cautious when increasing dt)
+      // Close to the PI defaults of OrdinaryDiffEq.jl, with a dead band [qsteady_min, qsteady_max] in which the
+      // step size is kept.
       beta1 = 7. / (10. * alg_order);
       beta2 = 2. / (5. * alg_order);
       qmin = 0.2;
@@ -37,9 +46,7 @@ namespace DiFfRG
   protected:
     using Base::t, Base::newton, Base::cur_dt, Base::sug_dt, Base::alg_order;
 
-    /**
-     * @brief This method just updates q for the calculation of the next sug_dt
-     */
+    /// Update q from the current error.
     void get_q()
     {
       const double EEst = newton.get_error();
@@ -48,9 +55,7 @@ namespace DiFfRG
       q = std::max(1. / qmax, std::min(1. / qmin, q / gamma));
     }
 
-    /**
-     * @brief Increment t and suggest a dt based on current error and previous error
-     */
+    /// Advance the time and suggest the next step from the current and previous error.
     virtual void step_success() override
     {
       t += cur_dt;

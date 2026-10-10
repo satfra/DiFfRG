@@ -174,7 +174,7 @@ TEST_CASE("solve_scaling_shift recovers the shift exactly", "[common][root_findi
   const auto shift_of = [](const double s) {
     const double d2 = 1., d1 = 3., beta = 0.7; // y_i = (s + d_i)^beta with d3 = 0
     const double y1 = std::pow(s + d1, beta), y2 = std::pow(s + d2, beta), y3 = std::pow(s, beta);
-    return DiFfRG::detail::solve_scaling_shift(std::log(y1 / y2), std::log(y2 / y3), d1, d2);
+    return DiFfRG::internal::solve_scaling_shift(std::log(y1 / y2), std::log(y2 / y3), d1, d2);
   };
 
   SECTION("exact wherever the shift is determinable")
@@ -213,7 +213,7 @@ TEST_CASE("fit_power_law_3 recovers the critical point", "[common][root_finding]
   for (std::size_t i = 0; i < 3; ++i)
     ys[i] = sc_obs(xs[i]);
 
-  const auto fit = DiFfRG::detail::fit_power_law_3(xs, ys);
+  const auto fit = DiFfRG::internal::fit_power_law_3(xs, ys);
   REQUIRE(fit.valid);
   const double x_c = 0.31 - fit.shift;
   CHECK(std::abs(x_c - sc_x_c) < 1e-10);
@@ -231,28 +231,28 @@ TEST_CASE("fit_power_law_3 rejects data that refutes the power law", "[common][r
     std::array<double, 3> ys{};
     for (std::size_t i = 0; i < 3; ++i)
       ys[i] = std::exp(-0.5 * xs[i]);
-    CHECK_FALSE(DiFfRG::detail::fit_power_law_3(xs, ys).valid);
+    CHECK_FALSE(DiFfRG::internal::fit_power_law_3(xs, ys).valid);
   }
 
   SECTION("convex the wrong way")
   {
     const std::array<double, 3> xs{{3., 2., 1.}};
     const std::array<double, 3> ys{{100., 2., 1.}};
-    CHECK_FALSE(DiFfRG::detail::fit_power_law_3(xs, ys).valid);
+    CHECK_FALSE(DiFfRG::internal::fit_power_law_3(xs, ys).valid);
   }
 
   SECTION("non-monotone")
   {
     const std::array<double, 3> xs{{3., 2., 1.}};
     const std::array<double, 3> ys{{2., 5., 1.}};
-    CHECK_FALSE(DiFfRG::detail::fit_power_law_3(xs, ys).valid);
+    CHECK_FALSE(DiFfRG::internal::fit_power_law_3(xs, ys).valid);
   }
 
   SECTION("ties and non-positive values")
   {
-    CHECK_FALSE(DiFfRG::detail::fit_power_law_3({{3., 2., 1.}}, {{2., 2., 1.}}).valid);
-    CHECK_FALSE(DiFfRG::detail::fit_power_law_3({{3., 2., 1.}}, {{2., 1., 0.}}).valid);
-    CHECK_FALSE(DiFfRG::detail::fit_power_law_3({{3., 3., 1.}}, {{3., 2., 1.}}).valid);
+    CHECK_FALSE(DiFfRG::internal::fit_power_law_3({{3., 2., 1.}}, {{2., 2., 1.}}).valid);
+    CHECK_FALSE(DiFfRG::internal::fit_power_law_3({{3., 2., 1.}}, {{2., 1., 0.}}).valid);
+    CHECK_FALSE(DiFfRG::internal::fit_power_law_3({{3., 3., 1.}}, {{3., 2., 1.}}).valid);
   }
 }
 
@@ -385,7 +385,7 @@ TEST_CASE("scaling fits recover the critical point of a recorded Yang-Mills tuni
     const std::array<double, 3> xs{{-106.1843776703, -106.1843860149, -106.1843901873}};
     const std::array<double, 3> ys{{0.008303434404644766, 0.004734391912027866, 0.0018394165060647556}};
 
-    const auto fit = DiFfRG::detail::fit_power_law_3(xs, ys);
+    const auto fit = DiFfRG::internal::fit_power_law_3(xs, ys);
     REQUIRE(fit.valid);
     const double x_c = *std::min_element(xs.begin(), xs.end()) - fit.shift;
     // Bisection had this bracketed only to ~7e-4 at that point.
@@ -400,7 +400,7 @@ TEST_CASE("scaling fits recover the critical point of a recorded Yang-Mills tuni
     const double x1 = -150.0, x2 = -115.0, x3 = -106.25;
     const double r1 = 2.6, r2 = 2.8, r3 = 5.0;
 
-    const double s = DiFfRG::detail::solve_scaling_shift(r2 - r1, r3 - r2, x3 - x1, x3 - x2);
+    const double s = DiFfRG::internal::solve_scaling_shift(r2 - r1, r3 - r2, x3 - x1, x3 - x2);
     REQUIRE(std::isfinite(s));
     const double x_c = x3 + s;
     // Three failed flows put us within 0.1 of the critical point out of a 44-wide gap -- worth

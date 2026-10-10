@@ -406,8 +406,7 @@ namespace DiFfRG
 
     /// Single-precision integration handing back a double result.
     template <typename OT, typename... T>
-      requires(internal::is_widened_result<OT, NT> &&
-               internal::accepts_args<NT, KERNEL, ctype, dim, T...>)
+      requires(internal::is_widened_result<OT, NT> && internal::accepts_args<NT, KERNEL, ctype, dim, T...>)
     void get(OT &dest, const T &...t) const
     {
       NT result;
@@ -457,7 +456,7 @@ namespace DiFfRG
 
       Kokkos::parallel_reduce("QuadratureIntegral_" + std::to_string(dim) + "D", // name of the kernel
                               make_kokkos_nd_range<dim, ExecutionSpace>(space, {0}, grid_size),
-                              KokkosNDLambdaWrapperReduction<dim, decltype(functor)>(functor), dest);
+                              internal::KokkosNDLambdaWrapperReduction<dim, decltype(functor)>(functor), dest);
     }
 
     /**
@@ -594,7 +593,7 @@ namespace DiFfRG
               device::tuple_cat(x, pos));
         };
         Kokkos::parallel_for(make_kokkos_nd_range_divisible<1 + dim, ExecutionSpace>(space, {0}, extents),
-                             KokkosNDLambdaWrapper<1 + dim, decltype(functor)>(functor));
+                             internal::KokkosNDLambdaWrapper<1 + dim, decltype(functor)>(functor));
       } else {
         auto functor = KOKKOS_LAMBDA(const device::array<size_t, 1 + dim> &idx)
         {
@@ -628,7 +627,7 @@ namespace DiFfRG
               device::tuple_cat(x, pos));
         };
         Kokkos::parallel_for(make_kokkos_nd_range_divisible<1 + dim, ExecutionSpace>(space, {0}, extents),
-                             KokkosNDLambdaWrapper<1 + dim, decltype(functor)>(functor));
+                             internal::KokkosNDLambdaWrapper<1 + dim, decltype(functor)>(functor));
       }
 
       using TeamType = Kokkos::TeamPolicy<ExecutionSpace>::member_type;
@@ -721,9 +720,8 @@ namespace DiFfRG
      * A single-precision integrator receives its arguments converted to single precision.
      */
     template <typename OT, typename... A>
-      requires(
-          internal::is_map_result<OT, NT> &&
-          internal::accepts_args<NT, KERNEL, ctype, dim, internal::point_arg_value_t<A>...>)
+      requires(internal::is_map_result<OT, NT> &&
+               internal::accepts_args<NT, KERNEL, ctype, dim, internal::point_arg_value_t<A>...>)
     void map_points(const PointSpan<OT> dest, const A &...args)
     {
       run_map_points(dest, PointArg<internal::point_arg_value_t<A>>(args)...);
@@ -770,10 +768,9 @@ namespace DiFfRG
     template <typename OT, typename Coordinates, typename... Args>
     auto map_dist(OT *dest, const Coordinates &coordinates, const Args &...args)
     {
-      internal::staged_map(space, m_staging.template get<OT>(), dest, coordinates.size(),
-                           [this, coordinates, args...](const auto &view) {
-                             this->map(this->space, view, coordinates, args...);
-                           });
+      internal::staged_map(
+          space, m_staging.template get<OT>(), dest, coordinates.size(),
+          [this, coordinates, args...](const auto &view) { this->map(this->space, view, coordinates, args...); });
       return space;
     }
 
@@ -981,8 +978,7 @@ namespace DiFfRG
     }
 
     template <typename OT, typename... T>
-      requires(internal::is_widened_result<OT, NT> &&
-               internal::accepts_args<NT, KERNEL, ctype, dim, T...>)
+      requires(internal::is_widened_result<OT, NT> && internal::accepts_args<NT, KERNEL, ctype, dim, T...>)
     void get(OT &dest, const T &...t) const
     {
       NT result;
@@ -993,9 +989,8 @@ namespace DiFfRG
     /// See QuadratureIntegrator::map_points. One get() per point inside a flat parallel loop, so every
     /// result is bitwise identical to the corresponding get().
     template <typename OT, typename... A>
-      requires(
-          internal::is_map_result<OT, NT> &&
-          internal::accepts_args<NT, KERNEL, ctype, dim, internal::point_arg_value_t<A>...>)
+      requires(internal::is_map_result<OT, NT> &&
+               internal::accepts_args<NT, KERNEL, ctype, dim, internal::point_arg_value_t<A>...>)
     void map_points(const PointSpan<OT> dest, const A &...args) const
     {
       internal::map_points_by_get(*this, dest, PointArg<internal::point_arg_value_t<A>>(args)...);
@@ -1035,15 +1030,16 @@ namespace DiFfRG
       requires internal::is_map_result<OT, NT>
     auto map(OT *dest, const Coordinates &coordinates, const Args &...args)
     {
-      internal::scheduled_map<execution_space>(
-          this->integrator_id(), Base::quadrature_volume(), dest, coordinates, [&](auto *d, const auto &c) {
-            // tbb::parallel_for writes straight into `dest`, so there is nothing to stage.
-            internal::run_or_queue_host([this, d, c, args...]() {
-              auto sp = execution_space();
-              this->map(sp, d, c, args...);
-            });
-            if (!MapCompletion::deferral_enabled()) MapCompletion::flush();
-          });
+      internal::scheduled_map<execution_space>(this->integrator_id(), Base::quadrature_volume(), dest, coordinates,
+                                               [&](auto *d, const auto &c) {
+                                                 // tbb::parallel_for writes straight into `dest`, so there is nothing
+                                                 // to stage.
+                                                 internal::run_or_queue_host([this, d, c, args...]() {
+                                                   auto sp = execution_space();
+                                                   this->map(sp, d, c, args...);
+                                                 });
+                                                 if (!MapCompletion::deferral_enabled()) MapCompletion::flush();
+                                               });
       return execution_space();
     }
 

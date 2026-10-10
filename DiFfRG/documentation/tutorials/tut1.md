@@ -95,7 +95,7 @@ The actual program logic starts with the entry point, the `main` function. The v
   // get all needed parameters and parse from the CLI
   const auto json = config_helper.get_json();
 ```
-`DiFfRG::Init(argc, argv)` sets up the runtime environment - in particular it initializes [Kokkos](https://kokkos.org/) (which provides the CPU/GPU parallelization) and, if enabled, MPI. It must be called once at the start of `main` before any `DiFfRG` object is constructed, and the returned object owns these environments for the lifetime of the program. From it we obtain a `ConfigurationHelper`.
+`DiFfRG::Init(argc, argv)` sets up the runtime environment - in particular it initializes [Kokkos](https://kokkos.org/) (which provides the CPU/GPU parallelization) and, if enabled, MPI. It must be called once at the start of `main` before any `DiFfRG` object is constructed. The environments then stay up until the program exits; they are shut down at exit, not when the `Init` object goes out of scope, so a temporary `Init` as above is fine. From it we obtain a `ConfigurationHelper`.
 
 The `ConfigurationHelper` class automatically chooses the correct parameter file; if the executable is invoked with the `-p` parameter, i.e. `./tut1 -p parameter.json`, the argument of `-p` is chosen as the parameter file. Otherwise, `ConfigurationHelper` will try to open a file called `parameter.json` in the current working directory, falling back to `parameter.toml` if that does not exist. The parameters can be specified either in the [JSON](https://www.json.org/json-en.html) or in the [TOML](https://toml.io/) format; files ending in `.toml` are read as TOML, everything else as JSON. This tutorial ships both `parameter.json` and the equivalent, commented `parameter.toml`.
 
@@ -406,7 +406,7 @@ For more information about timesteppers and their relationship with spontaneous 
 }
 ```
 The `output` section defines:
-- `verbosity` controls structured runtime progress. At 0 no progress is shown; 1 reports residual/timestep work; 2 adds Jacobian, linear-solver, and solver diagnostics; 3 adds factorization and output work. Levels 1--4 are aggregated to at most one update per operation per second. Level 5 prints every event and is intended only for debugging because it can slow the run substantially. The same setting gates plain log messages on the console: at 0 only warnings and errors appear, at 1 also info messages, from 2 upwards also debug records. The `.log` file always receives everything.
+- `verbosity` controls structured runtime progress. At 0 no progress is shown; 1 reports residual/timestep work; 2 adds Jacobian, linear-solver, and solver diagnostics; 3 adds factorization and output work. Levels 1--4 are aggregated to at most one update per operation per second. Level 5 prints every event and is intended only for debugging because it can slow the run substantially. The same setting gates plain log messages on the console: at 0 only warnings and errors appear, at 1 also info messages, from 2 upwards also debug records. The `.log` file is controlled separately by `log_level` (spdlog numbering, default 2 = info: 0 trace, 1 debug, 2 info, 3 warn, 4 error, 5 critical, 6 off), so debug records reach it only with `log_level` set to 1 or 0.
 - `folder` sets the base folder where data is stored. This is useful to not clutter your current directory ("./") with output, or if you run a large amount of simulations.
 - `name` sets the beginning of all filenames of the output, i.e. in this case all files created by the simulation start with "output".
 

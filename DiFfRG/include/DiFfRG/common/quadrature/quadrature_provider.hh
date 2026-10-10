@@ -231,33 +231,41 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief A class that provides quadrature points and weights, in host and device memory.
-   * The quadrature points and weights are computed either the GSL quadratures or the MatsubaraQuadrature class.
-   * This avoids recomputing the quadrature points and weights for each integrator.
+   * @brief Builds and caches quadrature rules (Quadrature, MatsubaraQuadrature), so that integrators sharing a rule
+   * share its nodes and weights.
+   *
+   * Rules are built on first request and kept for the lifetime of the provider; returned Views and references stay
+   * valid. Matsubara rules are looked up by \f$T\f$ and \f$E\f$ to relative precision \f$10^{-6}\f$. Parameter-file
+   * keys (with defaults), passed to MatsubaraQuadrature::reinit():
+   * - `/integration/vacuum_quad_size` (64), `/integration/matsubara_precision_factor` (1),
+   *   `/integration/min_matsubara_size` (8), `/integration/max_matsubara_size` (128).
+   *
+   * @code
+   * QuadratureProvider provider(config);
+   * auto x = provider.nodes(32, QuadratureType::legendre);   // host View, 32 points on [0, 1]
+   * auto w = provider.weights(32, QuadratureType::legendre);
+   * const auto &rule = provider.matsubara_rule(T, k);        // Matsubara sum at temperature T
+   * @endcode
    */
   class QuadratureProvider
   {
   public:
+    /// A provider with the default settings above; requires DiFfRG::Init.
     QuadratureProvider();
     /**
-     * @brief Construct a provider that reports the quadratures it builds.
+     * @brief A provider with the settings from `config`.
      *
-     * The standalone overload reports into the run log, <output folder>/<output name>.log, under the
-     * "quadrature" tag when /output/folder is present. It owns that reporter rather than borrow one
-     * from an OutputSession, because integrators request their quadratures inside their constructors
-     * -- typically before any session exists; the file sink is shared process-wide per path, so the
-     * session opening the same file later appends to the quadrature inventory instead of truncating
-     * it. The inventory never echoes to the console, where it would drown the timestepper progress
-     * report. Passing a port joins an existing run reporter.
+     * If `/output/folder` is set, every rule built is listed in the run log `<folder>/<name>.log` (not on the
+     * console).
      */
     explicit QuadratureProvider(const ConfigTree &config);
+    /// As above, reporting through an existing `log` port.
     QuadratureProvider(const ConfigTree &config, ReportPort log);
 
     /**
-     * @brief Get the quadrature points for a quadrature of size quadrature_size.
+     * @brief Nodes of the `order`-point rule of type `type`, see QuadratureType.
      *
-     * @param quadrature_size Size of the quadrature.
-     * @return const std::vector<double>&
+     * @return a `Kokkos::View<const NT *, MemorySpace>`.
      */
     template <typename NT = double, typename MemorySpace = CPU_memory>
     auto nodes(const size_t order, const QuadratureType type = QuadratureType::legendre)
@@ -266,10 +274,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Get the quadrature weights for a quadrature of size quadrature_size.
+     * @brief Weights of the `order`-point rule of type `type`, matching nodes().
      *
-     * @param quadrature_size Size of the quadrature.
-     * @return const std::vector<double>&
+     * @return a `Kokkos::View<const NT *, MemorySpace>`.
      */
     template <typename NT = double, typename MemorySpace = CPU_memory>
     auto weights(const size_t order, const QuadratureType type = QuadratureType::legendre)
@@ -278,10 +285,10 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Get the quadrature points for a quadrature of size quadrature_size.
+     * @brief Positive nodes of the Matsubara rule for temperature `T` and largest scale `typical_E`, without the zero
+     * mode; see MatsubaraQuadrature::nodes(). The caller adds \f$T f(0)\f$, or uses matsubara_rule().sum_nodes().
      *
-     * @param quadrature_size Size of the quadrature.
-     * @return const std::vector<double>&
+     * @return a `Kokkos::View<const NT *, MemorySpace>`.
      */
     template <typename NT = double, typename MemorySpace = CPU_memory>
     auto matsubara_nodes(const NT T, const NT typical_E)
@@ -290,10 +297,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Get the quadrature weights for a quadrature of size quadrature_size.
+     * @brief Weights matching matsubara_nodes() (they include the factor \f$T\f$).
      *
-     * @param quadrature_size Size of the quadrature.
-     * @return const std::vector<double>&
+     * @return a `Kokkos::View<const NT *, MemorySpace>`.
      */
     template <typename NT = double, typename MemorySpace = CPU_memory>
     auto matsubara_weights(const NT T, const NT typical_E)
@@ -301,22 +307,17 @@ namespace DiFfRG
       return matsubara_storage.get_matsubara_quadrature<NT>(T, typical_E).template weights<MemorySpace>();
     }
 
-    /**
-     * @brief The Matsubara rule itself, for callers that need more than nodes and weights -- its
-     * size, or the zero-mode-inclusive node list of sum_nodes(). The reference is into a
-     * node-based map and stays valid for the lifetime of the provider.
-     */
+    /// The whole Matsubara rule for (`T`, `typical_E`), e.g. for sum_nodes(); valid for the provider's lifetime.
     template <typename NT = double> const MatsubaraQuadrature<NT> &matsubara_rule(const NT T, const NT typical_E)
     {
       return matsubara_storage.get_matsubara_quadrature<NT>(T, typical_E);
     }
 
-    /// The node ceiling /integration/max_matsubara_size, i.e. the budget the rule choice is made against.
+    /// `/integration/max_matsubara_size`, the largest Monien rule this provider builds.
     int max_matsubara_size() const { return matsubara_storage.get_max_matsubara_size(); }
 
-    /**
-     * @brief Nodes the Monien rule would want at (T, typical_E). See MatsubaraStorage::predicted_size.
-     */
+    /// Nodes the Monien rule would need at (`T`, `typical_E`) with this provider's precision factor, before clamping;
+    /// see MatsubaraQuadrature::predict_size().
     template <typename NT = double> int matsubara_predicted_size(const NT T, const NT typical_E) const
     {
       return matsubara_storage.template predicted_size<NT>(T, typical_E);
@@ -344,20 +345,11 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Hand out one of a small pool of execution space instances, round robin.
+     * @brief One of a pool of 8 device execution-space instances (streams), handed out round robin.
      *
-     * Every integrator used to default-construct its ExecutionSpace, i.e. they all shared the
-     * default stream and no two flows could ever execute concurrently -- even the ones that are
-     * mutually independent (the vertex flows of a typical RHS read the same dressings and write
-     * disjoint outputs). Handing neighbouring integrators different instances lets those overlap,
-     * which matters most for the many small launches that individually leave the device
-     * underutilised.
-     *
-     * Safe to mix with the interpolators' uploads, which fence on the host before returning, so
-     * any kernel issued afterwards on any stream already sees the new data.
-     *
-     * The pool is created lazily and shared by every integrator holding this provider. Host
-     * execution spaces have no streams to speak of, so they get a default-constructed instance.
+     * Integrators on different instances can run their kernels concurrently. The pool is created on first use and
+     * shared by the whole process, not only this provider. Host execution spaces get a default-constructed
+     * instance.
      */
     template <typename ExecutionSpace> ExecutionSpace next_execution_space()
     {

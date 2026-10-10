@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace DiFfRG
+namespace DiFfRG::internal
 {
   /**
    * @brief A std::streambuf that forwards everything except whole lines starting with a prefix.
@@ -15,6 +15,8 @@ namespace DiFfRG
    * diverges, all of them are forwarded at once. Nothing written for another reason is therefore
    * delayed. That property is the point of the class rather than an optimization: it is used around
    * calls that may abort the process, and a line-buffering filter would swallow the dying message.
+   *
+   * Not thread-safe. `prefix` is not copied and must outlive the filter.
    */
   class LinePrefixFilter : public std::streambuf
   {
@@ -109,4 +111,4 @@ namespace DiFfRG
     LinePrefixFilter filter;
     std::streambuf *previous;
   };
-} // namespace DiFfRG
+} // namespace DiFfRG::internal

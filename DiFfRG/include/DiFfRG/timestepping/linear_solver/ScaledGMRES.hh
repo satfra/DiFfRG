@@ -16,6 +16,16 @@
 
 namespace DiFfRG
 {
+  /**
+   * @brief Wraps a serial solver and applies it to the equilibrated matrix \f$S_r A S_c\f$.
+   *
+   * \f$S_r\f$ and \f$S_c\f$ are diagonal, with entries \f$1/\sqrt{\max_j |A_{ij}|}\f$ for row \f$i\f$ and
+   * \f$1/\sqrt{\max_i |A_{ij}|}\f$ for column \f$j\f$. solve() then returns \f$x = S_c y\f$ with
+   * \f$S_r A S_c\, y = S_r b\f$. Helps when the rows of the Jacobian differ by many orders of magnitude. Note that
+   * `tol` applies to the scaled system.
+   *
+   * @tparam InnerSolver the solver applied to the scaled matrix.
+   */
   template <typename SparseMatrixType, typename VectorType,
             typename InnerSolver = GMRES<SparseMatrixType, VectorType, dealii::PreconditionIdentity>>
   class ScaledLinearSolver : public AbstractLinearSolver<SparseMatrixType, VectorType>
@@ -115,10 +125,12 @@ namespace DiFfRG
     InnerSolver inner_solver;
   };
 
+  /// GMRES on the equilibrated matrix; see ScaledLinearSolver.
   template <typename SparseMatrixType, typename VectorType, typename PreconditionerType = dealii::PreconditionIdentity>
   using ScaledGMRES =
       ScaledLinearSolver<SparseMatrixType, VectorType, GMRES<SparseMatrixType, VectorType, PreconditionerType>>;
 
+  /// UMFPACK LU of the equilibrated matrix; see ScaledLinearSolver.
   template <typename SparseMatrixType, typename VectorType>
   using ScaledUMFPack = ScaledLinearSolver<SparseMatrixType, VectorType, UMFPack<SparseMatrixType, VectorType>>;
 } // namespace DiFfRG

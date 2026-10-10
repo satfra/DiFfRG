@@ -38,8 +38,7 @@ namespace DiFfRG
 
     /// Turn a row-major flat index into a multi-index.
     template <int dim>
-    void unflatten_index(std::size_t flat, const device::array<size_t, dim> &grid_size,
-                         device::array<size_t, dim> &idx)
+    void unflatten_index(std::size_t flat, const device::array<size_t, dim> &grid_size, device::array<size_t, dim> &idx)
     {
       for (int d = dim - 1; d >= 0; --d) {
         idx[d] = flat % grid_size[d];
@@ -83,6 +82,16 @@ namespace DiFfRG
    * tbb::parallel_reduce must never be used here: its range splitting depends on which worker
    * happens to steal which subrange, which makes the summation order - and therefore the result -
    * vary from call to call.
+   *
+   * Grids of at most 4096 points are summed serially in row-major order (last index fastest), larger ones in a
+   * fixed tree of chunks of 256 points.
+   *
+   * @tparam dim Number of grid dimensions.
+   * @tparam NT Result type; `NT(0)` is the starting value.
+   * @tparam FUN Callable as `NT functor(const device::array<size_t, dim> &index)`.
+   * @param grid_size Number of points in each dimension.
+   * @param functor Evaluated once at every grid point.
+   * @return The sum of `functor` over all grid points.
    */
   template <int dim, typename NT, typename FUN>
   NT TBBReduction(const device::array<size_t, dim> &grid_size, const FUN &functor)

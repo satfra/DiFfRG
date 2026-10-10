@@ -15,6 +15,7 @@
 
 namespace DiFfRG
 {
+  /// The Boost.Odeint stepper for TimeStepperBoostRK_impl: 0 = Cash-Karp 5(4), 1 = Fehlberg 7(8).
   template <int prec> struct stepperChoice {
     static_assert(prec == 0 || prec == 1, "Only precisions 0 and 1 are supported!");
 
@@ -25,13 +26,22 @@ namespace DiFfRG
   };
 
   /**
-   * @brief A class to perform time stepping using adaptive Boost Runge-Kutta methods.
-   * This stepper uses adaptive time steps and is fully explicit.
+   * @brief Adaptive explicit Runge-Kutta methods from Boost.Odeint.
    *
-   * @tparam VectorType Type of the vector
-   * @tparam dim Dimension of the problem
-   * @tparam prec Algorithm choice: 0 for Cash-Karp54 (5th order), 1 for Fehlberg78 (8th order)
+   * Integrates \f$\dot u = -M^{-1} R(u, v)\f$ and \f$\dot v = -D(v, u)\f$ (see abstract_timestepper.hh) with an
+   * embedded Runge-Kutta pair. The step starts at /timestepping/explicit/dt and is adapted so that the estimated local
+   * error \f$e_i\f$ of every component satisfies
+   * \f$|e_i| \le \mathrm{abs\_tol} + \mathrm{rel\_tol}\,(|y_i| + \Delta t\, |\dot y_i|)\f$.
+   * For pure-variables systems the step is capped at /timestepping/explicit/maximal_dt; with /timestepping/explicit/
+   * detect_stuck the run aborts if the time stops advancing.
    *
+   * Handles FE problems with or without variables and pure-variables systems (`dim == 0`). Output frames are linearly
+   * interpolated between steps. Serial only; the mesh adaptor is not called.
+   *
+   * @tparam VectorType vector type of the assembler.
+   * @tparam SparseMatrixType sparse matrix type of the assembler.
+   * @tparam dim spatial dimension, 0 for a pure-variables system.
+   * @tparam prec 0: Cash-Karp 5(4), 1: Fehlberg 7(8).
    */
   template <typename VectorType, typename SparseMatrixType, uint dim, int prec>
   class TimeStepperBoostRK_impl : public AbstractTimestepper<VectorType, SparseMatrixType, dim>
@@ -52,16 +62,18 @@ namespace DiFfRG
     using Base::assembler, Base::data_out, Base::config, Base::adaptor;
 
     /// The public entry point, which handles snapshots and restarts; see AbstractTimestepper::run.
-
     using Base::run;
-    /// Forwards to the base with this stepper's kind. Not `using Base::Base;`: the base needs to
-    /// know which /timestepping/ section to read, and it cannot ask a virtual function for that
-    /// from inside its own constructor.
+
+    // Not `using Base::Base;`: the base needs to know which /timestepping/ section to read, and it
+    // cannot ask a virtual function for that from inside its own constructor.
+
+    /// Construct without mesh adaptation; see AbstractTimestepper.
     TimeStepperBoostRK_impl(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                             OutputSession_impl<dim, VectorType> &data_out)
         : Base(config, assembler, data_out, /*implicit=*/false, /*explicit=*/true)
     {
     }
+    /// Construct with a mesh adaptor; see AbstractTimestepper.
     TimeStepperBoostRK_impl(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                             OutputSession_impl<dim, VectorType> &data_out, AbstractAdaptor<VectorType> &adaptor)
         : Base(config, assembler, data_out, adaptor, /*implicit=*/false, /*explicit=*/true)
@@ -71,9 +83,6 @@ namespace DiFfRG
 
     using error_stepper_type = typename stepperChoice<prec>::value;
 
-    /**
-     * @brief Run the time stepping algorithm.
-     */
     virtual void run_segment(AbstractFlowingVariables<NumberType, VectorType> &initial_condition, const double t_start,
                              const double t_stop) override;
 
@@ -90,18 +99,15 @@ namespace DiFfRG
   // The class above takes the linear algebra spelled out because it is compiled out of line: the
   // set of valid arguments is closed by the explicit instantiations in src/. Applications name the
   // assembler instead and let these aliases project it onto that fixed parameter list.
-  //
-  // The argument is anything exposing VectorType, SparseMatrixType and dim -- an Assembler, or a
-  // Discretization where the assembler type is not a single type (e.g. a test that runs one
-  // discretization against several models).
 
+  /// Adaptive explicit Runge-Kutta timestepper for an assembler; see TimeStepperBoostRK_impl.
   template <typename Assembler, int prec>
   using TimeStepperBoostRK = TimeStepperBoostRK_impl<typename Assembler::VectorType,
                                                      typename Assembler::SparseMatrixType, Assembler::dim, prec>;
 
-  /// Time stepping with the adaptive Boost Cash-Karp54 method.
+  /// Adaptive explicit Runge-Kutta, Cash-Karp 5(4).
   template <typename Assembler> using TimeStepperBoostRK54 = TimeStepperBoostRK<Assembler, 0>;
 
-  /// Time stepping with the adaptive Boost Fehlberg78 method.
+  /// Adaptive explicit Runge-Kutta, Fehlberg 7(8).
   template <typename Assembler> using TimeStepperBoostRK78 = TimeStepperBoostRK<Assembler, 1>;
 } // namespace DiFfRG

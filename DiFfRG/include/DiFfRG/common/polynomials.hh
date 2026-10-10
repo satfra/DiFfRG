@@ -10,75 +10,45 @@
 namespace DiFfRG
 {
   /**
-   * @brief A class representing a polynomial.
+   * @brief A polynomial \f$P(x) = \sum_{i=0}^{n-1} c_i x^i\f$ with double coefficients.
+   *
+   * An empty coefficient list is the zero polynomial.
    */
   class Polynomial
   {
   public:
-    /**
-     * @brief Construct a new Polynomial object from a list of coefficients.
-     * The coefficients are ordered from the lowest to the highest power, starting with 0.
-     */
+    /// From the coefficients \f$c_0, c_1, \dots\f$, lowest power first.
     Polynomial(const std::vector<double> &coefficients);
 
-    /**
-     * @brief Access the i-th coefficient of the polynomial.
-     */
+    /// Coefficient \f$c_i\f$ (unchecked index).
     const double &operator[](const uint &i) const;
 
-    /**
-     * @brief Access the i-th coefficient of the polynomial.
-     */
+    /// Coefficient \f$c_i\f$ (unchecked index).
     double &operator[](const uint &i);
 
-    /**
-     * @brief Evaluate the polynomial at a given point x.
-     */
+    /// \f$P(x)\f$.
     double operator()(const double &x) const;
 
-    /**
-     * @brief Multiply the polynomial by a scalar.
-     */
+    /// \f$P \to s P\f$.
     void operator*=(const double &scalar);
 
-    /**
-     * @brief Multiply the polynomial by another polynomial.
-     */
+    /// \f$P \to P Q\f$.
     void operator*=(const Polynomial &other);
 
     /**
-     * @brief Compute the antiderivative of the polynomial. An integration constant is given as an argument.
+     * @brief The antiderivative \f$C + \sum_i c_i x^{i+1}/(i+1)\f$.
      *
-     * The antiderivative is a polynomial of one degree higher than the original polynomial.
-     *
-     * @param integration_constant The constant term of the antiderivative.
-     * @return Polynomial The antiderivative of the polynomial.
+     * @param integration_constant the constant term \f$C\f$.
      */
     Polynomial anti_derivative(const double &integration_constant) const;
 
-    /**
-     * @brief Compute the derivative of the polynomial.
-     *
-     * The derivative is a polynomial of one degree lower than the original polynomial.
-     *
-     * @return Polynomial The derivative of the polynomial.
-     */
+    /// The derivative \f$P'(x)\f$; the zero polynomial for a constant or empty \f$P\f$.
     Polynomial derivative() const;
 
-    /**
-     * @brief Compute the integral of the polynomial between two points.
-     *
-     * @param x_min The lower bound of the integral.
-     * @param x_max The upper bound of the integral.
-     * @return double The integral of the polynomial between x_min and x_max.
-     */
+    /// \f$\int_{x_\text{min}}^{x_\text{max}} P(x)\, dx\f$.
     double integral(const double &x_min, const double &x_max) const;
 
-    /**
-     * @brief A utility function to obtain from this polynomial P(x) the polynomial Q(x) = P(x^2)
-     *
-     * @return Polynomial The polynomial Q(x) = P(x^2).
-     */
+    /// The polynomial \f$Q(x) = P(x^2)\f$.
     Polynomial square_argument() const;
 
   private:

@@ -609,7 +609,7 @@ namespace DiFfRG
 #if defined(DiFfRG_KERNEL_ARCH) && defined(DiFfRG_BUNDLE_ARCH)
       // Drop Kokkos' architecture warning while it initializes; see kokkos_arch_warning above for why.
       const bool arch_differs = std::string(DiFfRG_KERNEL_ARCH) != DiFfRG_BUNDLE_ARCH;
-      std::optional<ScopedLineFilter> arch_warning_filter;
+      std::optional<internal::ScopedLineFilter> arch_warning_filter;
       if (arch_differs) arch_warning_filter.emplace(std::cerr, kokkos_arch_warning);
 #endif
 

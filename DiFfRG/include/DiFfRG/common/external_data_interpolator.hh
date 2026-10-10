@@ -11,51 +11,46 @@
 namespace DiFfRG
 {
   /**
-   * @brief This class takes in a .csv file with x-dependent data and interpolates it to a given x on request.
+   * @brief Interpolates columns of tabulated data read from .csv files, as functions of one chosen column \f$x\f$.
    *
-   * Data can be read from several files which are identically formatted and will then be concatenated. The choice which
-   * column represents the independent x variable can be made by the user when creating the object. After read-in, the
-   * data can be post-processed before interpolation. After the object is constructed, this class allows to access both
-   * the interpolant and its derivative.
+   * The columns of all files are placed side by side and numbered consecutively: with two files of three columns
+   * each, the columns of the second file are 3, 4, 5. All files must have the same number of rows. Rows that contain
+   * a NaN in any column are dropped. Column `i` is then interpolated as a function of column `x_column` with a
+   * barycentric rational interpolant (see Interpolation::Barycentric).
    *
-   * Note, that interpolations beyond the range of the data will return the value at the closest boundary.
+   * Outside the range of the data, value() returns the value at the nearest end of the range and derivative() the
+   * derivative there. The constructor checks that the interpolant reproduces every data point to a relative
+   * precision of \f$10^{-4}\f$ and throws otherwise.
    *
-   * Internally, the boost barycentric rational interpolator is used.
-   *
+   * @code
+   * // data.csv: columns p, Z(p), m2(p)
+   * ExternalDataInterpolator data({"data.csv"});
+   * const double Z = data.value(p, 1);
+   * @endcode
    */
   class ExternalDataInterpolator
   {
   public:
     /**
-     * @brief Construct a new External Data Interpolator object
+     * @brief Read and interpolate the data.
      *
-     * @param input_files The .csv file(s) to read the data from.
-     * @param post_processors The post processors to apply to the data.
-     * @param separator The separator used in the .csv file.
-     * @param has_header Whether the .csv file has a header.
-     * @param x_column The column in the .csv file(s) that contains the x values. This counts all columns, including the
-     * ones from previous files.
+     * @param input_files the .csv file(s) to read.
+     * @param post_processors functions applied to every entry of a column after reading, `post_processors[c]` to
+     * column `c` (counted as above, including the \f$x\f$ column); may be shorter than the number of columns.
+     * @param separator the field separator.
+     * @param has_header whether the first row of each file is a header.
+     * @param x_column the column holding \f$x\f$.
+     * @param order the approximation order of the barycentric interpolant, see Interpolation::Barycentric.
      */
     ExternalDataInterpolator(std::vector<std::string> input_files,
                              std::vector<std::function<double(double)>> post_processors, char separator = ',',
                              bool has_header = false, uint x_column = 0, uint order = 1);
 
-    /**
-     * @brief Construct a new External Data Interpolator object
-     *
-     * @param input_files The .csv file(s) to read the data from.
-     * @param separator The separator used in the .csv file.
-     * @param has_header Whether the .csv file has a header.
-     * @param x_column The column in the .csv file(s) that contains the x values. This counts all columns, including the
-     * ones from previous files.
-     */
+    /// As above, without post-processing.
     ExternalDataInterpolator(std::vector<std::string> input_files, char separator = ',', bool has_header = false,
                              uint x_column = 0, uint order = 1);
 
-    /**
-     * @brief Construct an empty External Data Interpolator object
-     *
-     */
+    /// An empty interpolator; must be assigned before it is evaluated.
     ExternalDataInterpolator();
 
   private:
@@ -85,22 +80,10 @@ namespace DiFfRG
     bool check_consistency(double tolerance, uint x_column) const;
 
   public:
-    /**
-     * @brief Interpolate the data to a given x.
-     *
-     * @param x The x to interpolate to.
-     * @param i The index of the data to interpolate.
-     * @return double The interpolated data.
-     */
+    /// Column `i` at \f$x\f$; clamped to the nearest end of the data range.
     double value(double x, uint i) const;
 
-    /**
-     * @brief Interpolate the derivative of the data to a given x.
-     *
-     * @param x The x to interpolate to.
-     * @param i The index of the data to interpolate.
-     * @return double The interpolated derivative.
-     */
+    /// Derivative of column `i` with respect to \f$x\f$; outside the data range, the derivative at the nearest end.
     double derivative(double x, uint i) const;
 
   private:

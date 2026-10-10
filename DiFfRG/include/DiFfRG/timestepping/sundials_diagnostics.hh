@@ -9,6 +9,7 @@ namespace DiFfRG
 {
   using IDACallbackDiagnostics = SolverCallbackDiagnostics;
 
+  /// Collect IDA's statistics and the callback failure counts for a progress report.
   template <typename VectorType>
   TimesteppingDiagnostics make_timestepping_diagnostics(const SUNDIALS::IDA<VectorType> &time_stepper,
                                                         const IDACallbackDiagnostics &callbacks)
@@ -36,6 +37,7 @@ namespace DiFfRG
     return diagnostics;
   }
 
+  /// The Jacobian record of an IDA Jacobian build with IDA's \f$\alpha\f$; see jacobian_diagnostics.hh.
   template <typename VectorType>
   TimestepperJacobianBuildDiagnostics
   make_ida_jacobian_build_diagnostics(const SUNDIALS::IDA<VectorType> &time_stepper, const std::size_t build_id,

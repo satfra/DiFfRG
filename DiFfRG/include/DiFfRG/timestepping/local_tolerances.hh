@@ -62,11 +62,14 @@ namespace DiFfRG
       return drifted;
     }
 
+    /// The per-dof absolute tolerances IDA uses.
     VectorType &get() { return atol; }
+    /// The smallest tolerance over all ranks (abs_tol if none are set).
     double min() const
     {
       return extreme([](double a, double b) { return std::min(a, b); }, true);
     }
+    /// The largest tolerance over all ranks (abs_tol if none are set).
     double max() const
     {
       return extreme([](double a, double b) { return std::max(a, b); }, false);

@@ -32,7 +32,7 @@ TEST_CASE("Test diagonalization of tridiagonal symmetric matrices", "[common]")
                  1 + std::pow(-a + b - std::sqrt(std::pow(a, 2) - 2 * a * b + std::pow(b, 2) + 4 * std::pow(c, 2)), 2) /
                          (4. * std::pow(c, 2))));
 
-    diagonalize_tridiagonal_symmetric_matrix(diag, off_diag, eigvecs);
+    DiFfRG::internal::diagonalize_tridiagonal_symmetric_matrix(diag, off_diag, eigvecs);
 
     std::vector<double> sorted_eig = {eig_1, eig_2};
     std::sort(sorted_eig.begin(), sorted_eig.end());
@@ -835,7 +835,7 @@ TEST_CASE("Test diagonalization of tridiagonal symmetric matrices", "[common]")
                  2) /
                  (b0 * b1))));
 
-    diagonalize_tridiagonal_symmetric_matrix(diag, off_diag, eigvecs);
+    DiFfRG::internal::diagonalize_tridiagonal_symmetric_matrix(diag, off_diag, eigvecs);
 
     std::vector<double> sorted_eig = {eig_1, eig_2, eig_3};
     std::sort(sorted_eig.begin(), sorted_eig.end());

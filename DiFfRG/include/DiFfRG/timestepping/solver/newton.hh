@@ -14,15 +14,35 @@ namespace DiFfRG
   using namespace dealii;
 
   /**
-   * @brief A newton solver, using local error estimates for each vector component.
+   * @brief Newton's method for \f$F(u) = 0\f$, used by TimeStepperImplicitEuler and TimeStepperTRBDF2.
    *
-   * @tparam VectorType_ Vector type used by the simulation (i.e. any dealii vector type)
+   * The caller sets three callbacks: residual(F, u) computes \f$F(u)\f$, update_jacobian(u) assembles (and e.g.
+   * factorizes) \f$J = \partial F/\partial u\f$, lin_solve(du, F) solves \f$J\, du = F\f$. An iteration sets
+   * \f$u \to u - du\f$; if that does not reduce \f$\|F\|_2\f$, the step is halved up to `n_stepsize_iterations`
+   * times. Convergence is measured by
+   * \f[
+   *   E = \sqrt{\frac{1}{N} \sum_{i=1}^N \left(\frac{F_i(u)}{\text{abstol} + \text{reltol}\,\max(|u^0_i|, |u_i|)}
+   *   \right)^2}\,,
+   * \f]
+   * with the initial guess \f$u^0\f$ and \f$N\f$ unknowns; the iteration has converged when \f$E \le 1\f$.
+   *
+   * The Jacobian is not rebuilt in the first iteration (the one from the previous call, or from reinit(), is reused);
+   * later iterations rebuild it whenever \f$E_\text{new} / E_\text{old} \ge\f$ `assemble_threshold`.
+   *
+   * @tparam VectorType_ a serial deal.II vector type.
    */
   template <typename VectorType_> class Newton
   {
   public:
     using VectorType = VectorType_;
 
+    /**
+     * @param abstol_ absolute tolerance in \f$E\f$.
+     * @param reltol_ relative tolerance in \f$E\f$.
+     * @param assemble_threshold_ rebuild the Jacobian if \f$E_\text{new} / E_\text{old} \ge\f$ this.
+     * @param max_steps_ maximal number of iterations.
+     * @param n_stepsize_iterations_ maximal number of step halvings per iteration.
+     */
     Newton(double abstol_ = 1e-10, double reltol_ = 1e-6, double assemble_threshold_ = 0., uint max_steps_ = 21,
            uint n_stepsize_iterations_ = 21)
         : abstol(abstol_), reltol(reltol_), assemble_threshold(assemble_threshold_), max_steps(max_steps_),
@@ -32,15 +52,16 @@ namespace DiFfRG
 
     void set_report_port(ReportPort port) { report_port = std::move(port); }
 
-    /**
-     * @brief Should it be necessary, one can force a recalculation of the jacobian hereby.
-     */
+    /// Build the Jacobian at @p u now, e.g. before the first solve or after the problem size changed.
     void reinit(const VectorType &u) { update_jacobian(u); }
 
     /**
-     * @brief Perform a newton iteration on the input vector.
+     * @brief Solve \f$F(u) = 0\f$.
      *
-     * @param iterate the input vector which contains the initial guess and later the solution.
+     * Throws if the residual becomes non-finite, a linear solve fails, or \f$E > 1\f$ after `max_steps` iterations
+     * (unless set_ignore_nonconv() was set).
+     *
+     * @param iterate initial guess on entry, solution on return (unchanged if it throws).
      */
     void operator()(VectorType &iterate)
     {
@@ -120,9 +141,10 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Set the jacobian recalculation threshold, i.e. below which reduction we force a jacobian update.
+     * @brief Set `assemble_threshold`: the Jacobian is rebuilt when \f$E_\text{new} / E_\text{old} \ge\f$ this in an
+     * iteration.
      *
-     * @return double the old threshold
+     * @return the previous threshold.
      */
     double threshold(const double thr)
     {
@@ -131,10 +153,14 @@ namespace DiFfRG
       return t;
     }
 
+    /// \f$F\f$ at the last iterate.
     const VectorType &get_residual() const { return residual_vector; }
+    /// The initial guess of the last solve.
     const VectorType &get_initial() const { return initial_vector; }
+    /// The last iterate.
     const VectorType &get_iterate() const { return iterate_vector; }
 
+    /// Mean wall time of a solve in seconds, without Jacobian assembly.
     double average_time_newton() const
     {
       double t = 0.;
@@ -143,33 +169,26 @@ namespace DiFfRG
         t += t_ / n;
       return t;
     }
+    /// Number of solves so far.
     uint num_newton_calls() const { return timings_newton.size(); }
 
-    /**
-     * @brief Make the newton algorithm return a success even if the evolution did not fulfill the convergence
-     * criterion. The iteration always fails if the solution contains NaNs or infinities.
-     *
-     * @param x
-     */
+    /// Accept the last iterate even if \f$E > 1\f$ after `max_steps` iterations. Non-finite residuals still throw.
     void set_ignore_nonconv(bool x) { ignore_nonconv = x; }
 
+    /// residual(F, u): write \f$F(u)\f$ into F.
     std::function<void(VectorType &, const VectorType &)> residual;
+    /// lin_solve(du, F): solve \f$J\, du = F\f$ with the current Jacobian.
     std::function<void(VectorType &, const VectorType &)> lin_solve;
+    /// update_jacobian(u): build the Jacobian at u.
     std::function<void(const VectorType &)> update_jacobian;
 
-    /**
-     * @brief Get the latest error
-     */
+    /// The convergence measure \f$E\f$ after the last solve.
     double get_error() { return resnorm; }
 
-    /**
-     * @brief Get the number of steps taken in the latest iteration
-     */
+    /// Number of iterations of the last solve.
     uint get_step() { return step; }
 
-    /**
-     * @brief Get the number of jacobians created in the latest iteration
-     */
+    /// Number of Jacobians built during the last solve.
     uint get_jacobians() { return jacobians; }
 
   private:
@@ -189,11 +208,7 @@ namespace DiFfRG
     std::vector<double> timings_newton;
     ReportPort report_port;
 
-    /**
-     * @brief Calculate the current error estimate
-     *
-     * @return double
-     */
+    /// The convergence measure \f$E\f$ at the current iterate.
     double get_EEst()
     {
       const VectorType &err = residual_vector;
@@ -211,12 +226,7 @@ namespace DiFfRG
       return eest_tmp.l2_norm() / sqrt(eest_tmp.size());
     }
 
-    /**
-     * @brief Check if the iteration should go on.
-     *
-     * @return true
-     * @return false
-     */
+    /// Whether to iterate further; sets `converged`.
     bool check()
     {
       if (step == 0) return true;

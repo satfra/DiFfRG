@@ -11,22 +11,29 @@
 #include <autodiff/forward/real.hpp>
 #include <type_traits>
 
+/**
+ * @file math.hh
+ * @brief Small math helpers usable in host and device code: integer powers, sphere volumes and areas, step and sign
+ * functions, floating-point comparison, and the `compute::` namespace of math functions for kernels.
+ */
+
 namespace DiFfRG
 {
   /**
-   * @brief Type trait: true iff T is any autodiff::Real<N, U> specialization.
-   * Allows generic handling of higher-order forward-mode AD types beyond
-   * autodiff::real (= autodiff::Real<1, double>).
+   * @brief True if `T` is an `autodiff::Real<N, U>` (forward-mode derivative type of any order \f$N\f$).
+   *
+   * `autodiff::real` is `autodiff::Real<1, double>`.
    */
-  template <typename T> struct is_autodiff_real : std::false_type {};
-  template <size_t N, typename U> struct is_autodiff_real<autodiff::Real<N, U>> : std::true_type {};
+  template <typename T> struct is_autodiff_real : std::false_type {
+  };
+  template <size_t N, typename U> struct is_autodiff_real<autodiff::Real<N, U>> : std::true_type {
+  };
   template <typename T> inline constexpr bool is_autodiff_real_v = is_autodiff_real<T>::value;
 
   /**
-   * @brief Finite-ness check for autodiff::real
+   * @brief Whether the value and the first derivative of `x` are finite.
    *
-   * @param x Number to check
-   * @return Whether x and its derivative are finite
+   * Higher derivatives (\f$N \geq 2\f$) are not checked.
    */
   template <size_t N, typename T> bool isfinite(const autodiff::Real<N, T> &x)
   {
@@ -35,12 +42,12 @@ namespace DiFfRG
   using std::isfinite;
 
   /**
-   * @brief A compile-time evaluatable power function for whole number exponents
+   * @brief \f$x^n\f$ for an integer exponent \f$n\f$ known at compile time, by repeated squaring.
    *
-   * @tparam n Exponent of type int
-   * @tparam RF Type of argument
-   * @param x Argument
-   * @return x^n
+   * Negative \f$n\f$ give \f$1/x^{|n|}\f$, and \f$x^0 = 1\f$.
+   *
+   * @tparam n the exponent.
+   * @tparam NumberType type of the argument, e.g. `double`, complex or autodiff types.
    */
   template <int n, typename NumberType>
     requires requires(NumberType x) {
@@ -61,6 +68,7 @@ namespace DiFfRG
       return powr<n / 2>(x) * powr<n / 2>(x) * x;
   }
 
+  /// \f$x!\f$ for an integer \f$x\f$; \f$0! = 1\f$.
   template <typename NumberType>
     requires std::is_integral_v<NumberType>
   constexpr KOKKOS_INLINE_FUNCTION NumberType factorial(const NumberType &x)
@@ -72,10 +80,11 @@ namespace DiFfRG
   }
 
   /**
-   * @brief Volume of a d-dimensional sphere
+   * @brief Volume of the unit ball in \f$d\f$ dimensions, \f$V_d = \pi^{d/2} / \Gamma(d/2 + 1)\f$.
    *
-   * @tparam NT Type of the number
-   * @param d Dimension of the sphere
+   * E.g. \f$V_2 = \pi\f$, \f$V_3 = 4\pi/3\f$. Computed in double precision.
+   *
+   * @param d the dimension; need not be an integer.
    */
   template <typename NT> constexpr KOKKOS_INLINE_FUNCTION double V_d(NT d)
   {
@@ -85,12 +94,10 @@ namespace DiFfRG
   }
 
   /**
-   * @brief Volume of a d-dimensional sphere with extent
+   * @brief Volume \f$V_d\, r^d\f$ of the ball of radius \f$r\f$ = `extent` in \f$d\f$ dimensions.
    *
-   * @tparam NT1 Type of the number
-   * @tparam NT2 Type of the extent
-   * @param d Dimension of the sphere
-   * @param extent Extent of the sphere
+   * @param d the dimension; need not be an integer.
+   * @param extent the radius \f$r\f$.
    */
   template <typename NT1, typename NT2> constexpr KOKKOS_INLINE_FUNCTION double V_d(NT1 d, NT2 extent)
   {
@@ -100,10 +107,12 @@ namespace DiFfRG
   }
 
   /**
-   * @brief Surface of a d-dimensional sphere
+   * @brief Area of the unit sphere in \f$\mathbb{R}^d\f$, \f$S_d = 2\pi^{d/2} / \Gamma(d/2)\f$.
    *
-   * @tparam NT Type of the number
-   * @param d Dimension of the sphere
+   * E.g. \f$S_2 = 2\pi\f$ (circumference of the unit circle), \f$S_3 = 4\pi\f$. This is the angular factor in
+   * \f$\int d^dq\, f(|q|) = S_d \int_0^\infty dq\, q^{d-1} f(q)\f$. Computed in double precision.
+   *
+   * @param d the dimension of the embedding space; need not be an integer.
    */
   template <typename NT> constexpr KOKKOS_INLINE_FUNCTION double S_d(NT d)
   {
@@ -113,13 +122,13 @@ namespace DiFfRG
   }
 
   /**
-   * @brief Surface \f$S_d = 2\pi^{d/2}/\Gamma(d/2)\f$ of the unit sphere in \f$d\f$ dimensions, evaluated at compile
-   * time.
+   * @brief S_d at compile time for integer \f$d\f$, in the number type `NT`.
    *
    * Uses \f$S_1 = 2\f$, \f$S_2 = 2\pi\f$ and \f$S_{d+2} = 2\pi S_d / d\f$. \f$d = 0\f$ is a compile error.
+   * \f$\pi\f$ enters as the double-precision constant, so wider `NT` gain nothing beyond double precision.
    *
-   * @tparam NT Type of the number
-   * @param d Dimension of the space, \f$d \geq 1\f$
+   * @tparam NT the result type.
+   * @param d the dimension, \f$d \geq 1\f$.
    */
   template <typename NT> consteval NT S_d_prec(uint d)
   {
@@ -131,9 +140,8 @@ namespace DiFfRG
     return result;
   }
 
-  /**
-   * @brief A compile-time evaluatable theta function
-   */
+  /// Step function \f$\Theta(x)\f$, with \f$\Theta(0) = 1\f$. Returns a plain number (no derivative) for
+  /// `autodiff::real` input.
   template <typename NumberType>
     requires requires(NumberType x) { x >= 0; }
   constexpr KOKKOS_INLINE_FUNCTION auto heaviside_theta(const NumberType x)
@@ -144,9 +152,7 @@ namespace DiFfRG
       return x >= static_cast<NumberType>(0) ? static_cast<NumberType>(1) : static_cast<NumberType>(0);
   }
 
-  /**
-   * @brief A compile-time evaluatable sign function
-   */
+  /// Sign of \f$x\f$: \f$+1\f$ for \f$x \geq 0\f$ (including 0), \f$-1\f$ otherwise.
   template <typename NumberType>
     requires requires(NumberType x) { x >= 0; }
   constexpr KOKKOS_INLINE_FUNCTION auto sign(const NumberType x)
@@ -158,11 +164,13 @@ namespace DiFfRG
   }
 
   /**
-   * @brief Function to evaluate whether two floats are equal to numerical precision.
-   * Tests for both relative and absolute equality.
+   * @brief Whether \f$a\f$ and \f$b\f$ agree to within \f$\epsilon\f$, absolutely or relatively.
    *
-   * @param eps_ Precision with which to compare a and b
-   * @return bool
+   * True if \f$|a - b| \leq \epsilon\f$ or \f$|a - b| \leq \epsilon \max(|a|, |b|)\f$. Complex numbers are compared
+   * part by part; autodiff numbers by their value only.
+   *
+   * @param a, b the numbers to compare.
+   * @param eps_ the tolerance \f$\epsilon\f$, used both as absolute and as relative tolerance.
    */
   template <typename T1, typename T2, typename T3>
     requires(std::is_floating_point<T1>::value || is_autodiff_real_v<T1> || is_complex<T1>::value) &&
@@ -183,10 +191,9 @@ namespace DiFfRG
   }
 
   /**
-   * @brief Function to evaluate whether two floats are equal to numerical precision.
-   * Tests for both relative and absolute equality.
+   * @brief is_close() with \f$\epsilon\f$ the machine epsilon of the less precise of the two types.
    *
-   * @return bool
+   * For autodiff numbers \f$\epsilon\f$ is 10 times the double-precision machine epsilon.
    */
   template <typename T1, typename T2>
     requires(std::is_floating_point<T1>::value || is_autodiff_real_v<T1> || is_complex<T1>::value) &&
@@ -206,8 +213,10 @@ namespace DiFfRG
   }
 
   /**
-   * @brief A dot product which takes the dot product between a1 and a2, assuming each has n entries which can be
-   * accessed via the [] operator.
+   * @brief \f$\sum_{i=0}^{n-1} a_1[i]\, a_2[i]\f$ for any two objects indexable by `[]`.
+   *
+   * @tparam n number of entries, \f$n \geq 1\f$.
+   * @tparam NT result type.
    */
   template <uint n, typename NT, typename A1, typename A2>
     requires requires(A1 a1, A2 a2) { a1[0] * a2[0]; }
@@ -219,6 +228,13 @@ namespace DiFfRG
     return ret;
   }
 
+  /**
+   * @brief Math functions to use inside kernels: `using namespace DiFfRG::compute;` (or `compute::exp(x)`) picks
+   * the overload that works on host and device for double, float, complex and autodiff arguments.
+   *
+   * Contains the Kokkos math functions (`exp`, `log`, `sqrt`, `pow`, trigonometric and hyperbolic functions, `abs`,
+   * `min`, `max`, `fma`, `real`, `imag`, ...), `powr`, `conj` (identity for real types) and `cot`, `coth`.
+   */
   namespace compute
   {
     using ::Kokkos::abs;
@@ -286,7 +302,9 @@ namespace DiFfRG
 
     using DiFfRG::powr;
 
+    /// \f$\cot x = 1/\tan x\f$.
     template <typename NT> constexpr auto cot(const NT x) { return NT(1) / tan(x); }
+    /// \f$\coth x = 1/\tanh x\f$.
     template <typename NT> constexpr auto coth(const NT x) { return NT(1) / tanh(x); }
   } // namespace compute
 } // namespace DiFfRG

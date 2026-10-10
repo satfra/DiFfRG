@@ -20,8 +20,27 @@
 #endif
 
 #ifdef DEAL_II_WITH_MPI
+/// Defined (as 1) when DiFfRG is built with MPI.
 #define DIFFRG_WITH_MPI 1
 #endif
+
+/**
+ * @file mpi.hh
+ * @brief Thin MPI helpers that also work in builds without MPI.
+ *
+ * Every function can be called in any build and at any time. Without MPI, or before DiFfRG::Init has started
+ * MPI, they behave as if there were a single rank: rank() is 0, size() is 1, reductions return their input
+ * and broadcasts do nothing. Note that this also means that "print on rank 0 only" checks done before Init
+ * print on every rank.
+ *
+ * Communicators are plain `MPI_Comm`, e.g. `MPI_COMM_WORLD`. In a build without MPI these names are provided
+ * in namespace DiFfRG by deal.II's stand-ins.
+ *
+ * @code
+ * if (DiFfRG::MPI::rank(MPI_COMM_WORLD) == 0) std::cout << "hello from rank 0\n";
+ * const double total = DiFfRG::MPI::sum_reduce(MPI_COMM_WORLD, local_value);
+ * @endcode
+ */
 
 namespace DiFfRG
 {
@@ -47,38 +66,62 @@ namespace DiFfRG
   namespace MPI
   {
     /**
-     * @brief Whether this build has MPI *and* MPI_Init has run. Everything below degrades to a
-     * single-rank no-op when this is false, so callers never have to branch on the build type.
+     * @brief Whether this build has MPI and MPI is running (initialized, not yet finalized).
+     *
+     * When false, all functions below act as on a single rank.
      */
     bool available();
 
+    /// This process' rank in `comm`; 0 without MPI.
     uint rank(MPI_Comm comm);
+    /// The number of ranks in `comm`; 1 without MPI.
     uint size(MPI_Comm comm);
+    /// Wait for all running Kokkos work (Kokkos::fence(), also without MPI), then for all ranks of `comm`.
     void barrier(MPI_Comm comm);
 
-    // Element-wise in-place array reductions: on return every rank holds the reduced array.
+    /** @name Reductions
+     *
+     * The array forms reduce `size` entries element-wise in place: afterwards every rank holds the sum, maximum
+     * or minimum over all ranks. The scalar forms return the reduced value on every rank.
+     * @{
+     */
+    /// Element-wise sum over all ranks, in place.
     void sum_reduce(MPI_Comm comm, int *data, int size);
+    /// Element-wise maximum over all ranks, in place.
     void max_reduce(MPI_Comm comm, int *data, int size);
+    /// Element-wise minimum over all ranks, in place.
     void min_reduce(MPI_Comm comm, int *data, int size);
 
+    /// Element-wise sum over all ranks, in place.
     void sum_reduce(MPI_Comm comm, double *data, int size);
+    /// Element-wise maximum over all ranks, in place.
     void max_reduce(MPI_Comm comm, double *data, int size);
+    /// Element-wise minimum over all ranks, in place.
     void min_reduce(MPI_Comm comm, double *data, int size);
 
+    /// Sum over all ranks.
     int sum_reduce(MPI_Comm comm, int value);
+    /// Maximum over all ranks.
     int max_reduce(MPI_Comm comm, int value);
+    /// Minimum over all ranks.
     int min_reduce(MPI_Comm comm, int value);
 
+    /// Sum over all ranks.
     double sum_reduce(MPI_Comm comm, double value);
+    /// Maximum over all ranks.
     double max_reduce(MPI_Comm comm, double value);
+    /// Minimum over all ranks.
     double min_reduce(MPI_Comm comm, double value);
+    /** @} */
 
     /**
-     * @brief Collective agreement on a predicate. Used to turn a rank-local decision (an abort, a
-     * convergence flag) into one that every rank makes identically -- ranks that disagree about
-     * control flow enter different numbers of collectives and hang.
+     * @brief Whether `value` is true on at least one rank.
+     *
+     * Use it to turn a decision made on one rank (stop, retry) into one that all ranks take: ranks that take
+     * different branches around a collective operation wait for each other forever.
      */
     bool any_of(MPI_Comm comm, bool value);
+    /// Whether `value` is true on all ranks.
     bool all_of(MPI_Comm comm, bool value);
 
     /**
@@ -89,7 +132,7 @@ namespace DiFfRG
      */
     bool agree(MPI_Comm comm, uint64_t token);
 
-    /// Broadcast raw bytes from @p root to all ranks.
+    /// Copy `bytes` bytes at `data` from rank `root` to all ranks. At most 2 GiB.
     void bcast(MPI_Comm comm, void *data, size_t bytes, uint root = 0);
 
     /**
@@ -99,16 +142,19 @@ namespace DiFfRG
      * hold sum(recv_counts) bytes. Used by MapScheduler to exchange map() slices. Deliberately not
      * an Allreduce(SUM) over zero-filled buffers: that moves N times more data and is not bit-safe,
      * since (-0.0) + 0.0 == +0.0 destroys a signed zero.
+     *
+     * Without MPI this does nothing; in particular `send` is not copied into `recv`.
      */
     void allgatherv_bytes(MPI_Comm comm, const void *send, size_t send_bytes, void *recv,
                           const std::vector<int> &recv_counts, const std::vector<int> &displs);
 
     /**
-     * @brief A communicator over the ranks sharing this node's memory, for GPU affinity.
+     * @brief A communicator over the ranks of `comm` on this node.
      *
-     * Returns MPI_COMM_SELF-equivalent behaviour (size 1) without MPI. Free it with free_comm().
+     * `MPI_COMM_SELF` without MPI. Free it with free_comm().
      */
     MPI_Comm split_shared(MPI_Comm comm);
+    /// Free a communicator from split_shared().
     void free_comm(MPI_Comm &comm);
 
     /**

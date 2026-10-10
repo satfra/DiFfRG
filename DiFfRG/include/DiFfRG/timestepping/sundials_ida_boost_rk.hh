@@ -14,16 +14,30 @@
 namespace DiFfRG
 {
   /**
-   * @brief A class to perform time stepping using the adaptive Boost Runge-Kutta method for the explicit part and
-   * SUNDIALS IDA for the implicit part. In this scheme, the IDA stepper is the controller and the Boost RK stepper
-   * solves the explicit part of the problem on-demand.
+   * @brief SUNDIALS IDA for the FE part, an adaptive explicit Runge-Kutta method (Boost.Odeint) for the variables.
    *
-   * @tparam VectorType Type of the vector
-   * @tparam dim Dimension of the problem
-   * @tparam prec Algorithm choice: 0 for Cash-Karp54 (5th order), 1 for Fehlberg78 (8th order)
+   * IDA (see TimeStepperSUNDIALS_IDA_impl) integrates the FE part \f$m(u, \dot u) + R(u, v) = 0\f$; the variables
+   * \f$\dot v = -D(v, u)\f$ are integrated by an explicit method. Use this when \f$D\f$ is expensive (e.g. momentum
+   * integrals): IDA treats \f$v\f$ as a given function of time, so \f$D\f$ is evaluated only by the explicit steps,
+   * not in every Newton iteration and not for the Jacobian. In turn, the explicit method reads \f$u(t)\f$ by
+   * interpolation between the steps IDA has accepted.
+   *
+   * Requires an FE system with variables. The variables are integrated redundantly on every rank. The variables
+   * written at an output time are interpolated from the explicit steps.
+   *
+   * The Runge-Kutta steps adapt to /timestepping/explicit/abs_tol and rel_tol, starting from explicit/dt and capped at
+   * explicit/maximal_dt.
+   *
+   * Reads /timestepping/implicit and /timestepping/explicit, see abstract_timestepper.hh.
+   *
+   * @tparam VectorType vector type of the assembler.
+   * @tparam SparseMatrixType sparse matrix type of the assembler.
+   * @tparam dim spatial dimension (at least 1).
+   * @tparam LinearSolver solver for IDA's Newton systems; see DefaultLinearSolver.
+   * @tparam prec 0: Cash-Karp 5(4), 1: Fehlberg 7(8).
    */
-  template <typename VectorType, typename SparseMatrixType, uint dim,
-            template <typename...> typename LinearSolver, int prec>
+  template <typename VectorType, typename SparseMatrixType, uint dim, template <typename...> typename LinearSolver,
+            int prec>
   class TimeStepperSUNDIALS_IDA_BoostRK_impl : public AbstractTimestepper<VectorType, SparseMatrixType, dim>
   {
     using Base = AbstractTimestepper<VectorType, SparseMatrixType, dim>;
@@ -35,18 +49,23 @@ namespace DiFfRG
     using Base::assembler, Base::data_out, Base::config, Base::adaptor;
 
     /// The public entry point, which handles snapshots and restarts; see AbstractTimestepper::run.
-
     using Base::run;
-    /// Forwards to the base with this stepper's kind. Not `using Base::Base;`: the base needs to
-    /// know which /timestepping/ section to read, and it cannot ask a virtual function for that
-    /// from inside its own constructor.
-    TimeStepperSUNDIALS_IDA_BoostRK_impl(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
+
+    // Not `using Base::Base;`: the base needs to know which /timestepping/ section to read, and it
+    // cannot ask a virtual function for that from inside its own constructor.
+
+    /// Construct without mesh adaptation; see AbstractTimestepper.
+    TimeStepperSUNDIALS_IDA_BoostRK_impl(const ConfigTree &config,
+                                         AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                                          OutputSession_impl<dim, VectorType> &data_out)
         : Base(config, assembler, data_out, /*implicit=*/true, /*explicit=*/true)
     {
     }
-    TimeStepperSUNDIALS_IDA_BoostRK_impl(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
-                                         OutputSession_impl<dim, VectorType> &data_out, AbstractAdaptor<VectorType> &adaptor)
+    /// Construct with a mesh adaptor; see AbstractTimestepper.
+    TimeStepperSUNDIALS_IDA_BoostRK_impl(const ConfigTree &config,
+                                         AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
+                                         OutputSession_impl<dim, VectorType> &data_out,
+                                         AbstractAdaptor<VectorType> &adaptor)
         : Base(config, assembler, data_out, adaptor, /*implicit=*/true, /*explicit=*/true)
     {
     }
@@ -68,27 +87,18 @@ namespace DiFfRG
   // The class above takes the linear algebra spelled out because it is compiled out of line: the
   // set of valid arguments is closed by the explicit instantiations in src/. Applications name the
   // assembler instead and let these aliases project it onto that fixed parameter list.
-  //
-  // The argument is anything exposing VectorType, SparseMatrixType and dim -- an Assembler, or a
-  // Discretization where the assembler type is not a single type (e.g. a test that runs one
-  // discretization against several models).
 
+  /// IDA + Runge-Kutta timestepper for an assembler; see TimeStepperSUNDIALS_IDA_BoostRK_impl.
   template <typename Assembler, template <typename...> typename LinearSolver, int prec>
   using TimeStepperSUNDIALS_IDA_BoostRK =
       TimeStepperSUNDIALS_IDA_BoostRK_impl<typename Assembler::VectorType, typename Assembler::SparseMatrixType,
                                            Assembler::dim, LinearSolver, prec>;
 
-  /**
-   * @brief Boost Cash-Karp54 for the explicit part, SUNDIALS IDA for the implicit part.
-   *
-   * IDA is the controller; the Boost RK stepper solves the explicit part on demand.
-   */
+  /// IDA for the FE part, Cash-Karp 5(4) Runge-Kutta for the variables.
   template <typename Assembler, template <typename...> typename LinearSolver = DefaultLinearSolver>
   using TimeStepperSUNDIALS_IDA_BoostRK54 = TimeStepperSUNDIALS_IDA_BoostRK<Assembler, LinearSolver, 0>;
 
-  /**
-   * @brief Boost Fehlberg78 for the explicit part, SUNDIALS IDA for the implicit part.
-   */
+  /// IDA for the FE part, Fehlberg 7(8) Runge-Kutta for the variables.
   template <typename Assembler, template <typename...> typename LinearSolver = DefaultLinearSolver>
   using TimeStepperSUNDIALS_IDA_BoostRK78 = TimeStepperSUNDIALS_IDA_BoostRK<Assembler, LinearSolver, 1>;
 } // namespace DiFfRG

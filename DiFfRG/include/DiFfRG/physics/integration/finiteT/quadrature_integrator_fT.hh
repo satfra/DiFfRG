@@ -376,7 +376,7 @@ namespace DiFfRG
 
       Kokkos::parallel_reduce("QuadratureIntegral_fT_" + std::to_string(dim) + "D", // name of the kernel
                               make_kokkos_nd_range<dim, ExecutionSpace>(space, {0}, grid_size),
-                              KokkosNDLambdaWrapperReduction<dim, decltype(functor)>(functor), dest);
+                              internal::KokkosNDLambdaWrapperReduction<dim, decltype(functor)>(functor), dest);
     }
 
     /// Launch the integrals for all points of @p coordinates into a device view, without waiting or MPI
@@ -483,7 +483,7 @@ namespace DiFfRG
           subview() = weight * node_value(x, pos, m_args, m_n[jt], m_w[jt], jt < n_tail);
         };
         Kokkos::parallel_for(make_kokkos_nd_range_divisible<1 + dim, ExecutionSpace>(space, {0}, extents),
-                             KokkosNDLambdaWrapper<1 + dim, decltype(functor)>(functor));
+                             internal::KokkosNDLambdaWrapper<1 + dim, decltype(functor)>(functor));
       } else {
         auto functor = KOKKOS_LAMBDA(const device::array<size_t, 1 + dim> &idx)
         {
@@ -503,7 +503,7 @@ namespace DiFfRG
           subview() = weight * node_value(x, pos, m_args, m_n[jt], m_w[jt], jt < n_tail);
         };
         Kokkos::parallel_for(make_kokkos_nd_range_divisible<1 + dim, ExecutionSpace>(space, {0}, extents),
-                             KokkosNDLambdaWrapper<1 + dim, decltype(functor)>(functor));
+                             internal::KokkosNDLambdaWrapper<1 + dim, decltype(functor)>(functor));
       }
 
       using TeamType = Kokkos::TeamPolicy<ExecutionSpace>::member_type;
@@ -595,9 +595,8 @@ namespace DiFfRG
      * for the current T, k and typical_E: it is shared by all points.
      */
     template <typename OT, typename... A>
-      requires(
-          internal::is_map_result<OT, NT> &&
-          internal::accepts_args<NT, KERNEL, ctype, dim, internal::point_arg_value_t<A>...>)
+      requires(internal::is_map_result<OT, NT> &&
+               internal::accepts_args<NT, KERNEL, ctype, dim, internal::point_arg_value_t<A>...>)
     void map_points(const PointSpan<OT> dest, const A &...args)
     {
       run_map_points(dest, PointArg<internal::point_arg_value_t<A>>(args)...);
@@ -711,10 +710,9 @@ namespace DiFfRG
     template <typename OT, typename Coordinates, typename... Args>
     auto map_dist(OT *dest, const Coordinates &coordinates, const Args &...args)
     {
-      internal::staged_map(space, m_staging.template get<OT>(), dest, coordinates.size(),
-                           [this, coordinates, args...](const auto &view) {
-                             this->map(this->space, view, coordinates, args...);
-                           });
+      internal::staged_map(
+          space, m_staging.template get<OT>(), dest, coordinates.size(),
+          [this, coordinates, args...](const auto &view) { this->map(this->space, view, coordinates, args...); });
       return space;
     }
 
@@ -824,8 +822,8 @@ namespace DiFfRG
           // (a pure frequency sum), keep the size of the tangent map.
           size_t order = standard.sum_size();
           if constexpr (sdim > 0) order = grid_size[0];
-          fe_rule = &quadrature_provider.template matsubara_finite_interval<ctype>(m_extent_margin * m_freq_cutoff,
-                                                                                   order);
+          fe_rule =
+              &quadrature_provider.template matsubara_finite_interval<ctype>(m_extent_margin * m_freq_cutoff, order);
         }
       }
 
@@ -1043,15 +1041,16 @@ namespace DiFfRG
       requires internal::is_map_result<OT, NT>
     auto map(OT *dest, const Coordinates &coordinates, const Args &...args)
     {
-      internal::scheduled_map<execution_space>(
-          this->integrator_id(), Base::quadrature_volume(), dest, coordinates, [&](auto *d, const auto &c) {
-            // tbb::parallel_for writes straight into `dest`, so there is nothing to stage.
-            internal::run_or_queue_host([this, d, c, args...]() {
-              auto sp = execution_space();
-              this->map(sp, d, c, args...);
-            });
-            if (!MapCompletion::deferral_enabled()) MapCompletion::flush();
-          });
+      internal::scheduled_map<execution_space>(this->integrator_id(), Base::quadrature_volume(), dest, coordinates,
+                                               [&](auto *d, const auto &c) {
+                                                 // tbb::parallel_for writes straight into `dest`, so there is nothing
+                                                 // to stage.
+                                                 internal::run_or_queue_host([this, d, c, args...]() {
+                                                   auto sp = execution_space();
+                                                   this->map(sp, d, c, args...);
+                                                 });
+                                                 if (!MapCompletion::deferral_enabled()) MapCompletion::flush();
+                                               });
       return execution_space();
     }
 

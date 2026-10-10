@@ -17,6 +17,21 @@
 #include <utility>
 #endif
 
+/**
+ * @file kokkos.hh
+ * @brief Execution and memory spaces, and Kokkos helpers.
+ *
+ * Integrators and interpolators take the place where they run as a template parameter. Use
+ * - `GPU_exec` / `GPU_memory`: the GPU if DiFfRG was built with one, otherwise the same as the host spaces,
+ * - `TBB_exec`: the CPU, through the TBB thread pool (the usual CPU choice),
+ * - `KokkosHost_exec`: Kokkos' own host backend, which is serial in a standard build,
+ * - `CPU_memory`: host memory; identical to `KokkosHost_memory` and `TBB_memory`.
+ *
+ * @code
+ * using Integrator = DiFfRG::QuadratureIntegrator<4, double, Kernel, DiFfRG::GPU_exec>;
+ * @endcode
+ */
+
 namespace DiFfRG
 {
   /**
@@ -36,6 +51,7 @@ namespace DiFfRG
     void fence() const {}
   };
 
+  /// The execution and memory spaces DiFfRG uses, collected in one place; see the aliases below.
   class ExecutionSpaces
   {
   public:
@@ -49,10 +65,14 @@ namespace DiFfRG
     using TBB_memory_space = TBB_exec_space::memory_space;
   };
 
+  /// Memory of GPU_exec: device memory, or host memory in a build without GPU.
   using GPU_memory = ExecutionSpaces::GPU_memory_space;
+  /// Memory of KokkosHost_exec, i.e. host memory.
   using KokkosHost_memory = ExecutionSpaces::KokkosHost_memory_space;
+  /// Memory of TBB_exec, i.e. host memory.
   using TBB_memory = ExecutionSpaces::TBB_memory_space;
 
+  /// Host memory.
   using CPU_memory = Kokkos::DefaultHostExecutionSpace::memory_space;
 
   /**
@@ -69,8 +89,11 @@ namespace DiFfRG
   using PinnedHost_memory = CPU_memory;
 #endif
 
+  /// Kokkos' default execution space: the GPU if there is one, otherwise the host.
   using GPU_exec = ExecutionSpaces::GPU_exec_space;
+  /// Kokkos' host execution space; serial unless the build enables a threaded Kokkos host backend.
   using KokkosHost_exec = ExecutionSpaces::KokkosHost_exec_space;
+  /// The CPU through the TBB thread pool, see TBB_ExecutionSpace.
   using TBB_exec = ExecutionSpaces::TBB_exec_space;
 
   // Ensure that CPU memory space is the same as the Kokkos host and TBB memory spaces.
@@ -78,61 +101,6 @@ namespace DiFfRG
   static_assert(std::is_same_v<CPU_memory, KokkosHost_memory>,
                 "CPU memory space must be the same as the Kokkos host memory space");
   static_assert(std::is_same_v<CPU_memory, TBB_memory>, "CPU memory space must be the same as TBB memory space");
-
-  /**
-   * @brief An extension of the Kokkos::Sum reducer that adds a constant value to the result.
-   *
-   * @tparam Scalar the type of the scalar value to be summed.
-   * @tparam Space execution space for the Kokkos::Sum reducer.
-   */
-  template <class Scalar, class SavedScalar, class Space> struct SumPlus {
-  public:
-    // Required
-    using reducer = SumPlus<Scalar, SavedScalar, Space>;
-    using value_type = std::remove_cv_t<Scalar>;
-    using saved_type = std::remove_cv_t<SavedScalar>;
-    static_assert(!std::is_pointer_v<value_type> && !std::is_array_v<value_type>);
-
-    using result_view_type = Kokkos::View<value_type, Space>;
-
-  private:
-    result_view_type value;
-    bool references_scalar_v;
-
-    const saved_type plus_value;
-
-  public:
-    KOKKOS_INLINE_FUNCTION
-    SumPlus(value_type &value_, const saved_type &plus_value_)
-        : value(&value_), references_scalar_v(true), plus_value(plus_value_)
-    {
-    }
-
-    KOKKOS_INLINE_FUNCTION
-    SumPlus(const result_view_type &value_, const saved_type &plus_value_)
-        : value(value_), references_scalar_v(false), plus_value(plus_value_)
-    {
-    }
-
-    // Required
-    KOKKOS_INLINE_FUNCTION
-    void join(value_type &dest, const value_type &src) const { dest += src; }
-
-    KOKKOS_INLINE_FUNCTION
-    void init(value_type &val) const { val = Kokkos::reduction_identity<value_type>::sum(); }
-
-    KOKKOS_INLINE_FUNCTION
-    value_type &reference() const { return *value.data(); }
-
-    KOKKOS_INLINE_FUNCTION
-    result_view_type view() const { return value; }
-
-    KOKKOS_INLINE_FUNCTION
-    bool references_scalar() const { return references_scalar_v; }
-
-    KOKKOS_INLINE_FUNCTION
-    void final(value_type &update) const { update += plus_value; }
-  };
 
   namespace device
   {
@@ -167,38 +135,46 @@ namespace DiFfRG
 #endif
   } // namespace device
 
-  template <int dim, typename T> struct GetKokkosNDStarType {
-    using type = typename GetKokkosNDStarType<dim - 1, T>::type *;
-  };
-  template <typename T> struct GetKokkosNDStarType<1, T> {
-    using type = T *;
-  };
+  namespace internal
+  {
+    template <int dim, typename T> struct GetKokkosNDStarType {
+      using type = typename GetKokkosNDStarType<dim - 1, T>::type *;
+    };
+    template <typename T> struct GetKokkosNDStarType<1, T> {
+      using type = T *;
+    };
+  } // namespace internal
 
   // ------------------------------------------------
   // Getting View types
   // ------------------------------------------------
 
+  /// A `dim`-dimensional Kokkos::View of `T` in memory space `ExecutionSpace` (e.g. GPU_memory, CPU_memory).
   template <int dim, typename T, typename ExecutionSpace>
-  using KokkosNDView = Kokkos::View<typename GetKokkosNDStarType<dim, T>::type, // Get the star syntax for
-                                                                                // dimensionality recursively with
-                                    ExecutionSpace                              // Choice between GPU and CPU
-                                    >;
+  using KokkosNDView =
+      Kokkos::View<typename internal::GetKokkosNDStarType<dim, T>::type, // Get the star syntax for
+                                                                         // dimensionality recursively with
+                   ExecutionSpace                                        // Choice between GPU and CPU
+                   >;
+  /// As KokkosNDView, with the promise that the data is not aliased.
   template <int dim, typename T, typename ExecutionSpace>
   using KokkosNDViewRestrict =
-      Kokkos::View<typename GetKokkosNDStarType<dim, T>::type, // Get the star syntax for dimensionality recursively
-                                                               // with a helper
-                   ExecutionSpace,                             // Choice between GPU and CPU
-                   Kokkos::MemoryTraits<Kokkos::Restrict>      // No-alias hint for compiler optimization
+      Kokkos::View<typename internal::GetKokkosNDStarType<dim, T>::type, // Get the star syntax for dimensionality
+                                                                         // recursively with a helper
+                   ExecutionSpace,                                       // Choice between GPU and CPU
+                   Kokkos::MemoryTraits<Kokkos::Restrict>                // No-alias hint for compiler optimization
                    >;
 
+  /// As KokkosNDView, but wrapping existing memory instead of allocating.
   template <int dim, typename T, typename ExecutionSpace>
   using KokkosNDViewUnmanaged =
-      Kokkos::View<typename GetKokkosNDStarType<dim, T>::type, // Get the star syntax for dimensionality recursively
-                                                               // with a helper
-                   ExecutionSpace,                             // Choice between GPU and CPU
-                   Kokkos::MemoryTraits<Kokkos::Unmanaged>     // No allocation: Attach to existing memory
+      Kokkos::View<typename internal::GetKokkosNDStarType<dim, T>::type, // Get the star syntax for dimensionality
+                                                                         // recursively with a helper
+                   ExecutionSpace,                                       // Choice between GPU and CPU
+                   Kokkos::MemoryTraits<Kokkos::Unmanaged>               // No allocation: Attach to existing memory
                    >;
 
+  /// Allocate a KokkosNDView with the given extents.
   template <int dim, typename T, typename ExecutionSpace>
   auto make_kokkos_nd_view(const std::string &label, const device::array<size_t, dim> &extents)
   {
@@ -206,6 +182,7 @@ namespace DiFfRG
                          extents);
   }
 
+  /// Allocate a KokkosNDViewRestrict with the given extents.
   template <int dim, typename T, typename ExecutionSpace>
   auto make_kokkos_nd_view_restrict(const std::string &label, const device::array<size_t, dim> &extents)
   {
@@ -222,22 +199,26 @@ namespace DiFfRG
 #ifndef DIFFRG_LAUNCH_BOUNDS
 #define DIFFRG_LAUNCH_BOUNDS 128
 #endif
-#if DIFFRG_LAUNCH_BOUNDS == 0 // A/B control: no launch bounds at all (the historical behaviour)
-  template <int dim, typename ExecutionSpace> struct KokkosNDRangeHelper {
-    using type = Kokkos::MDRangePolicy<Kokkos::Rank<dim>, ExecutionSpace>;
-  };
-  template <typename ExecutionSpace> struct KokkosNDRangeHelper<1, ExecutionSpace> {
-    using type = Kokkos::RangePolicy<ExecutionSpace>;
-  };
+  namespace internal
+  {
+#if DIFFRG_LAUNCH_BOUNDS == 0 // A/B control: no launch bounds at all
+    template <int dim, typename ExecutionSpace> struct KokkosNDRangeHelper {
+      using type = Kokkos::MDRangePolicy<Kokkos::Rank<dim>, ExecutionSpace>;
+    };
+    template <typename ExecutionSpace> struct KokkosNDRangeHelper<1, ExecutionSpace> {
+      using type = Kokkos::RangePolicy<ExecutionSpace>;
+    };
 #else
-  template <int dim, typename ExecutionSpace> struct KokkosNDRangeHelper {
-    using type = Kokkos::MDRangePolicy<Kokkos::Rank<dim>, ExecutionSpace, Kokkos::LaunchBounds<DIFFRG_LAUNCH_BOUNDS>>;
-  };
-  template <typename ExecutionSpace> struct KokkosNDRangeHelper<1, ExecutionSpace> {
-    using type = Kokkos::RangePolicy<ExecutionSpace, Kokkos::LaunchBounds<DIFFRG_LAUNCH_BOUNDS>>;
-  };
+    template <int dim, typename ExecutionSpace> struct KokkosNDRangeHelper {
+      using type = Kokkos::MDRangePolicy<Kokkos::Rank<dim>, ExecutionSpace, Kokkos::LaunchBounds<DIFFRG_LAUNCH_BOUNDS>>;
+    };
+    template <typename ExecutionSpace> struct KokkosNDRangeHelper<1, ExecutionSpace> {
+      using type = Kokkos::RangePolicy<ExecutionSpace, Kokkos::LaunchBounds<DIFFRG_LAUNCH_BOUNDS>>;
+    };
 #endif
-  template <int dim, typename ExecutionSpace> using KokkosNDRange = KokkosNDRangeHelper<dim, ExecutionSpace>::type;
+  } // namespace internal
+  template <int dim, typename ExecutionSpace>
+  using KokkosNDRange = internal::KokkosNDRangeHelper<dim, ExecutionSpace>::type;
 
   // Use a tile whose every dimension DIVIDES its extent, instead of Kokkos' heuristic.
   //
@@ -266,124 +247,105 @@ namespace DiFfRG
 #define DIFFRG_DIVISIBLE_TILE 1
 #endif
 
-  /**
-   * @brief A tile whose every dimension divides its extent, so no lane is launched masked.
-   *
-   * @param extents      iteration-space extents
-   * @param kokkos_tile  the tile Kokkos would have chosen; used as the seed and as the tie-breaker,
-   *                     so this function inherits Kokkos' architecture-specific recommendation
-   *                     rather than duplicating it (which would silently drift on a Kokkos bump)
-   * @param budget       maximum tile product, i.e. the block size ceiling
-   *
-   * Among all tiles that divide their extents and fit the budget, take the largest product -- a
-   * bigger block means fewer blocks and less of the register file lost to per-warp allocation
-   * granularity -- breaking ties toward Kokkos' shape, which encodes the coalescing preference on
-   * dim 0. Returns `kokkos_tile` unchanged when it already divides everything, so architectures and
-   * models that were already clean (e.g. YangMills, whose orders are 8) are untouched.
-   */
-  template <int dim>
-  device::array<size_t, dim> compute_divisible_tile(const device::array<size_t, dim> &extents,
-                                                    const device::array<size_t, dim> &kokkos_tile, size_t budget)
+  namespace internal
   {
-    bool already_divides = true;
-    for (int i = 0; i < dim; ++i)
-      if (kokkos_tile[i] == 0 || extents[i] % kokkos_tile[i] != 0) already_divides = false;
-    if (already_divides) return kokkos_tile;
-
-    // Candidate tile values per dimension: the divisors of the extent that fit the budget. Extents
-    // here are quadrature orders and grid sizes (order 10-100), so these lists are short and the
-    // search below visits a few thousand nodes at worst -- negligible against a millisecond kernel.
-    std::array<std::vector<size_t>, dim> candidates;
-    for (int i = 0; i < dim; ++i) {
-      const size_t cap = std::min<size_t>(extents[i], budget);
-      for (size_t d = 1; d <= cap; ++d)
-        if (extents[i] % d == 0) candidates[i].push_back(d);
-      if (candidates[i].empty()) candidates[i].push_back(1); // extent 0: degenerate, launch nothing
-    }
-
-    // Ranking, in order:
-    //  (1) whole warps -- a block that is not a multiple of 32 pads its last warp with dead lanes,
-    //      which is the very defect being fixed, only at warp instead of tile granularity;
-    //  (2) largest block -- fewer blocks, and the register file is handed out per warp;
-    //  (3) closest to Kokkos' shape, measured as sum |log2(tile/kokkos)| so the metric is
-    //      scale-free: 16->64 costs 2 and 4->2 costs 1, which stops the search from collapsing the
-    //      angular dimensions to 1 just to inflate dim 0;
-    //  (4) tile weight as far forward as possible, since dim 0 is the contiguous one under
-    //      LayoutLeft and a wider dim-0 tile coalesces the cache write better.
-    constexpr size_t warp = 32;
-    const auto log_distance = [&](const device::array<size_t, dim> &tile) {
-      double d = 0.;
+    /**
+     * @brief A tile whose every dimension divides its extent, so no lane is launched masked.
+     *
+     * @param extents      iteration-space extents
+     * @param kokkos_tile  the tile Kokkos would have chosen; used as the seed and as the tie-breaker,
+     *                     so this function inherits Kokkos' architecture-specific recommendation
+     *                     rather than duplicating it (which would silently drift on a Kokkos bump)
+     * @param budget       maximum tile product, i.e. the block size ceiling
+     *
+     * Among all tiles that divide their extents and fit the budget, take the largest product -- a
+     * bigger block means fewer blocks and less of the register file lost to per-warp allocation
+     * granularity -- breaking ties toward Kokkos' shape, which encodes the coalescing preference on
+     * dim 0. Returns `kokkos_tile` unchanged when it already divides everything.
+     */
+    template <int dim>
+    device::array<size_t, dim> compute_divisible_tile(const device::array<size_t, dim> &extents,
+                                                      const device::array<size_t, dim> &kokkos_tile, size_t budget)
+    {
+      bool already_divides = true;
       for (int i = 0; i < dim; ++i)
-        d += std::abs(std::log2(static_cast<double>(tile[i]) / static_cast<double>(kokkos_tile[i])));
-      return d;
-    };
-    const auto lexicographically_greater = [](const device::array<size_t, dim> &a,
-                                              const device::array<size_t, dim> &b) {
-      for (int i = 0; i < dim; ++i)
-        if (a[i] != b[i]) return a[i] > b[i];
-      return false;
-    };
+        if (kokkos_tile[i] == 0 || extents[i] % kokkos_tile[i] != 0) already_divides = false;
+      if (already_divides) return kokkos_tile;
 
-    device::array<size_t, dim> best{}, current{};
-    size_t best_product = 0;
-    double best_distance = 0.;
-    bool best_whole_warps = false, have_best = false;
+      // Candidate tile values per dimension: the divisors of the extent that fit the budget. Extents
+      // here are quadrature orders and grid sizes (order 10-100), so these lists are short and the
+      // search below visits a few thousand nodes at worst -- negligible against a millisecond kernel.
+      std::array<std::vector<size_t>, dim> candidates;
+      for (int i = 0; i < dim; ++i) {
+        const size_t cap = std::min<size_t>(extents[i], budget);
+        for (size_t d = 1; d <= cap; ++d)
+          if (extents[i] % d == 0) candidates[i].push_back(d);
+        if (candidates[i].empty()) candidates[i].push_back(1); // extent 0: degenerate, launch nothing
+      }
 
-    const auto visit = [&](auto &&self, int i, size_t product) -> void {
-      if (i == dim) {
-        const bool whole_warps = (product % warp == 0);
-        const double distance = log_distance(current);
-        bool better;
-        if (!have_best)
-          better = true;
-        else if (whole_warps != best_whole_warps)
-          better = whole_warps;
-        else if (product != best_product)
-          better = product > best_product;
-        else if (std::abs(distance - best_distance) > 1e-9)
-          better = distance < best_distance;
-        else
-          better = lexicographically_greater(current, best);
-        if (better) {
-          best = current;
-          best_product = product;
-          best_distance = distance;
-          best_whole_warps = whole_warps;
-          have_best = true;
+      // Ranking, in order:
+      //  (1) whole warps -- a block that is not a multiple of 32 pads its last warp with dead lanes,
+      //      which is the very defect being fixed, only at warp instead of tile granularity;
+      //  (2) largest block -- fewer blocks, and the register file is handed out per warp;
+      //  (3) closest to Kokkos' shape, measured as sum |log2(tile/kokkos)| so the metric is
+      //      scale-free: 16->64 costs 2 and 4->2 costs 1, which stops the search from collapsing the
+      //      angular dimensions to 1 just to inflate dim 0;
+      //  (4) tile weight as far forward as possible, since dim 0 is the contiguous one under
+      //      LayoutLeft and a wider dim-0 tile coalesces the cache write better.
+      constexpr size_t warp = 32;
+      const auto log_distance = [&](const device::array<size_t, dim> &tile) {
+        double d = 0.;
+        for (int i = 0; i < dim; ++i)
+          d += std::abs(std::log2(static_cast<double>(tile[i]) / static_cast<double>(kokkos_tile[i])));
+        return d;
+      };
+      const auto lexicographically_greater = [](const device::array<size_t, dim> &a,
+                                                const device::array<size_t, dim> &b) {
+        for (int i = 0; i < dim; ++i)
+          if (a[i] != b[i]) return a[i] > b[i];
+        return false;
+      };
+
+      device::array<size_t, dim> best{}, current{};
+      size_t best_product = 0;
+      double best_distance = 0.;
+      bool best_whole_warps = false, have_best = false;
+
+      const auto visit = [&](auto &&self, int i, size_t product) -> void {
+        if (i == dim) {
+          const bool whole_warps = (product % warp == 0);
+          const double distance = log_distance(current);
+          bool better;
+          if (!have_best)
+            better = true;
+          else if (whole_warps != best_whole_warps)
+            better = whole_warps;
+          else if (product != best_product)
+            better = product > best_product;
+          else if (std::abs(distance - best_distance) > 1e-9)
+            better = distance < best_distance;
+          else
+            better = lexicographically_greater(current, best);
+          if (better) {
+            best = current;
+            best_product = product;
+            best_distance = distance;
+            best_whole_warps = whole_warps;
+            have_best = true;
+          }
+          return;
         }
-        return;
-      }
-      for (const size_t d : candidates[i]) {
-        if (product * d > budget) break; // candidates are ascending, so nothing further fits either
-        current[i] = d;
-        self(self, i + 1, product * d);
-      }
-    };
-    visit(visit, 0, 1);
+        for (const size_t d : candidates[i]) {
+          if (product * d > budget) break; // candidates are ascending, so nothing further fits either
+          current[i] = d;
+          self(self, i + 1, product * d);
+        }
+      };
+      visit(visit, 0, 1);
 
-    return have_best ? best : kokkos_tile;
-  }
-
-  /**
-   * @brief Compute clamped tile sizes for MDRangePolicy so that the product of tile dimensions does not exceed
-   * max_threads. Fills from the innermost (last) dimension outward.
-   */
-  template <int dim>
-  device::array<size_t, dim> compute_tile_hints(const device::array<size_t, dim> &extents, size_t max_threads = 256)
-  {
-    device::array<size_t, dim> tile;
-    for (int i = 0; i < dim; ++i)
-      tile[i] = 1;
-
-    size_t budget = max_threads;
-    // Fill from innermost dimension outward
-    for (int i = dim - 1; i >= 0; --i) {
-      tile[i] = std::min(extents[i], budget);
-      budget /= tile[i];
-      if (budget == 0) break;
+      return have_best ? best : kokkos_tile;
     }
-    return tile;
-  }
+  } // namespace internal
 
   template <int dim, typename ExecutionSpace>
   auto make_kokkos_nd_range(ExecutionSpace &space, const device::array<size_t, dim> start,
@@ -447,7 +409,7 @@ namespace DiFfRG
         kokkos_tile[i] = static_cast<size_t>(policy.m_tile[i]);
         budget *= kokkos_tile[i];
       }
-      const auto tile = compute_divisible_tile<dim>(extents, kokkos_tile, budget);
+      const auto tile = internal::compute_divisible_tile<dim>(extents, kokkos_tile, budget);
       for (int i = 0; i < dim; ++i)
         changed |= (tile[i] != kokkos_tile[i]);
       if (changed) return make_kokkos_nd_range<dim, ExecutionSpace>(space, start, end, tile);
@@ -471,65 +433,60 @@ namespace DiFfRG
   // Wrap Kokkos lambdas
   // ------------------------------------------------
 
-  /**
-   * @brief This is a functor which wraps a lambda.
-   * Basically, this is necessary when one wants to call a variadic lambda on an NVIDIA GPU.
-   * CUDA seems to be unable to expand the variadic arguments - in contrast, a direct approach does indeed work for
-   * openMP or serial compilation.
-   * To get around this limitation, the KokkosNDLambdaWrapper packs the indices into an array.
-   * If you wonder, whether there's a difference when using tie and tuples: https://godbolt.org/z/M3bG39rsM
-   * No. Therefore, we spare the ourselves the hassle and simply use an array.
-   *
-   * @tparam dim Number of arguments taken
-   * @tparam FUN The lambda to which we forward the indices
-   */
-  template <int dim, typename FUN> struct KokkosNDLambdaWrapper {
-    KOKKOS_FUNCTION
-    KokkosNDLambdaWrapper(const FUN &_fun) : fun(_fun) {};
+  namespace internal
+  {
+    /**
+     * @brief Calls a lambda taking one `device::array<size_t, dim>` with `dim` separate loop indices.
+     *
+     * CUDA cannot expand variadic lambda arguments in device code, so the indices are packed into an array.
+     *
+     * @tparam dim Number of indices
+     * @tparam FUN The lambda to which we forward the indices
+     */
+    template <int dim, typename FUN> struct KokkosNDLambdaWrapper {
+      KOKKOS_FUNCTION
+      KokkosNDLambdaWrapper(const FUN &_fun) : fun(_fun) {};
 
-    template <typename... Args>
-      requires(sizeof...(Args) == dim)
-    KOKKOS_FORCEINLINE_FUNCTION void operator()(Args &&...args) const
-    {
-      fun({{std::forward<Args>(args)...}});
-    }
+      template <typename... Args>
+        requires(sizeof...(Args) == dim)
+      KOKKOS_FORCEINLINE_FUNCTION void operator()(Args &&...args) const
+      {
+        fun({{std::forward<Args>(args)...}});
+      }
 
-    FUN fun;
-  };
+      FUN fun;
+    };
 
-  /**
-   * @brief This is a functor which wraps a lambda for reduction.
-   * Basically, this is necessary when one wants to call a variadic lambda on an NVIDIA GPU.
-   * CUDA seems to be unable to expand the variadic arguments - in contrast, a direct approach does indeed work for
-   * openMP or serial compilation.
-   * To get around this limitation, the KokkosNDLambdaWrapperReduction packs the indices into an array.
-   * Uses compile-time index sequences to extract the first `dim` args as indices and the last arg as the reduction
-   * value, avoiding recursive tuple_first/tuple_cat overhead per GPU thread.
-   *
-   * @tparam dim Number of arguments taken
-   * @tparam FUN The lambda to which we forward the indices
-   */
-  template <int dim, typename FUN> struct KokkosNDLambdaWrapperReduction {
-    KOKKOS_FUNCTION
-    KokkosNDLambdaWrapperReduction(const FUN &_fun) : fun(_fun) {};
+    /**
+     * @brief As KokkosNDLambdaWrapper, for reductions: the last argument is the reduction value.
+     *
+     * The lambda is called as `fun(device::array<size_t, dim>{indices...}, value)`.
+     *
+     * @tparam dim Number of indices
+     * @tparam FUN The lambda to which we forward the indices
+     */
+    template <int dim, typename FUN> struct KokkosNDLambdaWrapperReduction {
+      KOKKOS_FUNCTION
+      KokkosNDLambdaWrapperReduction(const FUN &_fun) : fun(_fun) {};
 
-    template <typename... Args>
-      requires(sizeof...(Args) == dim + 1)
-    KOKKOS_FORCEINLINE_FUNCTION void operator()(Args &&...args) const
-    {
-      impl(device::make_integer_sequence<size_t, dim>{}, device::forward<Args>(args)...);
-    }
+      template <typename... Args>
+        requires(sizeof...(Args) == dim + 1)
+      KOKKOS_FORCEINLINE_FUNCTION void operator()(Args &&...args) const
+      {
+        impl(device::make_integer_sequence<size_t, dim>{}, device::forward<Args>(args)...);
+      }
 
-    FUN fun;
+      FUN fun;
 
-  private:
-    template <size_t... Is, typename... Args>
-    KOKKOS_FORCEINLINE_FUNCTION void impl(device::integer_sequence<size_t, Is...>, Args &&...args) const
-    {
-      auto tuple = device::tie(args...);
-      fun(device::array<size_t, dim>{{static_cast<size_t>(device::get<Is>(tuple))...}}, device::get<dim>(tuple));
-    }
-  };
+    private:
+      template <size_t... Is, typename... Args>
+      KOKKOS_FORCEINLINE_FUNCTION void impl(device::integer_sequence<size_t, Is...>, Args &&...args) const
+      {
+        auto tuple = device::tie(args...);
+        fun(device::array<size_t, dim>{{static_cast<size_t>(device::get<Is>(tuple))...}}, device::get<dim>(tuple));
+      }
+    };
+  } // namespace internal
 } // namespace DiFfRG
 
 #include <autodiff/forward/real.hpp>

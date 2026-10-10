@@ -28,7 +28,7 @@ TEMPLATE_TEST_CASE_SIG("Test correct creation of quadrature rules at example of 
   std::vector<double> x(order, 0);
   std::vector<double> w(order, 0);
 
-  make_quadrature(a, b, mu0, x, w);
+  DiFfRG::internal::make_quadrature(a, b, mu0, x, w);
 
   REQUIRE(x[order - 1] == Catch::Approx(2. * gl.x[order - 1] - 1.));
   REQUIRE(w[order - 1] == Catch::Approx(2. * gl.w[order - 1]));

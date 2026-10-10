@@ -15,12 +15,27 @@
 #include <gsl/gsl_math.h>
 #include <gsl/gsl_multimin.h>
 
+/**
+ * @file minimization.hh
+ * @brief Minimization of a function \f$f: \mathbb{R}^{d} \to \mathbb{R}\f$ with GSL, without derivatives.
+ *
+ * @code
+ * GSLMinimizer1D minimizer([](double x) { return (x - 0.3) * (x - 0.3); }, 1e-8);
+ * minimizer.set_bounds(0., 1.);
+ * minimizer.set_x0(0.5);
+ * const double x_min = minimizer.minimize(); // 0.3
+ * @endcode
+ *
+ * @note Constructing a GSL minimizer calls `gsl_set_error_handler_off()`, which switches off GSL's abort-on-error for
+ * the whole process.
+ */
+
 namespace DiFfRG
 {
   /**
-   * @brief Abstract class for minimization in arbitrary dimensions.
+   * @brief Common interface of the minimizers: set tolerances, call minimize(), get the location of the minimum.
    *
-   * @tparam dim Dimension of the minimization problem.
+   * @tparam dim number of variables \f$d\f$. For \f$d = 1\f$ the objective takes a plain `double`.
    */
   template <int dim> class AbstractMinimizer
   {
@@ -29,43 +44,25 @@ namespace DiFfRG
 
   public:
     /**
-     * @brief Construct a new AbstractMinimizer object.
-     *
-     * @param f Objective function to minimize. Must take a std::array<double, dim> as input and return a double.
-     * @param abs_tol Absolute tolerance for the minimization.
-     * @param max_iter Maximum number of iterations.
+     * @param f the objective \f$f(x)\f$, taking a `std::array<double, dim>`.
+     * @param abs_tol absolute tolerance on the location of the minimum (its meaning depends on the method).
+     * @param max_iter maximal number of iterations.
      */
     AbstractMinimizer(const FUN &f, const double abs_tol = 1e-4, const int max_iter = 1000)
         : f(f), abs_tol(abs_tol), max_iter(max_iter), iter(0)
     {
     }
 
-    /**
-     * @brief Set the absolute tolerance for the minimization.
-     *
-     * @param abs_tol Absolute tolerance.
-     */
+    /// Set the absolute tolerance.
     void set_abs_tol(const double abs_tol) { this->abs_tol = abs_tol; }
 
-    /**
-     * @brief Set the maximum number of iterations.
-     *
-     * @param max_iter Maximum number of iterations.
-     */
+    /// Set the maximal number of iterations.
     void set_max_iter(const uint max_iter) { this->max_iter = max_iter; }
 
-    /**
-     * @brief Get the number of iterations used in the last minimization.
-     *
-     * @return uint Number of iterations.
-     */
+    /// Number of iterations of the last minimize().
     uint get_iter() const { return iter; }
 
-    /**
-     * @brief Perform the minimization.
-     *
-     * @return std::array<double, dim> Minimimum of the objective function.
-     */
+    /// Run the minimization and return the location \f$x_\text{min}\f$ of the minimum.
     std::array<double, dim> minimize() { return this->minimize_impl(); }
 
   protected:
@@ -78,7 +75,7 @@ namespace DiFfRG
     virtual std::array<double, dim> minimize_impl() = 0;
   };
 
-  // explicit specialization for 1D minimization
+  /// One variable: the objective takes a `double`, minimize() returns a `double`.
   template <> class AbstractMinimizer<1>
   {
   protected:
@@ -87,55 +84,31 @@ namespace DiFfRG
 
   public:
     /**
-     * @brief Construct a new AbstractMinimizer object.
-     *
-     * @param f Objective function to minimize. Must take a double as input and return a double.
-     * @param abs_tol Absolute tolerance for the minimization.
-     * @param max_iter Maximum number of iterations.
+     * @param f the objective \f$f(x)\f$, taking a `double`.
+     * @param abs_tol absolute tolerance on the location of the minimum.
+     * @param max_iter maximal number of iterations.
      */
     AbstractMinimizer(const FUN &f, const double abs_tol = 1e-4, const int max_iter = 1000)
         : f([f](const std::array<double, 1> &x) { return f(x[0]); }), abs_tol(abs_tol), max_iter(max_iter), iter(0)
     {
     }
 
-    /**
-     * @brief Construct a new AbstractMinimizer object.
-     *
-     * @param f Objective function to minimize. Must take a std::array<double, 1> as input and return a double.
-     * @param abs_tol Absolute tolerance for the minimization.
-     * @param max_iter Maximum number of iterations.
-     */
+    /// As above, with an objective taking a `std::array<double, 1>`.
     AbstractMinimizer(const FUN_ARR &f, const double abs_tol = 1e-4, const int max_iter = 1000)
         : f(f), abs_tol(abs_tol), max_iter(max_iter), iter(0)
     {
     }
 
-    /**
-     * @brief Set the absolute tolerance for the minimization.
-     *
-     * @param abs_tol Absolute tolerance.
-     */
+    /// Set the absolute tolerance.
     void set_abs_tol(const double abs_tol) { this->abs_tol = abs_tol; }
 
-    /**
-     * @brief Set the maximum number of iterations.
-     *
-     * @param max_iter Maximum number of iterations.
-     */
+    /// Set the maximal number of iterations.
     void set_max_iter(const uint max_iter) { this->max_iter = max_iter; }
 
-    /**
-     * @brief Get the number of iterations used in the last minimization.
-     *
-     * @return uint Number of iterations.
-     */
+    /// Number of iterations of the last minimize().
     uint get_iter() const { return iter; }
 
-    /**
-     * @brief Perform the minimization.
-     *
-     * @return double Minimimum of the objective function.
-     */
+    /// Run the minimization and return the location \f$x_\text{min}\f$ of the minimum.
     double minimize() { return this->minimize_impl()[0]; }
 
   protected:
@@ -149,9 +122,13 @@ namespace DiFfRG
   };
 
   /**
-   * @brief Minimizer using the Nelder-Mead simplex algorithm from GSL.
+   * @brief Nelder-Mead simplex minimizer (GSL `nmsimplex2`).
    *
-   * @tparam dim Dimension of the minimization problem.
+   * Starts from a simplex around set_x0() with edge length set_step_size() (default 1). Stops when the simplex size
+   * drops below `abs_tol`, when \f$f\f$ reaches set_f_target(), or after `max_iter` iterations; in the latter cases
+   * minimize() returns the best point found and converged() tells which. Throws only if GSL fails.
+   *
+   * @tparam dim number of variables. For `dim = 1` the objective takes a plain `double`.
    */
   template <int dim> class GSLSimplexMinimizer : public AbstractMinimizer<dim>
   {
@@ -159,11 +136,9 @@ namespace DiFfRG
 
   public:
     /**
-     * @brief Construct a new GSLSimplexMinimizer object.
-     *
-     * @param f Objective function to minimize. Must take a std::array<double, dim> as input and return a double.
-     * @param abs_tol Absolute tolerance for the minimization.
-     * @param max_iter Maximum number of iterations.
+     * @param f the objective \f$f(x)\f$.
+     * @param abs_tol stop when the simplex size falls below this.
+     * @param max_iter maximal number of iterations.
      */
     GSLSimplexMinimizer(const FUN &f, const double abs_tol = 1e-4, const int max_iter = 1000)
         : AbstractMinimizer<dim>(f, abs_tol, max_iter), step_size(1.)
@@ -171,28 +146,17 @@ namespace DiFfRG
       gsl_set_error_handler_off();
     }
 
-    /**
-     * @brief Set the initial step size for the minimization.
-     *
-     * @param step_size Initial step size.
-     */
+    /// Edge length of the initial simplex (default 1).
     void set_step_size(const double step_size) { this->step_size = step_size; }
 
-    /**
-     * @brief Set the initial guess for the minimization.
-     *
-     * @param x0 Initial guess.
-     */
+    /// The starting point; must be set before minimize().
     void set_x0(const std::array<double, dim> &x0) { this->x0 = x0; }
 
     /**
-     * @brief Stop as soon as the objective falls to or below this value.
+     * @brief Stop as soon as \f$f \leq\f$ `f_target`.
      *
-     * The simplex-size test alone answers "has the search stopped moving", which is a statement
-     * about the parameter space and says nothing about whether the answer is any good. When the
-     * objective is a calibrated quantity -- an RMS residual, say -- a target on IT is the
-     * meaningful criterion, and the size test degrades to a give-up condition. NaN (the default)
-     * disables this and restores pure size-based convergence.
+     * Useful when \f$f\f$ has a meaningful scale, e.g. a residual: then reaching the target is the success
+     * criterion, and a collapsed simplex counts as not converged. NaN (the default) disables the target.
      */
     void set_f_target(const double f_target) { this->f_target = f_target; }
 
@@ -209,6 +173,7 @@ namespace DiFfRG
     /// Why the search stopped, for logging.
     const std::string &get_stop_reason() const { return stop_reason; }
 
+  private:
     static double gsl_wrap(const gsl_vector *v, void *params)
     {
       GSLSimplexMinimizer<dim> *self = (GSLSimplexMinimizer<dim> *)params;
@@ -298,7 +263,13 @@ namespace DiFfRG
   };
 
   /**
-   * @brief Minimizer in 1D using either the golden section, Brent or quadratic method from GSL.
+   * @brief Minimizer of a function of one variable on an interval \f$[a, b]\f$ (GSL `gsl_min_fminimizer`).
+   *
+   * Needs a starting point \f$x_0\f$ with \f$f(x_0) < f(a)\f$ and \f$f(x_0) < f(b)\f$, so that a minimum is bracketed;
+   * otherwise minimize() throws. An \f$x_0\f$ outside \f$[a, b]\f$ is replaced by the midpoint. Stops when the
+   * bracket \f$[x_\text{lo}, x_\text{hi}]\f$ is narrower than
+   * \f$\mathrm{abs\_tol} + \mathrm{rel\_tol} \cdot \min(|x_\text{lo}|, |x_\text{hi}|)\f$; throws if that is not reached
+   * within `max_iter` iterations.
    */
   class GSLMinimizer1D : public AbstractMinimizer<1>
   {
@@ -306,11 +277,9 @@ namespace DiFfRG
 
   public:
     /**
-     * @brief Construct a new GSLMinimizer1D object.
-     *
-     * @param f Objective function to minimize. Must take a std::array<double, 1> as input and return a double.
-     * @param abs_tol Absolute tolerance for the minimization.
-     * @param max_iter Maximum number of iterations.
+     * @param f the objective \f$f(x)\f$, taking a `double`.
+     * @param abs_tol absolute tolerance on the location of the minimum.
+     * @param max_iter maximal number of iterations.
      */
     GSLMinimizer1D(const FUN &f, const double abs_tol = 1e-4, const int max_iter = 1000)
         : AbstractMinimizer<1>(f, abs_tol, max_iter), x0(0.), min_x(-1.), max_x(1.), rel_tol(0.), m(method::brent)
@@ -319,41 +288,25 @@ namespace DiFfRG
     }
 
     /**
-     * @brief List of available minimization methods.
+     * @brief The method: golden-section search, Brent's method (default), or Brent's method with safeguarded
+     * quadratic steps (GSL `quad_golden`).
      */
     enum method { golden_section, brent, quadratic };
 
-    /**
-     * @brief Set the initial guess for the minimization.
-     *
-     * @param x0 Initial guess.
-     */
+    /// The starting point \f$x_0\f$ (default 0).
     void set_x0(const double x0) { this->x0 = x0; }
 
-    /**
-     * @brief Set the bounds for the minimization.
-     *
-     * @param min_x Lower bound.
-     * @param max_x Upper bound.
-     */
+    /// The interval \f$[a, b]\f$ (default \f$[-1, 1]\f$).
     void set_bounds(const double min_x, const double max_x)
     {
       this->min_x = min_x;
       this->max_x = max_x;
     }
 
-    /**
-     * @brief Set the minimization method. Default is Brent.
-     *
-     * @param m Minimization method.
-     */
+    /// Choose the method; default Brent.
     void set_method(const method m) { this->m = m; }
 
-    /**
-     * @brief Set the relative tolerance for the minimization. Default is 0.
-     *
-     * @param rel_tol Relative tolerance.
-     */
+    /// Relative tolerance on the location (default 0).
     void set_rel_tol(const double rel_tol) { this->rel_tol = rel_tol; }
 
   protected:

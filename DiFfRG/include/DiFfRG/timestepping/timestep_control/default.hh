@@ -12,16 +12,28 @@
 namespace DiFfRG
 {
   /**
-   * @brief This is a default time controller implementation which should be used as a base class for any other time
-   * controller. It only implements the basic tasks that should be done when advancing time, i.e. saving, aborting if the
-   * stepper got stuck, checking if the simulation is finished and restricting the minimal timestep.
+   * @brief Step-size control for the Newton-based implicit steppers (TimeStepperImplicitEuler, TimeStepperTRBDF2);
+   * base class of TC_PI.
    *
-   * @tparam NEWT the used solver type which should at least explose the methods set_ignore_nonconv(bool)->void and
-   * get_error()->double.
+   * Calls the step function, advances the time, writes output, keeps the step in [min_dt, max_dt] and ends exactly
+   * at max_t. When the suggested step falls below min_dt, the step min_dt is taken and accepted even if Newton does
+   * not converge. This base class keeps the step size constant and aborts on the first failed step; TC_PI adapts it.
+   * Throws if the time does not advance for more than 10 steps.
+   *
+   * @tparam NEWT the solver; must provide set_ignore_nonconv(bool) and get_error().
    */
   template <typename NEWT> class TC_Default
   {
   public:
+    /**
+     * @param newton_ the solver, see NEWT.
+     * @param alg_order_ order of the time discretization, used by TC_PI.
+     * @param t_ start time.
+     * @param max_t_ final time.
+     * @param dt_ initial step.
+     * @param min_dt_, max_dt_ bounds of the step.
+     * @param output_dt_ output interval.
+     */
     TC_Default(NEWT &newton_, unsigned int alg_order_, double t_, double max_t_, double dt_, double min_dt_,
                double max_dt_, double output_dt_)
         : newton(newton_), alg_order(alg_order_), t(t_), max_t(max_t_), sug_dt(dt_), min_dt(min_dt_), max_dt(max_dt_),
@@ -29,19 +41,22 @@ namespace DiFfRG
     {
     }
 
+    /// The step to take next.
     double get_dt() const { return cur_dt; }
+    /// The current time.
     double get_t() const { return t; }
-    /**
-     * @brief Get how many times in succession the timestepper was at the same time step
-     */
+    /// How many steps in a row did not advance the time.
     unsigned int get_stuck() const { return stuck; }
+    /// Whether max_t has been reached.
     bool finished() const { return fin; }
 
     /**
-     * @brief Method to perform a single time step
+     * @brief Attempt one step and plan the next.
      *
-     * @param f a function which performs a time step, of the signature void(double t, double dt)
-     * @param of a function which saves the current step to disk, of signature void(double t)
+     * Writes a frame at the first time past each multiple of output_dt from the start, and at the end.
+     *
+     * @param f performs the step from t to t + dt, `void(double t, double dt)`; throws on failure.
+     * @param of writes output at time t, `void(double t)`.
      */
     template <typename F, typename OF> void advance(F &f, OF &of)
     {
@@ -96,6 +111,7 @@ namespace DiFfRG
       }
     }
 
+    /// Unused.
     void print_step_info()
     {
       std::ostringstream message;
@@ -104,10 +120,7 @@ namespace DiFfRG
     }
 
   protected:
-    /**
-     * @brief The default implementation of step_success does nothing except incrementing time and trying to plan the
-     * next step to hit a save point.
-     */
+    /// Called after a successful step: advance the time. The step size stays the suggested one.
     virtual void step_success()
     {
       t += cur_dt;
@@ -116,9 +129,7 @@ namespace DiFfRG
       else
         cur_dt = sug_dt;
     }
-    /**
-     * @brief The default implementation of step_fail immediately aborts the program.
-     */
+    /// Called after a failed step; this default throws.
     virtual void step_fail(const std::exception &e)
     {
       throw std::runtime_error("Timestepping failed. Error: \n" + std::string(e.what()));

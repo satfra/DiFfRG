@@ -12,8 +12,21 @@
 namespace DiFfRG
 {
   /**
-   * @brief A class to perform time stepping using the Boost Adams-Bashforth-Moulton method.
-   * This stepper uses fixed time steps and is fully explicit.
+   * @brief Explicit 8-step Adams-Bashforth-Moulton method, with optional step-size control.
+   *
+   * Integrates \f$\dot u = -M^{-1} R(u, v)\f$ and \f$\dot v = -D(v, u)\f$ (see abstract_timestepper.hh) with an
+   * Adams-Bashforth predictor and one Adams-Moulton corrector, both of order 8, which costs two evaluations of the
+   * right-hand side per step. The first 7 steps, before enough history exists, are Cash-Karp 5(4) Runge-Kutta steps.
+   *
+   * The base step is the largest \f$\Delta t \le\f$ /timestepping/explicit/dt that divides the interval into equal
+   * steps. With /timestepping/explicit/error_control (default true) the local error is estimated from the difference
+   * between predictor and corrector; a step that fails the test
+   * \f$|e_i| \le \mathrm{abs\_tol} + \mathrm{rel\_tol}\, |y_i|\f$ is retaken at half the step size; at
+   * explicit/minimal_dt it is accepted anyway. After 16 steps in a row with an error below a quarter of the tolerance
+   * the step size doubles, up to the base step. Without error control every step is the base step.
+   *
+   * Handles FE problems with or without variables and pure-variables systems (`dim == 0`). Output frames are linearly
+   * interpolated between steps. Serial only; the mesh adaptor is not called.
    */
   template <typename VectorType, typename SparseMatrixType = dealii::SparseMatrix<get_type::NumberType<VectorType>>,
             uint dim = 0>
@@ -35,16 +48,18 @@ namespace DiFfRG
     using Base::assembler, Base::data_out, Base::config, Base::adaptor;
 
     /// The public entry point, which handles snapshots and restarts; see AbstractTimestepper::run.
-
     using Base::run;
-    /// Forwards to the base with this stepper's kind. Not `using Base::Base;`: the base needs to
-    /// know which /timestepping/ section to read, and it cannot ask a virtual function for that
-    /// from inside its own constructor.
+
+    // Not `using Base::Base;`: the base needs to know which /timestepping/ section to read, and it
+    // cannot ask a virtual function for that from inside its own constructor.
+
+    /// Construct without mesh adaptation; see AbstractTimestepper.
     TimeStepperBoostABM_impl(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                              OutputSession_impl<dim, VectorType> &data_out)
         : Base(config, assembler, data_out, /*implicit=*/false, /*explicit=*/true)
     {
     }
+    /// Construct with a mesh adaptor; see AbstractTimestepper.
     TimeStepperBoostABM_impl(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                              OutputSession_impl<dim, VectorType> &data_out, AbstractAdaptor<VectorType> &adaptor)
         : Base(config, assembler, data_out, adaptor, /*implicit=*/false, /*explicit=*/true)
@@ -52,9 +67,6 @@ namespace DiFfRG
     }
     using Base::output_dt, Base::impl, Base::expl;
 
-    /**
-     * @brief Run the time stepping algorithm.
-     */
     virtual void run_segment(AbstractFlowingVariables<NumberType, VectorType> &initial_condition, const double t_start,
                              const double t_stop) override;
 
@@ -72,10 +84,8 @@ namespace DiFfRG
   // set of valid arguments is closed by the explicit instantiations in src/, and keying it on the
   // assembler would explode that set into one instantiation per model. Applications name the
   // assembler instead and let these aliases project it onto that fixed parameter list.
-  //
-  // The argument is anything exposing VectorType, SparseMatrixType and dim -- an Assembler, or a
-  // Discretization where the assembler type is not a single type (e.g. a test that runs one
-  // discretization against several models).
+
+  /// Explicit Adams-Bashforth-Moulton timestepper for an assembler; see TimeStepperBoostABM_impl.
   template <typename Assembler>
   using TimeStepperBoostABM =
       TimeStepperBoostABM_impl<typename Assembler::VectorType, typename Assembler::SparseMatrixType, Assembler::dim>;
