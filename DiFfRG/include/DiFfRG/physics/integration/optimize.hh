@@ -22,16 +22,18 @@ namespace DiFfRG
    * - A regulator that vanishes for all \f$x > 1\f$, such as LitimRegulator, gives \f$x_\text{extent} = 1\f$.
    * - The result is computed once per program run for each `Regulator` and `dim`, and then reused: later calls
    *   ignore their `config`.
-   * - The integrators call it with the default `dim = 4`, whatever their own dimension.
+   * - The integrators pass their own `dim`: the momentum dimension for vacuum integrators, the spacetime dimension
+   *   at finite \f$T\f$ (so that a regulator in \f$q_0^2 + \vec q^{\,2}\f$ is covered too). A larger `dim` weights
+   *   the tail more and gives a larger \f$x_\text{extent}\f$.
    * - Throws `std::runtime_error` if the tolerance cannot be reached.
    * - Prints its progress if `/output/verbosity` is above 1.
    *
    * @tparam Regulator provides static `RB(k2, q2)` and `RBdot(k2, q2)`, see regulators.hh
-   * @tparam dim dimension of the test integral
+   * @tparam dim dimension of the test integral, \f$\geq 1\f$
    * @param config parameter file
    * @return \f$x_\text{extent}\f$, in units of \f$k^2\f$
    */
-  template <typename Regulator, int dim = 4> double optimize_x_extent(const ConfigTree &config)
+  template <typename Regulator, int dim> double optimize_x_extent(const ConfigTree &config)
   {
     static bool already_run = false;
     static double x_extent = 1.;

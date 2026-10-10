@@ -37,10 +37,10 @@ TEST_CASE("Test finite T sums", "[integration][quadrature]")
 
     const ctype T = GENERATE(0., 1e-3, 5e-3, 1e-2, 5e-2, 1e-1, 5e-1, 1., 5., 10.);
 
-    QuadratureProvider quadrature_provider;
-    Integrator_fT<1, NT, PolyIntegrand<1, NT, -1>, ExecutionSpace> integrator(quadrature_provider, {}, {});
-
     const ctype k = GENERATE(take(1, random(0., 1.)));
+
+    QuadratureProvider quadrature_provider;
+    Integrator_fT<1, NT, PolyIntegrand<1, NT, -1>, ExecutionSpace> integrator(quadrature_provider, T, k);
 
     SECTION("Volume integral (bosonic)")
     {
@@ -125,4 +125,38 @@ TEST_CASE("Test finite T sums", "[integration][quadrature]")
   SECTION("Threads") { check(KokkosHost_exec(), (double)0); }
   // Check on GPU
   SECTION("GPU") { check(GPU_exec(), (double)0); }
+}
+
+// Summand (L^2 - q0^2) for |q0| < L, zero beyond: a finite-extent kernel with cutoff L = sqrt(x_extent) k.
+struct FiniteExtentSummand {
+  static constexpr bool matsubara_finite_extent = true;
+  static KOKKOS_FORCEINLINE_FUNCTION double kernel(const double q0, const double L)
+  {
+    return Kokkos::abs(q0) < L ? L * L - q0 * q0 : 0.;
+  }
+  static KOKKOS_FORCEINLINE_FUNCTION double constant(const double) { return 0.; }
+};
+
+TEST_CASE("Integrator_fT sums a finite-extent kernel exactly", "[integration][quadrature]")
+{
+  DiFfRG::Init();
+
+  const double T = 0.1, k = 1., x_extent = 2.;
+  const double L = std::sqrt(x_extent) * k;
+
+  double reference = 0.;
+  for (int n = -100; n <= 100; ++n)
+    reference += T * FiniteExtentSummand::kernel(2. * M_PI * n * T, L);
+
+  QuadratureProvider quadrature_provider;
+  Integrator_fT<1, double, FiniteExtentSummand, TBB_exec> integrator(quadrature_provider, T, k, x_extent);
+  REQUIRE(integrator.uses_exact_matsubara_sum());
+
+  double result = 0.;
+  integrator.get(result, L);
+  CHECK(result == Catch::Approx(reference).epsilon(1e-12));
+
+  // x_extent = 0 (the default) keeps the approximate rule
+  Integrator_fT<1, double, FiniteExtentSummand, TBB_exec> approximate(quadrature_provider, T, k);
+  CHECK(!approximate.uses_exact_matsubara_sum());
 }

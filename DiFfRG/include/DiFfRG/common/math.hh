@@ -113,28 +113,22 @@ namespace DiFfRG
   }
 
   /**
-   * @brief Surface of a d-dimensional sphere (precompiled)
+   * @brief Surface \f$S_d = 2\pi^{d/2}/\Gamma(d/2)\f$ of the unit sphere in \f$d\f$ dimensions, evaluated at compile
+   * time.
+   *
+   * Uses \f$S_1 = 2\f$, \f$S_2 = 2\pi\f$ and \f$S_{d+2} = 2\pi S_d / d\f$. \f$d = 0\f$ is a compile error.
    *
    * @tparam NT Type of the number
-   * @param d Dimension of the sphere
+   * @param d Dimension of the space, \f$d \geq 1\f$
    */
   template <typename NT> consteval NT S_d_prec(uint d)
   {
-    if (d == 1)
-      return 2;
-    else if (d == 2)
-      return static_cast<NT>(2) * static_cast<NT>(M_PI);
-    else if (d == 3)
-      return static_cast<NT>(4) * static_cast<NT>(M_PI);
-    else if (d == 4)
-      return static_cast<NT>(2) * powr<2>(static_cast<NT>(M_PI));
-    else if (d == 5)
-      return static_cast<NT>(8) * powr<2>(static_cast<NT>(M_PI)) / static_cast<NT>(3);
-    else if (d == 6)
-      return powr<3>(static_cast<NT>(M_PI));
-    else if (d == 7)
-      return static_cast<NT>(16) * powr<3>(static_cast<NT>(M_PI)) / static_cast<NT>(15);
-    return std::numeric_limits<NT>::quiet_NaN();
+    // A throw is not a constant expression, so d = 0 fails to compile.
+    if (d == 0) throw "S_d_prec: the dimension must be at least 1";
+    NT result = d % 2 == 1 ? static_cast<NT>(2) : static_cast<NT>(2) * static_cast<NT>(M_PI);
+    for (uint n = 2 - d % 2; n + 2 <= d; n += 2)
+      result *= static_cast<NT>(2) * static_cast<NT>(M_PI) / static_cast<NT>(n);
+    return result;
   }
 
   /**

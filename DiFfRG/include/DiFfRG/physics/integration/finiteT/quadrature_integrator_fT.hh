@@ -820,9 +820,12 @@ namespace DiFfRG
           // accurate. (If `standard` is the Monien rule instead, the sum is genuinely thermal and
           // must not be replaced by an integral, so leave it alone.) The order is the SPATIAL one:
           // for a 4D regulator p0 and |q| enter the support p0^2 + |q|^2 <= x_extent k^2 on the
-          // same footing, so the order that resolves the radius resolves the frequency too.
+          // same footing, so the order that resolves the radius resolves the frequency too. Without a spatial axis
+          // (a pure frequency sum), keep the size of the tangent map.
+          size_t order = standard.sum_size();
+          if constexpr (sdim > 0) order = grid_size[0];
           fe_rule = &quadrature_provider.template matsubara_finite_interval<ctype>(m_extent_margin * m_freq_cutoff,
-                                                                                   grid_size[0]);
+                                                                                   order);
         }
       }
 

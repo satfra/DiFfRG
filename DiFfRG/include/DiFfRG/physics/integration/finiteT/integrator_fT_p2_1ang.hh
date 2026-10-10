@@ -99,7 +99,7 @@ namespace DiFfRG
    *
    * @see QuadratureIntegrator for the kernel interface, Integrator_fT_p2 for an example.
    *
-   * @tparam dim spacetime dimension \f$d\f$, 3 to 9
+   * @tparam dim spacetime dimension \f$d \geq 3\f$
    * @tparam NT numerical type of the result
    * @tparam KERNEL kernel to be integrated, providing static `kernel` and `constant`
    * @tparam ExecutionSpace GPU_exec, TBB_exec or KokkosHost_exec
@@ -162,7 +162,7 @@ namespace DiFfRG
     Integrator_fT_p2_1ang(QuadratureProvider &quadrature_provider, const ConfigTree &config)
       requires provides_regulator<KERNEL>
         : Integrator_fT_p2_1ang(quadrature_provider, internal::make_int_grid<2, NT>(config, {"x_order", "cos1_order"}),
-                                optimize_x_extent<typename KERNEL::Regulator>(config),
+                                optimize_x_extent<typename KERNEL::Regulator, dim>(config),
                                 config.get_double("/physical/T", 1.0))
     {
       apply_matsubara_overrides(config);
