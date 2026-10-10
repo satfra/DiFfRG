@@ -45,18 +45,17 @@ namespace DiFfRG
     public:
       template <typename NumberType> static NumberType slope_limit(const NumberType &a, const NumberType &b)
       {
-        // Strict TVD: vanish on sign disagreement, including either argument zero.
-        const auto ab = a * b;
-        if (ab <= NumberType(0)) return NumberType(0);
+        // Strict TVD: vanish on sign disagreement, including either argument zero. Compared directly, as a * b
+        // underflows for tiny slopes.
+        const bool same_sign = (a > NumberType(0) && b > NumberType(0)) || (a < NumberType(0) && b < NumberType(0));
+        if (!same_sign) return NumberType(0);
 
-        // ε_floor: defensive against the truly-zero-slope smooth-extremum case
-        // where a² + b² could be machine zero. Set far below any physical
-        // (du/h)² scale; ~1e-300 is safely below double's denormal range.
-        const NumberType eps_floor = NumberType(1e-300);
-
-        const auto a2 = a * a;
-        const auto b2 = b * b;
-        return (a * b2 + b * a2) / (a2 + b2 + eps_floor);
+        // a b (a + b) / (a² + b²) is homogeneous of degree one, so it can be evaluated on a / s, b / s: with
+        // s = max(|a|, |b|) the denominator is at least 1, and a² + b² cannot underflow.
+        using std::abs;
+        const NumberType s = abs(a) > abs(b) ? abs(a) : abs(b);
+        const NumberType as = a / s, bs = b / s;
+        return s * as * bs * (as + bs) / (as * as + bs * bs);
       }
     };
     static_assert(HasSlopeLimiter<VanAlbadaLimiter>);

@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -58,6 +59,27 @@ namespace DiFfRG
    * coordinate systems which do not expose their axes as separate types, e.g. BosonicCoordinates1DFiniteT.
    */
   template <typename C, size_t i> inline constexpr bool is_periodic_axis_v = internal::axis_periodic<C, i>::value;
+
+  namespace internal
+  {
+    /**
+     * @brief Format a grid parameter with the fewest digits that still identify it uniquely.
+     *
+     * The to_string() of a coordinate system is the identity key of its dataset in HDF5 output, and the key that
+     * HDF5Input::load_map compares against, so two grids that differ must render differently. std::to_string would
+     * not do: with six decimals every value below 1e-6 renders as "0.000000".
+     */
+    template <typename NT> std::string round_trip(const NT value)
+    {
+      char buffer[40];
+      for (int precision = 6; precision < std::numeric_limits<NT>::max_digits10; ++precision) {
+        std::snprintf(buffer, sizeof(buffer), "%.*g", precision, double(value));
+        if (NT(std::strtod(buffer, nullptr)) == value) return std::string(buffer);
+      }
+      std::snprintf(buffer, sizeof(buffer), "%.*g", std::numeric_limits<NT>::max_digits10, double(value));
+      return std::string(buffer);
+    }
+  } // namespace internal
 
   /**
    * @brief Utility class for combining multiple coordinate systems into one
@@ -170,11 +192,8 @@ namespace DiFfRG
     template <typename... Coordinates2>
     friend bool operator==(const CoordinatePackND<Coordinates...> &r, const CoordinatePackND<Coordinates2...> &l)
     {
-      if constexpr (sizeof...(Coordinates) != sizeof...(Coordinates2)) return false; // Different number of coordinates
-      if constexpr ((!std::is_same_v<Coordinates, Coordinates2> && ...))
-        return false; // Different types of coordinates
-      else if constexpr (sizeof...(Coordinates) == 0)
-        return true; // Empty coordinate pack, always equal
+      if constexpr (!std::is_same_v<device::tuple<Coordinates...>, device::tuple<Coordinates2...>>)
+        return false; // different axes
       else {
         // Check if all coordinates are equal
         bool equal = true;
@@ -300,7 +319,7 @@ namespace DiFfRG
     LinearCoordinates1D(size_t grid_extent, double start, double stop)
         : start(start), stop(stop), grid_extent(grid_extent), parent_extent(grid_extent)
     {
-      if (grid_extent == 0) throw std::runtime_error("LinearCoordinates1D: grid_extent must be > 0");
+      if (grid_extent < 2) throw std::runtime_error("LinearCoordinates1D: grid_extent must be > 1");
       a = (stop - start) / (grid_extent - 1.);
     }
 
@@ -380,8 +399,9 @@ namespace DiFfRG
 
     std::string to_string() const
     {
-      return "LinearCoordinates1D(" + std::to_string(parent_extent) + ", " + std::to_string(start) + ", " +
-             std::to_string(stop) + ")" + (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
+      return "LinearCoordinates1D(" + std::to_string(parent_extent) + ", " + internal::round_trip(start) + ", " +
+             internal::round_trip(stop) + ")" +
+             (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
     }
 
   private:
@@ -480,8 +500,8 @@ namespace DiFfRG
 
     std::string to_string() const
     {
-      return "LinearPeriodicCoordinates1D(" + std::to_string(grid_extent) + ", " + std::to_string(start) + ", " +
-             std::to_string(stop) + ")";
+      return "LinearPeriodicCoordinates1D(" + std::to_string(grid_extent) + ", " + internal::round_trip(start) + ", " +
+             internal::round_trip(stop) + ")";
     }
 
   private:
@@ -504,7 +524,8 @@ namespace DiFfRG
           gem1(grid_extent - 1.), gem1inv(1. / (grid_extent - 1.)), a(bias), b((stop - start) / std::expm1(bias)),
           c(start)
     {
-      if (grid_extent == 0) throw std::runtime_error("LogarithmicCoordinates1D: grid_extent must be > 0");
+      if (grid_extent < 2) throw std::runtime_error("LogarithmicCoordinates1D: grid_extent must be > 1");
+      if (bias == 0.) throw std::runtime_error("LogarithmicCoordinates1D: bias must be != 0");
     }
 
     template <typename NT2>
@@ -576,7 +597,7 @@ namespace DiFfRG
       return log1p((y - c) / b) * gem1 / a;
     }
 
-    NT KOKKOS_FORCEINLINE_FUNCTION backward_derivative(const NT &y) const { return 1. / (y - c) * gem1 / a; }
+    NT KOKKOS_FORCEINLINE_FUNCTION backward_derivative(const NT &y) const { return gem1 / (a * (b + y - c)); }
 
     size_t KOKKOS_FORCEINLINE_FUNCTION size() const { return grid_extent; }
 
@@ -594,8 +615,9 @@ namespace DiFfRG
 
     std::string to_string() const
     {
-      return "LogarithmicCoordinates1D(" + std::to_string(start) + ", " + std::to_string(stop) + ", " +
-             std::to_string(bias) + ", " + std::to_string(parent_extent) + ")" + (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
+      return "LogarithmicCoordinates1D(" + internal::round_trip(start) + ", " + internal::round_trip(stop) + ", " +
+             internal::round_trip(bias) + ", " + std::to_string(parent_extent) + ")" +
+             (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
     }
 
   private:
@@ -807,33 +829,12 @@ namespace DiFfRG
 
     std::string to_string() const
     {
-      return "FocusedLogCoordinates1D(" + std::to_string(parent_extent) + ", " + round_trip(start) + ", " +
-             round_trip(stop) + ", " + round_trip(center) + ", " + round_trip(focus) + ")" + (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
+      return "FocusedLogCoordinates1D(" + std::to_string(parent_extent) + ", " + internal::round_trip(start) + ", " +
+             internal::round_trip(stop) + ", " + internal::round_trip(center) + ", " + internal::round_trip(focus) +
+             ")" + (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
     }
 
   private:
-    /**
-     * @brief Format a parameter with the fewest digits that still identify it uniquely.
-     *
-     * to_string() is the identity key of a coordinate dataset in HDF5 output, and the key that
-     * HDF5Input::load_map compares against, so two grids that differ must render differently.
-     * std::to_string would not do: it emits six decimals, under which every start below 1e-6 --
-     * a perfectly ordinary IR cutoff here -- renders as "0.000000" and distinct grids would
-     * silently share one dataset. Widening the precision until the text parses back to the
-     * original value keeps the common cases readable ("0.005", not "0.0050000000000000001") while
-     * still separating values that genuinely differ.
-     */
-    static std::string round_trip(const NT value)
-    {
-      char buffer[40];
-      for (int precision = 6; precision < std::numeric_limits<NT>::max_digits10; ++precision) {
-        std::snprintf(buffer, sizeof(buffer), "%.*g", precision, double(value));
-        if (NT(std::strtod(buffer, nullptr)) == value) return std::string(buffer);
-      }
-      std::snprintf(buffer, sizeof(buffer), "%.*g", std::numeric_limits<NT>::max_digits10, double(value));
-      return std::string(buffer);
-    }
-
     /**
      * @brief asinh(c * (u - u0)), written out to pick the cancellation-free branch.
      *
@@ -871,20 +872,6 @@ namespace DiFfRG
     std::vector<cortype> grid(coordinates.size());
     for (size_t i = 0; i < coordinates.size(); ++i) {
       const auto forwarded = coordinates.forward(coordinates.from_linear_index(i));
-      for (size_t j = 0; j < Coordinates::dim; ++j) {
-        grid[i][j] = forwarded[j];
-      }
-    }
-    return grid;
-  }
-
-  template <typename Coordinates> auto make_idx_grid(const Coordinates &coordinates) -> std::vector<double>
-  {
-    using ctype = typename Coordinates::ctype;
-    using cortype = device::array<ctype, Coordinates::dim>;
-    std::vector<cortype> grid(coordinates.size());
-    for (size_t i = 0; i < coordinates.size(); ++i) {
-      const auto forwarded = coordinates.from_linear_index(i);
       for (size_t j = 0; j < Coordinates::dim; ++j) {
         grid[i][j] = forwarded[j];
       }

@@ -379,14 +379,31 @@ namespace DiFfRG
                     const VectorType &variables) const
       {
         derived().prepare_point_evaluation(solution);
-        auto potential = reconstruct_potential(solution);
+        // The raw potential is a solve over the whole mesh; skip it if neither the model nor the output reads it.
+        constexpr bool model_reads_potential =
+            Model::readouts_use_potential || (Components::count_extractors() > 0 && Model::extract_uses_potential);
+        if (model_reads_potential || data_out.writes_raw_potential()) {
+          auto potential = reconstruct_potential(solution);
+          readouts_with(data_out, solution, variables, potential);
+          data_out.attach_raw_potential(std::move(potential));
+        } else if constexpr (!model_reads_potential)
+          readouts_with(data_out, solution, variables, UnusedPotential{});
+      }
+
+      /// readouts() with the raw potential @p potential (or UnusedPotential) in the solution tuples.
+      template <typename Potential>
+      void readouts_with(OutputFrame<dim, VectorType> &data_out, const VectorType &solution,
+                         const VectorType &variables, const Potential &potential) const
+      {
         // GCC 16 fails to find members inside `if constexpr` in this variadic lambda; keep `this->`.
         auto helper = [&](auto &&...args) {
           if constexpr (sizeof...(args) == 3) {
             auto &&[id, EoMfun, outputter] = std::forward_as_tuple(std::forward<decltype(args)>(args)...);
             data_out.register_readout(id);
             auto cell = this->EoM_cell;
-            auto EoM_result = this->locate_EoM(cell, solution, EoMfun, [](const auto &p, const auto &) { return p; });
+            auto EoM_result = this->locate_EoM(cell, solution, EoMfun, [this](const auto &p, const auto &values) {
+              return this->model.EoM_postprocess(p, values);
+            });
             const auto EoM = EoM_result.point;
             const auto readout_solution = this->derived().evaluate_at(EoM, cell, solution, potential);
 
@@ -407,7 +424,6 @@ namespace DiFfRG
           }
         };
         model.readouts_multiple(helper, data_out);
-        data_out.attach_raw_potential(std::move(potential));
       }
 
       /**

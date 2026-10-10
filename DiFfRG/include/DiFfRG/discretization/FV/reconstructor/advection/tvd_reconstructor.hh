@@ -1,5 +1,9 @@
 #pragma once
 
+// standard library
+#include <algorithm>
+#include <cmath>
+
 // DiFfRG
 #include <DiFfRG/discretization/FV/limiter/abstract_limiter.hh>
 #include <DiFfRG/discretization/FV/limiter/minmod_limiter.hh>
@@ -127,9 +131,12 @@ namespace DiFfRG
             const auto dx_2 = x_n[i_n_2] - center_pos;
             const NumberType du_2 = (u_n[i_n_2][c] - u_val) / dx_2[d];
 
-            if (x[d] < center_pos[d])
+            // x at the centre along d, up to rounding: the source points come from FEValues, the centre from
+            // the cell, and the two need not agree to the last bit.
+            const double tolerance = 1e-10 * std::min(std::abs(dx_1[d]), std::abs(dx_2[d]));
+            if (x[d] < center_pos[d] - tolerance)
               u_grad[c][d] = du_1;
-            else if (x[d] > center_pos[d])
+            else if (x[d] > center_pos[d] + tolerance)
               u_grad[c][d] = du_2;
             else
               u_grad[c][d] = Limiter::slope_limit(du_1, du_2);

@@ -504,6 +504,12 @@ namespace DiFfRG
       static constexpr bool extract_uses_potential = true;
 
       /**
+       * @brief Whether readouts() reads the raw-potential slots of its solution tuple, as extract_uses_potential
+       * for extract(). With false, the potential is reconstructed for readouts only if the output writes it.
+       */
+      static constexpr bool readouts_use_potential = true;
+
+      /**
        * @brief The unmodified gradient of the scalar potential reconstructed for readouts and extractors.
        *
        * This is deliberately separate from the EoM callback supplied by readouts_multiple(): a physical EoM may

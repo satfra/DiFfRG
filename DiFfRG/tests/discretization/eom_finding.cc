@@ -204,6 +204,61 @@ namespace
     const std::array<double, dim> linear;
   };
 
+  // u = V'(rho) = m2 + lambda rho with a linear source: the EoM V' - c / sqrt(2 rho) is singular at rho = 0.
+  class ModelSourceEoM : public def::AbstractModel<ModelSourceEoM, typename Testing::compFactory<1>::value>,
+                         public def::Time,
+                         public def::NoNumFlux<ModelSourceEoM>,
+                         public def::FlowBoundaries<ModelSourceEoM>,
+                         public def::AD<ModelSourceEoM>
+  {
+  public:
+    ModelSourceEoM(const double m2, const double lambda, const double c) : m2(m2), lambda(lambda), c(c) {}
+
+    template <typename Vector> void initial_condition(const Point<1> &pos, Vector &values) const
+    {
+      values[0] = m2 + lambda * pos[0];
+    }
+
+    template <typename Vector> std::array<double, 1> EoM(const Point<1> &pos, const Vector &values) const
+    {
+      return {{double(values[0]) - c / std::sqrt(2. * pos[0] + 1e-300)}};
+    }
+
+    // The zero of m2 + lambda rho - c / sqrt(2 rho), by bisection.
+    double exact_minimum() const
+    {
+      double a = 1e-300, b = 1.;
+      for (uint i = 0; i < 200; ++i) {
+        const double m = 0.5 * (a + b);
+        (m2 + lambda * m - c / std::sqrt(2. * m) < 0. ? a : b) = m;
+      }
+      return 0.5 * (a + b);
+    }
+
+  private:
+    const double m2, lambda, c;
+  };
+
+  // EoM field V'(rho) = (rho - 0.03)(rho - 0.06): a minimum at the boundary rho = 0, a maximum at 0.03 and a
+  // higher, metastable minimum at 0.06 (V(0.06) - V(0) = 1.8e-5).
+  class ModelTwoMinima : public def::AbstractModel<ModelTwoMinima, typename Testing::compFactory<1>::value>,
+                         public def::Time,
+                         public def::NoNumFlux<ModelTwoMinima>,
+                         public def::FlowBoundaries<ModelTwoMinima>,
+                         public def::AD<ModelTwoMinima>
+  {
+  public:
+    template <typename Vector> void initial_condition(const Point<1> &pos, Vector &values) const
+    {
+      values[0] = (pos[0] - 0.03) * (pos[0] - 0.06);
+    }
+
+    template <typename Vector> std::array<double, 1> EoM(const Point<1> &pos, const Vector &) const
+    {
+      return {{(pos[0] - 0.03) * (pos[0] - 0.06)}};
+    }
+  };
+
   using DefaultRawPotentialComponents = typename Testing::compFactory<2>::value;
 
   class DefaultRawPotentialModel : public def::AbstractModel<DefaultRawPotentialModel, DefaultRawPotentialComponents>
@@ -1567,4 +1622,36 @@ TEST_CASE("EoM max-iteration zero keeps the origin bypass", "[discretization][Eo
 
   REQUIRE(distance(result.point, Point<dim>(0., 0.)) < 1e-12);
   REQUIRE_FALSE(result.potential.has_value());
+}
+
+TEST_CASE("A source-dominated 1D minimum below the first cell centre is the zero of the EoM",
+          "[discretization][EoM][source][fv][cg]")
+{
+  DiFfRG::Init();
+  constexpr uint dim = 1;
+  // Minima at rho ~ 1e-4 .. 1e-2, below the first cell centre (cells of width 0.05): the piecewise-quadratic
+  // reconstruction cannot follow c / sqrt(2 rho) there.
+  const double c = GENERATE(0.015, 0.05, 0.14);
+  const double lambda = GENERATE(0., 2.);
+  const ModelSourceEoM model(1., lambda, c);
+  const double expected = model.exact_minimum();
+  CAPTURE(c, lambda, expected);
+
+  const auto fv = reconstruct_minimum_with_model<dim, FV::Discretization>(model, 0);
+  const auto cg = reconstruct_minimum_with_model<dim, CG::Discretization>(model, 1);
+  CAPTURE(fv[0], cg[0]);
+  CHECK(std::abs(fv[0] - expected) < 1e-12 * std::max(1., expected) + 1e-14);
+  CHECK(std::abs(cg[0] - expected) < 1e-12 * std::max(1., expected) + 1e-14);
+}
+
+TEST_CASE("The 1D EoM polish does not move to a higher, metastable minimum", "[discretization][EoM][fv][cg]")
+{
+  DiFfRG::Init();
+  constexpr uint dim = 1;
+  const ModelTwoMinima model;
+  const auto fv = reconstruct_minimum_with_model<dim, FV::Discretization>(model, 0);
+  const auto cg = reconstruct_minimum_with_model<dim, CG::Discretization>(model, 1);
+  CAPTURE(fv[0], cg[0]);
+  CHECK(fv[0] < 0.03);
+  CHECK(cg[0] < 0.03);
 }

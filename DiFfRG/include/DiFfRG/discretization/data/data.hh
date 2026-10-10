@@ -1,5 +1,8 @@
 #pragma once
 
+// standard library
+#include <stdexcept>
+
 // external libraries
 #include <deal.II/base/function.h>
 #include <deal.II/base/quadrature_lib.h>
@@ -176,10 +179,18 @@ namespace DiFfRG
        *
        * @return VectorType& The variable data vector.
        */
-      virtual VectorType &variable_data() override { return m_data.block(1); }
-      virtual const VectorType &variable_data() const override { return m_data.block(1); }
+      virtual VectorType &variable_data() override { return m_data.block(variables_block()); }
+      virtual const VectorType &variable_data() const override { return m_data.block(variables_block()); }
 
     private:
+      /// Block 1, which exists only if the model has variables.
+      unsigned int variables_block() const
+      {
+        if (m_data.n_blocks() < 2)
+          throw std::logic_error("FlowingVariables::variable_data: the model has no variables.");
+        return 1;
+      }
+
       const Discretization &discretization;
       const DoFHandler<dim> &dof_handler;
       BlockVectorType m_data;
@@ -306,10 +317,18 @@ namespace DiFfRG
        *
        * @return VectorType& The variable data vector.
        */
-      virtual VectorType &variable_data() override { return m_data.block(1); }
-      virtual const VectorType &variable_data() const override { return m_data.block(1); }
+      virtual VectorType &variable_data() override { return m_data.block(variables_block()); }
+      virtual const VectorType &variable_data() const override { return m_data.block(variables_block()); }
 
     private:
+      /// Block 1, which exists only if the model has variables.
+      unsigned int variables_block() const
+      {
+        if (m_data.n_blocks() < 2)
+          throw std::logic_error("FlowingVariables::variable_data: the model has no variables.");
+        return 1;
+      }
+
       const Discretization &discretization;
       const DoFHandler<dim> &dof_handler;
       BlockVectorType m_data;

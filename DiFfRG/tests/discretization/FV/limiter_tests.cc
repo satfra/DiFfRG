@@ -1,5 +1,6 @@
 #include <DiFfRG/discretization/FV/limiter/abstract_limiter.hh>
 #include <DiFfRG/discretization/FV/limiter/minmod_limiter.hh>
+#include <DiFfRG/discretization/FV/limiter/van_albada_limiter.hh>
 
 #include <autodiff/forward/real.hpp>
 #include <catch2/catch_approx.hpp>
@@ -201,4 +202,28 @@ TEST_CASE("Minmod autodiff - derivative propagation", "[FV][limiter][autodiff]")
     CHECK(result.val() == Catch::Approx(-1.0));
     CHECK(result[1] == Catch::Approx(1.0 / dx_R));
   }
+}
+
+TEST_CASE("van Albada slope_limit", "[FV][limiter]")
+{
+  using DiFfRG::def::VanAlbadaLimiter;
+  // a b (a + b) / (a^2 + b^2)
+  CHECK(VanAlbadaLimiter::slope_limit(1.0, 3.0) == Catch::Approx(1.2));
+  CHECK(VanAlbadaLimiter::slope_limit(-1.0, -3.0) == Catch::Approx(-1.2));
+  CHECK(VanAlbadaLimiter::slope_limit(2.0, 2.0) == Catch::Approx(2.0));
+  CHECK(VanAlbadaLimiter::slope_limit(1.0, -3.0) == 0.0);
+  CHECK(VanAlbadaLimiter::slope_limit(0.0, 3.0) == 0.0);
+  // Tiny slopes neither underflow to 0/0 nor lose their value, in float as in double.
+  CHECK(VanAlbadaLimiter::slope_limit(1e-30f, 3e-30f) == Catch::Approx(1.2e-30f));
+  CHECK(VanAlbadaLimiter::slope_limit(1e-200, 3e-200) == Catch::Approx(1.2e-200));
+}
+
+TEST_CASE("van Albada autodiff - derivative", "[FV][limiter][autodiff]")
+{
+  using DiFfRG::def::VanAlbadaLimiter;
+  // d/da [a b (a + b) / (a^2 + b^2)] at (1, 3) = b^2 (b^2 - a^2 + 2ab) / (a^2 + b^2)^2 = 9 * 14 / 100
+  autodiff::real a = 1.0, b = 3.0;
+  const auto da = autodiff::derivative([](auto x, auto y) { return VanAlbadaLimiter::slope_limit(x, y); },
+                                       autodiff::wrt(a), autodiff::at(a, b));
+  CHECK(da == Catch::Approx(1.26));
 }

@@ -146,6 +146,15 @@ namespace DiFfRG
       session.attach_raw_potential(std::move(potential));
     }
 
+    /// Whether a raw potential attached to this frame would be written anywhere (VTK or HDF5).
+    bool writes_raw_potential() const
+    {
+      if constexpr (dim > 0)
+        return !session.potential_fe_out.will_discard();
+      else
+        return false;
+    }
+
     void dump_table(const std::string &name, const std::vector<std::vector<double>> &values, bool append = false,
                     const std::vector<std::string> &header = {})
     {
@@ -180,7 +189,7 @@ namespace DiFfRG
   public:
     OutputSession_impl() : OutputSession_impl(OutputPath::temporary(), Config::OutputSettings{}) {}
     explicit OutputSession_impl(const ConfigTree &config)
-        : OutputSession_impl(path_from(config), Config::OutputSettings(config))
+        : OutputSession_impl(OutputPath(config), Config::OutputSettings(config))
     {
     }
     explicit OutputSession_impl(OutputPath path, Config::OutputSettings settings = {});
@@ -243,13 +252,6 @@ namespace DiFfRG
     bool is_writer_rank() const noexcept { return active; }
 
   private:
-    static OutputPath path_from(const ConfigTree &config)
-    {
-      if (config.contains("/output/folder")) return OutputPath(config);
-      const auto name = config.get_string("/output/name", "output");
-      return OutputPath::temporary(TemporaryRetention::remove_on_destruction, name,
-                                   config.get_string("/output/field_directory", name));
-    }
 
     FEOutput<dim, VectorType> &fe_output() { return fe_out; }
     FEOutput<dim, VectorType> &field_output(const std::string &name);

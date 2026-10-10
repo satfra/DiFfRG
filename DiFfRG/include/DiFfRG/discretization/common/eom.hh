@@ -1417,6 +1417,184 @@ namespace DiFfRG
               .values = std::move(potential.values)};
     }
 
+    /**
+     * @brief The solution on one cell, as a function of the point: the FE solution itself, or for a DG0 source its
+     * least-squares linear reconstruction from the centres of the cell and its neighbours, out to at most two layers
+     * and until there are 2 (dim + 1) of them (the patch of recover_dg0_gradient_models on a regular mesh).
+     */
+    template <int dim, typename VectorType> class LocalSolution
+    {
+    public:
+      using NumberType = typename VectorType::value_type;
+      using Iterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
+
+      LocalSolution(const VectorType &sol, const dealii::DoFHandler<dim> &dof_handler,
+                    const dealii::Mapping<dim> &mapping, const Iterator &cell)
+          : n_components(dof_handler.get_fe().n_components()), centre_values(n_components),
+            slopes(n_components), fe_function(dof_handler, sol, mapping)
+      {
+        if (dof_handler.get_fe().degree != 0) {
+          fe_function.set_active_cell(cell);
+          dg0 = false;
+          return;
+        }
+        dg0 = true;
+
+        std::vector<Iterator> patch{cell};
+        for (uint layer = 0; layer < 2 && patch.size() < 2 * (dim + 1); ++layer) {
+          const std::vector<Iterator> frontier = patch;
+          for (const auto &member : frontier) {
+            std::vector<Iterator> neighbors;
+            dealii::GridTools::get_active_neighbors<dealii::DoFHandler<dim>>(member, neighbors);
+            for (const auto &neighbor : neighbors)
+              if (std::find(patch.begin(), patch.end(), neighbor) == patch.end()) patch.push_back(neighbor);
+          }
+        }
+
+        dealii::QMidpoint<dim> midpoint;
+        dealii::FEValues<dim> fe_values(mapping, dof_handler.get_fe(), midpoint,
+                                        dealii::update_values | dealii::update_quadrature_points);
+        std::vector<dealii::Vector<NumberType>> point_values(1, dealii::Vector<NumberType>(n_components));
+        std::vector<dealii::Point<dim>> centres;
+        std::vector<dealii::Vector<NumberType>> values;
+        for (const auto &member : patch) {
+          fe_values.reinit(member);
+          fe_values.get_function_values(sol, point_values);
+          centres.push_back(fe_values.quadrature_point(0));
+          values.push_back(point_values[0]);
+        }
+        centre = centres[0];
+        centre_values = values[0];
+        if (patch.size() < dim + 1) return;
+
+        const double scale = std::max(cell->diameter(), std::numeric_limits<double>::epsilon());
+        Eigen::MatrixXd design(patch.size(), dim + 1);
+        for (uint row = 0; row < patch.size(); ++row) {
+          design(row, 0) = 1.;
+          for (uint d = 0; d < dim; ++d)
+            design(row, d + 1) = (centres[row][d] - centre[d]) / scale;
+        }
+        Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr(design);
+        if (qr.rank() < dim + 1) return;
+        for (uint c = 0; c < n_components; ++c) {
+          Eigen::VectorXd samples(patch.size());
+          for (uint row = 0; row < patch.size(); ++row)
+            samples[row] = (double)values[row][c];
+          const Eigen::VectorXd coefficients = qr.solve(samples);
+          // The fit's own intercept, not the centre value: a least-squares line through the patch.
+          centre_values[c] = coefficients[0];
+          for (uint d = 0; d < dim; ++d)
+            slopes[c][d] = coefficients[d + 1] / scale;
+        }
+      }
+
+      dealii::Vector<NumberType> operator()(const dealii::Point<dim> &point) const
+      {
+        dealii::Vector<NumberType> out(n_components);
+        if (!dg0) {
+          fe_function.vector_value(point, out);
+          return out;
+        }
+        for (uint c = 0; c < n_components; ++c) {
+          out[c] = centre_values[c];
+          for (uint d = 0; d < dim; ++d)
+            out[c] += slopes[c][d] * (point[d] - centre[d]);
+        }
+        return out;
+      }
+
+    private:
+      uint n_components;
+      bool dg0 = false;
+      dealii::Point<dim> centre;
+      dealii::Vector<NumberType> centre_values;
+      std::vector<dealii::Tensor<1, dim>> slopes;
+      mutable dealii::Functions::FEFieldFunction<dim, VectorType> fe_function;
+    };
+
+    /**
+     * @brief In one field dimension, move the minimum of the reconstructed potential onto the zero of the EoM field.
+     *
+     * The reconstructed potential is piecewise quadratic and smoothed over EoM_smoothing_length, so its minimum misses
+     * the zero wherever the field is far from affine over that length -- e.g. an explicit-breaking term c / sqrt(2 rho),
+     * whose zero sits deep inside the first cell once the condensate is small. Here the field F(x) = get_EoM(x, u(x))
+     * is evaluated directly, with u from LocalSolution, on the cell holding @p guess and its two neighbours.
+     *
+     * Candidates are the minima of the potential V with V' = F there: the upward zeros of F (inside a cell by
+     * bisection, or a face across which F changes sign), and a domain boundary that F points away from. Of these, the
+     * one with the lowest V, measured as \f$\int_{\rm guess}^x F\f$, is returned, so a nearby metastable minimum never
+     * replaces a lower one; @p guess if there is no candidate.
+     */
+    template <int dim, typename VectorType, typename EoMFUN>
+    dealii::Point<dim> polish_EoM_root(const dealii::Point<dim> &guess, const VectorType &sol,
+                                       const dealii::DoFHandler<dim> &dof_handler, const dealii::Mapping<dim> &mapping,
+                                       const EoMFUN &get_EoM)
+    {
+      if constexpr (dim != 1)
+        return guess;
+      else {
+        using Iterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
+        const Iterator cell = dealii::GridTools::find_active_cell_around_point(mapping, dof_handler, guess).first;
+        if (cell == dof_handler.end()) return guess;
+
+        std::vector<Iterator> cells;
+        dealii::GridTools::get_active_neighbors<dealii::DoFHandler<dim>>(cell, cells); // clears its output
+        cells.push_back(cell);
+        std::sort(cells.begin(), cells.end(),
+                  [](const Iterator &a, const Iterator &b) { return a->center()[0] < b->center()[0]; });
+
+        // Per cell: its interval and the solution on it.
+        std::vector<std::pair<double, double>> intervals;
+        std::deque<LocalSolution<dim, VectorType>> solutions; // constructed in place, LocalSolution does not move
+        for (const auto &c : cells) {
+          intervals.emplace_back(std::min(c->vertex(0)[0], c->vertex(1)[0]), std::max(c->vertex(0)[0], c->vertex(1)[0]));
+          solutions.emplace_back(sol, dof_handler, mapping, c);
+        }
+        const auto F = [&](const size_t i, const double x) {
+          const dealii::Point<dim> p(x);
+          return (double)get_EoM(p, solutions[i](p))[0];
+        };
+        // V(x) - V(guess) = int_guess^x F, by Gauss quadrature on each cell.
+        const dealii::QGauss<1> gauss(8);
+        const auto potential_difference = [&](const double x) {
+          const double lo = std::min(x, guess[0]), hi = std::max(x, guess[0]);
+          double integral = 0.;
+          for (size_t i = 0; i < cells.size(); ++i) {
+            const double a = std::max(lo, intervals[i].first), b = std::min(hi, intervals[i].second);
+            if (b <= a) continue;
+            for (uint q = 0; q < gauss.size(); ++q)
+              integral += gauss.weight(q) * (b - a) * F(i, a + (b - a) * gauss.point(q)[0]);
+          }
+          return x >= guess[0] ? integral : -integral;
+        };
+
+        std::optional<double> best;
+        double best_V = std::numeric_limits<double>::infinity();
+        const auto consider = [&](const double x) {
+          const double V = potential_difference(x);
+          if (!best || V < best_V) best = x, best_V = V;
+        };
+
+        for (size_t i = 0; i < cells.size(); ++i) {
+          auto [a, b] = intervals[i];
+          const double Fa = F(i, a), Fb = F(i, b);
+          if (i == 0 && cells[i]->at_boundary(0) && Fa >= 0.) consider(a);
+          if (i + 1 == cells.size() && cells[i]->at_boundary(1) && Fb <= 0.) consider(b);
+          if (i > 0 && intervals[i - 1].second == a && F(i - 1, a) < 0. && Fa >= 0.) consider(a);
+          if (Fa < 0. && Fb >= 0.) {
+            for (uint it = 0; it < 200 && b - a > 4. * std::numeric_limits<double>::epsilon() * std::abs(b); ++it) {
+              const double m = 0.5 * (a + b);
+              const double Fm = F(i, m);
+              if (!std::isfinite(Fm)) break;
+              (Fm < 0. ? a : b) = m;
+            }
+            consider(0.5 * (a + b));
+          }
+        }
+        return best ? dealii::Point<dim>(*best) : guess;
+      }
+    }
+
   } // namespace internal
 
   /**
@@ -1513,7 +1691,8 @@ namespace DiFfRG
 
     auto potential =
         internal::reconstruct_potential(EoM_cell, sol, dof_handler, mapping, get_EoM, config, initial_guess, cache);
-    auto EoM = potential.minimum;
+    auto EoM = internal::polish_EoM_root(potential.minimum, sol, dof_handler, mapping, get_EoM);
+    EoM_cell = dealii::GridTools::find_active_cell_around_point(dof_handler, EoM);
 
     dealii::Vector<typename VectorType::value_type> values(dof_handler.get_fe().n_components());
     dealii::Functions::FEFieldFunction<dim, VectorType> fe_function(dof_handler, sol, mapping);

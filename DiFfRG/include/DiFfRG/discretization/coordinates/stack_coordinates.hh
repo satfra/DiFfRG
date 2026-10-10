@@ -1,7 +1,12 @@
 #pragma once
 
+// standard library
+#include <stdexcept>
+#include <string>
+
 // DiFfRG
 #include <DiFfRG/common/kokkos.hh>
+#include <DiFfRG/discretization/coordinates/coordinates.hh>
 
 namespace DiFfRG
 {
@@ -104,7 +109,7 @@ namespace DiFfRG
     std::string to_string() const
     {
       return "BosonicMatsubaraValues(" + std::to_string(start) + ", " + std::to_string(stop) + ", " +
-             std::to_string(T) + ")";
+             internal::round_trip(T) + ")";
     }
 
   private:
@@ -175,7 +180,7 @@ namespace DiFfRG
     std::string to_string() const
     {
       return "FermionicMatsubaraValues(" + std::to_string(start) + ", " + std::to_string(stop) + ", " +
-             std::to_string(T) + ")";
+             internal::round_trip(T) + ")";
     }
 
   private:

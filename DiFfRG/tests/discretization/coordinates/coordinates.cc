@@ -98,3 +98,42 @@ TEST_CASE("Test finite-T coordinates extend the Matsubara stack O(4)-symmetrical
   CHECK(f_lo == 0);
   CHECK(fp_lo == Catch::Approx(radial.backward(std::sqrt(p * p + mf * mf - mf_edge * mf_edge))));
 }
+
+using namespace DiFfRG;
+
+TEST_CASE("LogarithmicCoordinates1D::backward_derivative is the derivative of backward", "[coordinates]")
+{
+  for (const double start : {0., 0.3}) {
+    const LogarithmicCoordinates1D<double> grid(32, start, 5., 2.5);
+    for (const double y : {start, start + 0.1, 1., 4.9}) {
+      const double h = 1e-6;
+      const double fd = (grid.backward(y + h) - grid.backward(y - h)) / (2. * h);
+      CHECK(grid.backward_derivative(y) == Catch::Approx(fd).epsilon(1e-6));
+    }
+  }
+}
+
+TEST_CASE("1D grids reject parameters that make their map singular", "[coordinates]")
+{
+  CHECK_THROWS(LinearCoordinates1D<double>(1, 0., 1.));
+  CHECK_THROWS(LogarithmicCoordinates1D<double>(1, 0., 1., 2.));
+  CHECK_THROWS(LogarithmicCoordinates1D<double>(8, 0., 1., 0.));
+}
+
+TEST_CASE("Grids that differ below 1e-6 have different keys", "[coordinates]")
+{
+  CHECK(LinearCoordinates1D<double>(8, 1e-7, 1.).to_string() != LinearCoordinates1D<double>(8, 2e-7, 1.).to_string());
+  CHECK(LogarithmicCoordinates1D<double>(8, 1e-7, 1., 2.).to_string() !=
+        LogarithmicCoordinates1D<double>(8, 2e-7, 1., 2.).to_string());
+  CHECK(LinearCoordinates1D<double>(8, 0., 1.).to_string() == "LinearCoordinates1D(8, 0, 1)");
+}
+
+TEST_CASE("CoordinatePackND compares packs of different axes as unequal", "[coordinates]")
+{
+  const LinearCoordinates1D<double> x(8, 0., 1.);
+  const LogarithmicCoordinates1D<double> y(8, 0., 1., 2.);
+  CHECK(CoordinatePackND(x, y) == CoordinatePackND(x, y));
+  CHECK_FALSE(CoordinatePackND(x, y) == CoordinatePackND(y, x));
+  CHECK_FALSE(CoordinatePackND(x, y) == CoordinatePackND(x));
+  CHECK_FALSE(CoordinatePackND(x, x) == CoordinatePackND(x, LinearCoordinates1D<double>(9, 0., 1.)));
+}

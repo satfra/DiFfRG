@@ -11,6 +11,8 @@
 #include <deal.II/numerics/solution_transfer.h>
 
 // standard library
+#include <algorithm>
+#include <limits>
 #include <vector>
 
 // DiFfRG
@@ -43,6 +45,9 @@ namespace DiFfRG
       adapt_level = config.get_uint("/discretization/adaptivity/level", 0);
       adapt_upper = config.get_double("/discretization/adaptivity/refine_percent", 1e-1);
       adapt_lower = config.get_double("/discretization/adaptivity/coarsen_percent", 5e-2);
+      min_level = std::numeric_limits<uint>::max();
+      for (const auto &cell : discretization.get_triangulation().active_cell_iterators())
+        min_level = std::min(min_level, uint(cell->level()));
     }
 
     virtual double last_adaptation_time() const override { return last_adapt; }
@@ -108,11 +113,11 @@ namespace DiFfRG
 
       GridRefinement::refine_and_coarsen_fixed_fraction(triangulation, indicator, adapt_upper, adapt_lower);
 
-      if (triangulation.n_levels() > adapt_level)
-        for (const auto &cell : triangulation.active_cell_iterators_on_level(adapt_level))
-          cell->clear_refine_flag();
-      for (const auto &cell : triangulation.active_cell_iterators_on_level(0))
-        cell->clear_coarsen_flag();
+      // Never refine beyond adapt_level, never coarsen below the mesh we started from.
+      for (const auto &cell : triangulation.active_cell_iterators()) {
+        if (uint(cell->level()) >= adapt_level) cell->clear_refine_flag();
+        if (uint(cell->level()) <= min_level) cell->clear_coarsen_flag();
+      }
 
       bool any_refined = false;
       for (const auto &cell : triangulation.active_cell_iterators())
@@ -169,5 +174,7 @@ namespace DiFfRG
     double last_adapt = -std::numeric_limits<double>::infinity();
     double adapt_t, adapt_dt, adapt_upper, adapt_lower;
     uint adapt_level;
+    /// Level of the coarsest active cell at construction.
+    uint min_level;
   };
 } // namespace DiFfRG

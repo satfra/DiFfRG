@@ -186,7 +186,7 @@ namespace DiFfRG
           AssertThrow(jac.m() == Model::Components::count_extractors() && jac.n() == fe_derivatives.size() * dim,
                       ExcMessage("Assure that the jacobian has the right dimension!"));
         } else if constexpr (to == 2) {
-          AssertThrow(jac.m() == Model::Components::count_extractors() && jac.n() == fe_derivatives.size() * dim * dim,
+          AssertThrow(jac.m() == Model::Components::count_extractors() && jac.n() == fe_hessians.size() * dim * dim,
                       ExcMessage("Assure that the jacobian has the right dimension!"));
         }
 
