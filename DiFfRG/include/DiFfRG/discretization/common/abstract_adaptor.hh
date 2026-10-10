@@ -2,6 +2,8 @@
 
 // standard library
 #include <limits>
+#include <stdexcept>
+#include <vector>
 
 namespace DiFfRG
 {
@@ -23,6 +25,21 @@ namespace DiFfRG
      * @return true if adapation has happened, false otherwise
      */
     virtual bool operator()(const double t, VectorType &sol) = 0;
+
+    /**
+     * @brief As operator()(t, sol), but also transfers the vectors in @p also_transfer (states on the same mesh as
+     * @p sol, e.g. a stepper's earlier checkpoints) to the new mesh.
+     *
+     * The default implementation can transfer nothing else: it throws if an adaptation happened and
+     * @p also_transfer is not empty.
+     */
+    virtual bool adapt_at(const double t, VectorType &sol, const std::vector<VectorType *> &also_transfer)
+    {
+      const bool adapted = (*this)(t, sol);
+      if (adapted && !also_transfer.empty())
+        throw std::logic_error("This mesh adaptor cannot transfer additional vectors; implement adapt_at().");
+      return adapted;
+    }
 
     /**
      * @brief Force an adaptation and transfer the solution sol to the new mes

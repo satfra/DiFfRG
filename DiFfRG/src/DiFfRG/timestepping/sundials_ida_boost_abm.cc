@@ -278,14 +278,25 @@ namespace DiFfRG
         eigen_to_dealii(variable_buffer.back(), variable_y);
         return;
       }
-      std::size_t idx = 0;
-      for (std::size_t i = 0; i + 1 < variable_buffer_times.size(); ++i)
-        if (variable_buffer_times[i] <= t && t <= variable_buffer_times[i + 1]) idx = i;
+      // front < t < back, so the first time above t has a predecessor.
+      const std::size_t idx = std::upper_bound(variable_buffer_times.begin(), variable_buffer_times.end(), t) -
+                              variable_buffer_times.begin() - 1;
       const double t_prev = variable_buffer_times[idx];
       const double t_next = variable_buffer_times[idx + 1];
       const double alpha = (t - t_prev) / (t_next - t_prev);
       variable_ret = alpha * variable_buffer[idx + 1] + (1. - alpha) * variable_buffer[idx];
       eigen_to_dealii(variable_ret, variable_y);
+    };
+
+    // Drop the buffered trajectory before t, keeping the last point at or before t and at least two points: once a
+    // frame at t is written, IDA (and with it every query) is past t.
+    auto prune_buffer_before = [&](const double t) {
+      const std::size_t n_le = std::upper_bound(variable_buffer_times.begin(), variable_buffer_times.end(), t) -
+                               variable_buffer_times.begin();
+      const std::size_t n_drop =
+          std::min(n_le > 0 ? n_le - 1 : 0, variable_buffer.size() >= 2 ? variable_buffer.size() - 2 : 0);
+      variable_buffer.erase(variable_buffer.begin(), variable_buffer.begin() + n_drop);
+      variable_buffer_times.erase(variable_buffer_times.begin(), variable_buffer_times.begin() + n_drop);
     };
 
     // Refresh the predictor's cached dv/dt by evaluating the variable residual at the
@@ -681,8 +692,15 @@ namespace DiFfRG
 
     // Tells SUNDIALS to do an internal reset, e.g. if we do local refinement, or if the per-dof tolerances drifted
     time_stepper.solver_should_restart = [&](const double t, VectorType &sol, VectorType &sol_dot) -> bool {
-      if (adaptor(t, sol)) {
-        assembler.reinit_vector(sol_dot);
+      // sol_dot (the starting guess of IDA's consistent-IC solve) and the explicit side's spatial states move to
+      // the new mesh along with sol.
+      std::vector<VectorType *> spatial_states{&sol_dot, &spatial_lo, &spatial_hi, &spatial_pending};
+      for (auto &ckpt : spatial_ckpts)
+        spatial_states.push_back(&ckpt);
+      if (adaptor.adapt_at(t, sol, spatial_states)) {
+        assembler.reinit_vector(spatial_eval);
+        assembler.reinit_vector(residual_placeholder);
+        residual = &residual_placeholder;
         assembler.reinit_matrix(spatial_jacobian);
         for (auto *view : {&y_state, &y_dot_state, &sol_view, &sol_dot_view, &residual_view, &spatial_eval_view})
           assembler.reinit_solution_view(*view);
@@ -722,6 +740,7 @@ namespace DiFfRG
         });
 
         last_save = t;
+        prune_buffer_before(t);
       }
     };
 

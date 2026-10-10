@@ -302,22 +302,6 @@ namespace DiFfRG
                      local_tol.max());
     }
 
-    // Tells SUNDIALS to do an internal reset, e.g. if we do local refinement, or if the per-dof tolerances drifted
-    time_stepper.solver_should_restart = [&](const double t, VectorType &sol, VectorType &sol_dot) -> bool {
-      if (adaptor(t, sol)) {
-        assembler.reinit_vector(sol_dot);
-        assembler.reinit_matrix(jacobian);
-        local_tol.init(sol);
-        return true;
-      }
-      if (local_tol.refresh_needed(sol)) {
-        this->log.info("IDA: per-dof absolute tolerances refreshed at t = {:.5f} ({:.3e} .. {:.3e}), restarting", t,
-                       local_tol.min(), local_tol.max());
-        return true;
-      }
-      return false;
-    };
-
     time_stepper.differential_components = [&]() { return assembler.get_differential_indices(); };
 
     // Called whenever a vector needs to initalized
@@ -341,6 +325,26 @@ namespace DiFfRG
     SolutionView<VectorType> y_state, y_dot_state;
     assembler.reinit_solution_view(y_state);
     assembler.reinit_solution_view(y_dot_state);
+
+    // Tells SUNDIALS to do an internal reset, e.g. if we do local refinement, or if the per-dof tolerances drifted.
+    // On a refinement sol_dot is transferred as well: it is the starting guess of IDA's consistent-IC solve.
+    time_stepper.solver_should_restart = [&](const double t, VectorType &sol, VectorType &sol_dot) -> bool {
+      if (adaptor.adapt_at(t, sol, {&sol_dot})) {
+        assembler.reinit_vector(residual_placeholder);
+        residual = &residual_placeholder;
+        assembler.reinit_matrix(jacobian);
+        for (auto *view : {&sol_view, &sol_dot_view, &residual_view, &y_state, &y_dot_state})
+          assembler.reinit_solution_view(*view);
+        local_tol.init(sol);
+        return true;
+      }
+      if (local_tol.refresh_needed(sol)) {
+        this->log.info("IDA: per-dof absolute tolerances refreshed at t = {:.5f} ({:.3e} .. {:.3e}), restarting", t,
+                       local_tol.min(), local_tol.max());
+        return true;
+      }
+      return false;
+    };
 
     // At output_dt intervals this function saves intermediate solutions
     double last_save = -1.;
@@ -600,7 +604,7 @@ namespace DiFfRG
     linSolver.set_report_port(this->log);
     if constexpr (requires { linSolver.set_iterative_refinement(true); })
       linSolver.set_iterative_refinement(this->impl.iterative_refinement);
-    const uint n_FE_dofs = initial_data.block(0).size();
+    uint n_FE_dofs = initial_data.block(0).size(); // changes with mesh refinement
     const uint n_vars = initial_data.block(1).size();
     FullMatrix<NumberType> variable_jacobian(n_vars);
     FullMatrix<NumberType> variable_jacobian_inverse(n_vars);
@@ -635,16 +639,6 @@ namespace DiFfRG
     BlockVectorType residual_placeholder = initial_data;
     residual_placeholder *= 0.;
     BlockVectorType *residual = &residual_placeholder;
-
-    // Tells SUNDIALS to do an internal reset, e.g. if we do local refinement
-    time_stepper.solver_should_restart = [&](const double t, BlockVectorType &sol, BlockVectorType &sol_dot) -> bool {
-      if (adaptor(t, sol.block(0))) {
-        assembler.reinit_vector(sol_dot.block(0));
-        assembler.reinit_matrix(spatial_jacobian);
-        return true;
-      }
-      return false;
-    };
 
     time_stepper.differential_components = [&]() {
       IndexSet dof_indices = assembler.get_differential_indices();
@@ -687,6 +681,24 @@ namespace DiFfRG
     assembler.reinit_solution_view(y_state);
     assembler.reinit_solution_view(y_dot_state);
     reinit_variables_view(y_vars_state, n_vars, assembler.get_communicator());
+
+    // Tells SUNDIALS to do an internal reset after a mesh refinement; the spatial part of sol_dot is transferred as
+    // well, as the starting guess of IDA's consistent-IC solve.
+    time_stepper.solver_should_restart = [&](const double t, BlockVectorType &sol, BlockVectorType &sol_dot) -> bool {
+      if (adaptor.adapt_at(t, sol.block(0), {&sol_dot.block(0)})) {
+        sol.collect_sizes();
+        sol_dot.collect_sizes();
+        n_FE_dofs = sol.block(0).size();
+        assembler.reinit_vector(residual_placeholder.block(0));
+        residual_placeholder.collect_sizes();
+        residual = &residual_placeholder;
+        assembler.reinit_matrix(spatial_jacobian);
+        for (auto *view : {&sol_view, &sol_dot_view, &residual_view, &y_state, &y_dot_state})
+          assembler.reinit_solution_view(*view);
+        return true;
+      }
+      return false;
+    };
 
     // Scratch for the redundant variables computation; see compute_variables_into.
     VectorType vars_scratch;

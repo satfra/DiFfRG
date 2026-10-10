@@ -10,6 +10,9 @@
 #include <deal.II/numerics/error_estimator.h>
 #include <deal.II/numerics/solution_transfer.h>
 
+// standard library
+#include <vector>
+
 // DiFfRG
 #include <DiFfRG/common/mpi.hh>
 #include <DiFfRG/common/utils.hh>
@@ -54,10 +57,13 @@ namespace DiFfRG
      * @param sol Current solution
      * @return true if adapation has happened, false otherwise
      */
-    virtual bool operator()(const double t, VectorType &sol) override
+    virtual bool operator()(const double t, VectorType &sol) override { return adapt_at(t, sol, {}); }
+
+    /// As operator()(t, sol), also transferring @p also_transfer to the new mesh.
+    virtual bool adapt_at(const double t, VectorType &sol, const std::vector<VectorType *> &also_transfer) override
     {
       if (adapt_level > 0 && t >= adapt_t - 1e-12 * adapt_dt && (t - last_adapt + 1e-12 * adapt_dt) >= adapt_dt) {
-        if (!adapt(sol)) return false;
+        if (!adapt(sol, also_transfer)) return false;
         last_adapt = t;
         return true;
       }
@@ -69,7 +75,10 @@ namespace DiFfRG
 
      * @param solution to be transferred
      */
-    virtual bool adapt(VectorType &solution) override
+    virtual bool adapt(VectorType &solution) override { return adapt(solution, {}); }
+
+    /// As adapt(solution), also transferring @p also_transfer to the new mesh.
+    bool adapt(VectorType &solution, const std::vector<VectorType *> &also_transfer)
     {
       auto &triangulation = discretization.get_triangulation();
       auto &dof_handler = discretization.get_dof_handler(0);
@@ -122,14 +131,21 @@ namespace DiFfRG
       // A copy, not the view itself: reinit_vector() below resizes `solution`, and the serial view
       // aliases its source rather than snapshotting it. SolutionTransfer also has to keep reading
       // this right through execute_coarsening_and_refinement(), which is where the packing happens.
-      VectorType previous_solution = view.get();
+      std::vector<VectorType> previous{view.get()};
+      for (const auto *v : also_transfer) {
+        view.refresh(*v);
+        previous.push_back(view.get());
+      }
       triangulation.prepare_coarsening_and_refinement();
-      solution_trans.prepare_for_coarsening_and_refinement(previous_solution);
+      solution_trans.prepare_for_coarsening_and_refinement(previous);
       triangulation.execute_coarsening_and_refinement();
 
       discretization.reinit();
       assembler.reinit();
-      assembler.reinit_vector(solution);
+      std::vector<VectorType *> targets{&solution};
+      targets.insert(targets.end(), also_transfer.begin(), also_transfer.end());
+      for (auto *v : targets)
+        assembler.reinit_vector(*v);
 
       // The write side needs no distributed handling. SolutionTransfer is built with
       // average_values = false, so interpolate() ends in compress(VectorOperation::insert), and on
@@ -138,8 +154,9 @@ namespace DiFfRG
       // insert the owner keeps. (With average_values = true this would instead be a sum over
       // n_ranks redundant contributions, correct only because the valence is inflated by the same
       // factor, and no longer exact.)
-      solution_trans.interpolate(solution);
-      constraints.distribute(solution);
+      solution_trans.interpolate(targets);
+      for (auto *v : targets)
+        constraints.distribute(*v);
 
       return true;
     }
