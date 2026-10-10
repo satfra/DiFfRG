@@ -75,9 +75,9 @@
  * |--------------------------------------------------|--------|---------|---------|
  * | `/timestepping/output_dt`                        | double | 0.1     | all: output every `output_dt` in \f$t\f$ |
  * | `/timestepping/implicit/dt`                      | double | 1e-4    | initial step of the implicit steppers |
- * | `/timestepping/implicit/minimal_dt`              | double | 1e-8    | smallest step. IDA steppers: bound on IDA's step size (needs DiFfRG's deal.II patch) and time resolution of the stuck check; ImplicitEuler, TRBDF2: below it Newton failures are accepted. |
+ * | `/timestepping/implicit/minimal_dt`              | double | 1e-8    | smallest step. IDA steppers: bound on IDA's step size (needs DiFfRG's deal.II patch) and time resolution of the stuck check; ImplicitEuler, TRBDF2: at it steps are accepted regardless of error estimate and Newton convergence. |
  * | `/timestepping/implicit/maximal_dt`              | double | 1       | largest step (IDA steppers: needs DiFfRG's deal.II patch). |
- * | `/timestepping/implicit/abs_tol`                 | double | 1e-13 (warns) | IDA: local error test; ImplicitEuler, TRBDF2: Newton convergence |
+ * | `/timestepping/implicit/abs_tol`                 | double | 1e-13 (warns) | local error test (all implicit steppers); ImplicitEuler, TRBDF2: also Newton convergence |
  * | `/timestepping/implicit/rel_tol`                 | double | 1e-7 (warns)  | as abs_tol |
  * | `/timestepping/implicit/max_non_linear_iterations` | uint | 10      | IDA steppers: Newton iterations per step |
  * | `/timestepping/implicit/local_tolerance_refresh` | double | 4       | IDA without variables and the IDA hybrids, for models with per-dof tolerances; see LocalAbsTolerances |

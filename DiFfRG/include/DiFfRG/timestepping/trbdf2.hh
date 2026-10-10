@@ -25,16 +25,23 @@ namespace DiFfRG
    *   m(u_\gamma) - m(u_n) + \frac{\gamma\Delta t}{2}\big(R(u_n) + R(u_\gamma)\big) = 0\,,
    * \f]
    * \f[
-   *   (2 - \gamma)\, m(u_{n+1}) - \frac{1}{\gamma}\, m(u_\gamma) + \frac{(1 - \gamma)^2}{\gamma}\, m(u_n)
-   *   + (1 - \gamma)\Delta t\, R(u_{n+1}) = 0\,.
+   *   m(u_{n+1}) - \frac{m(u_\gamma)}{\gamma(2 - \gamma)} + \frac{(1 - \gamma)^2}{\gamma(2 - \gamma)}\, m(u_n)
+   *   + \frac{\gamma}{2}\Delta t\, R(u_{n+1}) = 0\,,
    * \f]
-   * Each stage is solved by Newton's method; the two stages share one Jacobian matrix and linear solver.
+   * using \f$(1-\gamma)/(2-\gamma) = \gamma/2\f$. Both stages thus have the Newton matrix
+   * \f$M + \frac{\gamma}{2}\Delta t\, J\f$, \f$J = \partial R/\partial u\f$, and share one Jacobian and linear solver.
    *
-   * The step size is chosen by a PI controller (TC_PI) from the Newton convergence measures of both stages,
-   * \f$\sqrt{e_\text{TR}^2 + e_\text{BDF2}^2}\f$ (see Newton), not from an estimate of the time discretization
-   * error: /timestepping/implicit/abs_tol and rel_tol set how accurately each step's equation is solved, and the step
-   * grows as long as Newton converges easily. Steps stay in
-   * [implicit/minimal_dt, implicit/maximal_dt]; at minimal_dt a step is accepted even if Newton did not converge.
+   * The step size is chosen by a PI controller (TC_PI) from the local error estimate of Bank et al. (1985),
+   * \f[
+   *   \Big(M + \frac{\gamma}{2}\Delta t\, J\Big)\, e = 2 k \Delta t \Big(-\frac{R(u_n)}{\gamma}
+   *   + \frac{R(u_\gamma)}{\gamma(1-\gamma)} - \frac{R(u_{n+1})}{1-\gamma}\Big)\,, \qquad
+   *   k = \frac{-3\gamma^2 + 4\gamma - 2}{12(2-\gamma)}\,.
+   * \f]
+   * A step is rejected and retried with a smaller \f$\Delta t\f$ if
+   * \f$\sqrt{\frac1N\sum_i (e_i / (\text{atol} + \text{rtol}\,|u_i|))^2} > 1\f$, with atol, rtol =
+   * /timestepping/implicit/abs_tol, rel_tol (which also set Newton's tolerance). Steps stay in
+   * [implicit/minimal_dt, implicit/maximal_dt]; at minimal_dt a step is accepted regardless of the error estimate
+   * and of Newton convergence.
    * A frame is written at the first step past each multiple of output_dt, and at the end.
    *
    * Only the FE part is integrated; a flow with variables throws. Serial only; the mesh adaptor is called
@@ -86,14 +93,15 @@ namespace DiFfRG
 
     /// Jacobians built in the last step, both stages.
     uint get_jacobians();
-    /// Combined Newton convergence measure of the last step, \f$\sqrt{e_\text{TR}^2 + e_\text{BDF2}^2}\f$.
-    double get_error();
+    /// Weighted RMS norm of the local error estimate of the last attempted step (infinite if Newton failed).
+    double get_error() const { return error_estimate; }
     /// Accept steps whose Newton iteration did not converge; see Newton::set_ignore_nonconv.
     void set_ignore_nonconv(bool x);
 
   private:
     std::shared_ptr<Newton<VectorType>> ptr_newton_TR;
     std::shared_ptr<Newton<VectorType>> ptr_newton_BDF2;
+    double error_estimate = 0.;
   };
 
   // ##############################################################################

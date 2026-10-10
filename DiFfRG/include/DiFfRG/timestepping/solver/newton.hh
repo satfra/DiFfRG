@@ -4,6 +4,7 @@
 
 // standard library
 #include <functional>
+#include <limits>
 
 // external libraries
 #include <deal.II/base/config.h>
@@ -19,15 +20,17 @@ namespace DiFfRG
    * The caller sets three callbacks: residual(F, u) computes \f$F(u)\f$, update_jacobian(u) assembles (and e.g.
    * factorizes) \f$J = \partial F/\partial u\f$, lin_solve(du, F) solves \f$J\, du = F\f$. An iteration sets
    * \f$u \to u - du\f$; if that does not reduce \f$\|F\|_2\f$, the step is halved up to `n_stepsize_iterations`
-   * times. Convergence is measured by
+   * times. Convergence is measured by the size of the Newton update,
    * \f[
-   *   E = \sqrt{\frac{1}{N} \sum_{i=1}^N \left(\frac{F_i(u)}{\text{abstol} + \text{reltol}\,\max(|u^0_i|, |u_i|)}
+   *   E = \sqrt{\frac{1}{N} \sum_{i=1}^N \left(\frac{du_i}{\text{abstol} + \text{reltol}\,\max(|u^0_i|, |u_i|)}
    *   \right)^2}\,,
    * \f]
-   * with the initial guess \f$u^0\f$ and \f$N\f$ unknowns; the iteration has converged when \f$E \le 1\f$.
+   * with the initial guess \f$u^0\f$ and \f$N\f$ unknowns; the iteration has converged when \f$E \le 0.1\f$. The
+   * timesteppers pass their local error tolerances, so the remaining Newton error is a tenth of what a step may make.
    *
    * The Jacobian is not rebuilt in the first iteration (the one from the previous call, or from reinit(), is reused);
-   * later iterations rebuild it whenever \f$E_\text{new} / E_\text{old} \ge\f$ `assemble_threshold`.
+   * later iterations rebuild it whenever \f$E_\text{new} / E_\text{old} \ge\f$ `assemble_threshold`, i.e. when
+   * Newton contracts too slowly.
    *
    * @tparam VectorType_ a serial deal.II vector type.
    */
@@ -58,7 +61,7 @@ namespace DiFfRG
     /**
      * @brief Solve \f$F(u) = 0\f$.
      *
-     * Throws if the residual becomes non-finite, a linear solve fails, or \f$E > 1\f$ after `max_steps` iterations
+     * Throws if the residual becomes non-finite, a linear solve fails, or \f$E > 0.1\f$ after `max_steps` iterations
      * (unless set_ignore_nonconv() was set).
      *
      * @param iterate initial guess on entry, solution on return (unchanged if it throws).
@@ -69,7 +72,7 @@ namespace DiFfRG
 
       converged = false;
       step = 0;
-      resnorm = 1.;
+      update_measure = 1.;
       jacobians = 0;
 
       initial_vector = iterate;
@@ -82,8 +85,8 @@ namespace DiFfRG
       // fill res with (f(u), v)
       residual(residual_vector, u);
       if (!std::isfinite(residual_vector.l2_norm())) throw std::runtime_error("Initial residual non-finite!");
-      resnorm = get_EEst();
-      double old_residual = 0.;
+      update_measure = std::numeric_limits<double>::infinity();
+      double old_update_measure = 0.;
       double res_l2 = residual_vector.l2_norm();
       double assembly_time = 0.;
 
@@ -91,7 +94,7 @@ namespace DiFfRG
         step++;
 
         // assemble (Df(u), v)
-        if ((step > 1) && (resnorm / old_residual >= assemble_threshold)) {
+        if ((step > 1) && (update_measure / old_update_measure >= assemble_threshold)) {
           Timer timer_assembly;
           update_jacobian(u);
           assembly_time += timer_assembly.wall_time();
@@ -106,14 +109,14 @@ namespace DiFfRG
         }
 
         u.add(-1., Du);
-        old_residual = resnorm;
+        old_update_measure = update_measure;
         double old_res_l2 = res_l2;
 
         residual(residual_vector, u);
         res_l2 = residual_vector.l2_norm();
         if (!std::isfinite(res_l2)) throw std::runtime_error("Residual non-finite!");
 
-        // Simple line search: use cheap l2_norm comparisons instead of full get_EEst()
+        // Simple line search on the residual norm
         uint step_size = 0;
         while (res_l2 >= old_res_l2) {
           ++step_size;
@@ -125,14 +128,13 @@ namespace DiFfRG
           res_l2 = residual_vector.l2_norm();
         }
 
-        // compute full error estimate once after line search
-        resnorm = get_EEst();
+        update_measure = update_norm();
       }
 
       timings_newton.push_back(timer.wall_time() - assembly_time);
 
       // in case of failure: throw exception
-      if (!(converged || ignore_nonconv) || !std::isfinite(resnorm)) {
+      if (!(converged || ignore_nonconv) || !std::isfinite(update_measure)) {
         throw std::runtime_error("Newton did not converge!");
       }
       // otherwise exit as normal
@@ -172,7 +174,7 @@ namespace DiFfRG
     /// Number of solves so far.
     uint num_newton_calls() const { return timings_newton.size(); }
 
-    /// Accept the last iterate even if \f$E > 1\f$ after `max_steps` iterations. Non-finite residuals still throw.
+    /// Accept the last iterate even if \f$E > 0.1\f$ after `max_steps` iterations. Non-finite residuals still throw.
     void set_ignore_nonconv(bool x) { ignore_nonconv = x; }
 
     /// residual(F, u): write \f$F(u)\f$ into F.
@@ -183,7 +185,7 @@ namespace DiFfRG
     std::function<void(const VectorType &)> update_jacobian;
 
     /// The convergence measure \f$E\f$ after the last solve.
-    double get_error() { return resnorm; }
+    double get_error() { return update_measure; }
 
     /// Number of iterations of the last solve.
     uint get_step() { return step; }
@@ -197,21 +199,22 @@ namespace DiFfRG
     VectorType iterate_vector;
     VectorType Du;
     VectorType eest_tmp;
+    static constexpr double convergence_threshold = 0.1;
     double abstol, reltol, assemble_threshold;
     uint max_steps, n_stepsize_iterations;
 
     bool converged;
     bool ignore_nonconv;
-    double resnorm;
+    double update_measure;
     uint step, jacobians;
 
     std::vector<double> timings_newton;
     ReportPort report_port;
 
-    /// The convergence measure \f$E\f$ at the current iterate.
-    double get_EEst()
+    /// The convergence measure \f$E\f$ of the last update.
+    double update_norm()
     {
-      const VectorType &err = residual_vector;
+      const VectorType &err = Du;
       const VectorType &u_prev = initial_vector;
       const VectorType &u = iterate_vector;
 
@@ -231,7 +234,7 @@ namespace DiFfRG
     {
       if (step == 0) return true;
       // Convergence is tested before the step limit, so that the last allowed step can still converge.
-      converged = get_EEst() <= 1.;
+      converged = update_measure <= convergence_threshold;
       return !converged && step < max_steps;
     }
   };

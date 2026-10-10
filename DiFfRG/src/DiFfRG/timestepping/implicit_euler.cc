@@ -13,7 +13,11 @@
 #include <DiFfRG/timestepping/linear_solver/UMFPack.hh>
 #include <DiFfRG/timestepping/solver/kinsol.hh>
 #include <DiFfRG/timestepping/solver/newton.hh>
+#include <DiFfRG/timestepping/timestep_control/local_error.hh>
 #include <DiFfRG/timestepping/timestep_control/pi.hh>
+#include <limits>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace DiFfRG
@@ -29,11 +33,12 @@ namespace DiFfRG
     VectorType solution = initial_condition.spatial_data();
 
     // newton algorithm
-    Newton<VectorType> newton(impl.abs_tol, impl.rel_tol, 2e-1, 11, 21);
+    ptr_newton = std::make_shared<Newton<VectorType>>(impl.abs_tol, impl.rel_tol, 2e-1, 11, 21);
+    auto &newton = *ptr_newton;
     newton.set_report_port(this->log);
 
     // create time controller instance
-    TC_PI tc(newton, 1, start, stop, impl.dt, impl.minimal_dt, impl.maximal_dt, output_dt);
+    TC_PI tc(*this, 1, start, stop, impl.dt, impl.minimal_dt, impl.maximal_dt, output_dt);
     assembler.set_time(start);
 
     // create jacobian and solver for inverse jacobian
@@ -126,11 +131,37 @@ namespace DiFfRG
           assembler.attach_data_output(frame, solution);
       });
     };
+    // R(u) without the mass term, at the start (R_old) and end (R_new) of a step.
+    VectorType R_old, R_new, error_rhs, error;
+    bool R_old_valid = false;
+    auto evaluate_R = [&](VectorType &R, const VectorType &u, const double t) {
+      assembler.set_time(t);
+      R.reinit(u);
+      assembler.residual(R, u, 1., 0.);
+    };
+
     auto dt_step = [&](double t, double dt) {
+      error_estimate = std::numeric_limits<double>::infinity();
+      if (!R_old_valid) evaluate_R(R_old, old_solution, t);
+      R_old_valid = true;
+
       assembler.set_time(t + dt);
       solution = old_solution;
       newton(solution);
+
+      // Local error of backward Euler, (dt/2)(f_{n+1} - f_n) with M f = -R(u), filtered by (M + dt J)^{-1}.
+      evaluate_R(R_new, solution, t + dt);
+      error_rhs = R_old;
+      error_rhs -= R_new;
+      error_rhs *= dt / 2.;
+      error.reinit(solution);
+      linSolver.solve(error_rhs, error, impl.abs_tol);
+      error_estimate = internal::weighted_rms(error, old_solution, solution, impl.abs_tol, impl.rel_tol);
+      if (error_estimate > 1. && dt > impl.minimal_dt * (1. + 1e-10))
+        throw internal::StepRejected("ImplicitEuler: local error estimate " + std::to_string(error_estimate) + " > 1");
+
       old_solution = solution;
+      std::swap(R_old, R_new);
     };
 
     // the actual time loop
@@ -140,6 +171,7 @@ namespace DiFfRG
         solution = old_solution;
         jacobian.reinit(assembler.get_sparsity_pattern_jacobian());
         newton.reinit(old_solution);
+        R_old_valid = false;
       }
       const double t_before_attempt = tc.get_t();
       const double attempted_h = tc.get_dt();

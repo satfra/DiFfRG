@@ -1,5 +1,8 @@
 #pragma once
 
+// standard library
+#include <memory>
+
 // DiFfRG
 #include <DiFfRG/common/linear_algebra.hh>
 #include <DiFfRG/common/math.hh>
@@ -10,6 +13,7 @@
 #include <DiFfRG/discretization/data/output_session.hh>
 #include <DiFfRG/timestepping/abstract_timestepper.hh>
 #include <DiFfRG/timestepping/default_linear_solver.hh>
+#include <DiFfRG/timestepping/solver/newton.hh>
 
 namespace DiFfRG
 {
@@ -23,10 +27,15 @@ namespace DiFfRG
    * which is \f$M(u_{n+1} - u_n) + \Delta t\, R(u_{n+1}) = 0\f$ for the usual linear mass term (notation of
    * abstract_timestepper.hh). First order in \f$\Delta t\f$.
    *
-   * The step size is chosen by a PI controller (TC_PI) from the Newton convergence measure of the last step (see
-   * Newton), not from an estimate of the time discretization error: /timestepping/implicit/abs_tol and rel_tol set how
-   * accurately each step's equation is solved, and the step grows as long as Newton converges easily. Steps stay in
-   * [implicit/minimal_dt, implicit/maximal_dt]; at minimal_dt a step is accepted even if Newton did not converge.
+   * The step size is chosen by a PI controller (TC_PI) from the local error estimate
+   * \f[
+   *   (M + \Delta t\, J)\, e = \frac{\Delta t}{2}\big(R(u_n) - R(u_{n+1})\big)\,, \qquad J = \partial R/\partial u\,,
+   * \f]
+   * i.e. \f$\frac{\Delta t}{2}(\dot u_{n+1} - \dot u_n)\f$ damped in stiff directions. A step is rejected and retried
+   * with a smaller \f$\Delta t\f$ if \f$\sqrt{\frac1N\sum_i (e_i / (\text{atol} + \text{rtol}\,|u_i|))^2} > 1\f$, with
+   * atol, rtol = /timestepping/implicit/abs_tol, rel_tol (which also set Newton's tolerance). Steps stay in
+   * [implicit/minimal_dt, implicit/maximal_dt]; at minimal_dt a step is accepted regardless of the error estimate
+   * and of Newton convergence.
    * A frame is written at the first step past each multiple of output_dt, and at the end.
    *
    * Only the FE part is integrated; a flow with variables throws. Serial only; the mesh adaptor is called
@@ -75,6 +84,17 @@ namespace DiFfRG
 
     virtual void run_segment(AbstractFlowingVariables<NumberType, VectorType> &initial_condition, const double t_start,
                              const double t_stop) override;
+
+    // The interface TC_PI uses to control the step; valid only during run().
+
+    /// Weighted RMS norm of the local error estimate of the last attempted step (infinite if Newton failed).
+    double get_error() const { return error_estimate; }
+    /// Accept steps whose Newton iteration did not converge; see Newton::set_ignore_nonconv.
+    void set_ignore_nonconv(bool x) { ptr_newton->set_ignore_nonconv(x); }
+
+  private:
+    std::shared_ptr<Newton<VectorType>> ptr_newton;
+    double error_estimate = 0.;
   };
 
   // ##############################################################################

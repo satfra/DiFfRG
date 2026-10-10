@@ -36,6 +36,9 @@ TEST_CASE("Test TRBDF2 with DG exponential model", "[timestepping][exponential][
   using Assembler = DG::Assembler<Discretization>;
   using TimeStepper = TimeStepperTRBDF2<Assembler>;
   REQUIRE(run<Model, Discretization, Assembler, TimeStepper>("test_trbdf2_exponential_dg", 1e-3));
+  // The space discretization is exact here, so this checks that the local error control limits the time error
+  // (the global error accumulates over the steps, hence the per-step tolerance of precision / 100).
+  REQUIRE(run<Model, Discretization, Assembler, TimeStepper>("test_trbdf2_exponential_dg_tight", 1e-6));
 }
 TEST_CASE("Test TRBDF2 with DG Burgers model", "[timestepping][Burgers][trbdf2][dg]")
 {

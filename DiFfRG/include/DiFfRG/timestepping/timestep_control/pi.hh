@@ -17,8 +17,9 @@ namespace DiFfRG
    * \f]
    * where \f$p\f$ is the order of the method, \f$q\f$ is clipped to [0.1, 5] and set to 1 within [0.99, 1.2].
    * \f$E_{n-1}\f$ is floored at \f$10^{-4}\f$. A failed step is retried with at most half the step size. The
-   * coefficients are close to the PI defaults of OrdinaryDiffEq.jl. For the Newton-based steppers \f$E\f$ is Newton's
-   * convergence measure, not a time discretization error estimate; see Newton.
+   * coefficients are close to the PI defaults of OrdinaryDiffEq.jl. For ImplicitEuler and TRBDF2 \f$E\f$ is the
+   * weighted norm of their local error estimate; a step that throws (e.g. rejected with \f$E > 1\f$) is retried with a
+   * smaller step.
    *
    * @tparam NEWT the solver; must provide set_ignore_nonconv(bool) and get_error().
    */
