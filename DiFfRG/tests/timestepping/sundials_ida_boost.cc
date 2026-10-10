@@ -240,13 +240,13 @@ TEST_CASE("Hybrid ABM stepper retains accuracy on smooth problem at ~1 substep p
                                          /*impl_max_dt=*/5e-2));
 }
 
-TEST_CASE("Hybrid ABM cur_dt scan on smooth problem", "[timestepping][sundials_ida_boost][abm][scan]")
+TEST_CASE("Hybrid ABM cur_dt scan on smooth problem", "[timestepping][sundials_ida_boost][abm][.][scan]")
 {
   using Model = Testing::ModelHybridSmooth<1>;
   using TimeStepper = TimeStepperSUNDIALS_IDA_BoostABM<HybridAssembler<Model>>;
   // Sweep cur_dt while holding output_dt and IDA max_dt fixed; the test prints the
   // observed v error so the scaling can be read off the log. We do not REQUIRE pass --
-  // this is a diagnostic scan, not a regression gate.
+  // this is a diagnostic scan, not a regression gate. The scans are hidden ([.]): run them with "[scan]".
   for (double cur_dt : {5e-2, 2.5e-2, 1.25e-2, 6.25e-3, 3.125e-3}) {
     const std::string tag = "test_scan_abm_dt_smooth_" + std::to_string(cur_dt);
     run_hybrid<Model, TimeStepper>(tag, /*tol=*/1e-30, /*cur_dt=*/cur_dt,
@@ -255,7 +255,7 @@ TEST_CASE("Hybrid ABM cur_dt scan on smooth problem", "[timestepping][sundials_i
   }
 }
 
-TEST_CASE("Hybrid ABM cur_dt scan on two-way coupled problem", "[timestepping][sundials_ida_boost][abm][scan]")
+TEST_CASE("Hybrid ABM cur_dt scan on two-way coupled problem", "[timestepping][sundials_ida_boost][abm][.][scan]")
 {
   using Model = Testing::ModelHybridTwoWay<1>;
   using TimeStepper = TimeStepperSUNDIALS_IDA_BoostABM<HybridAssembler<Model>>;
@@ -281,7 +281,7 @@ namespace
 } // namespace
 
 TEST_CASE("Hybrid ABM coupling-mode scan, dt_impl<<dt_expl, two-way",
-          "[timestepping][sundials_ida_boost][abm][scan][modes]")
+          "[timestepping][sundials_ida_boost][abm][.][scan][modes]")
 {
   using Model = Testing::ModelHybridTwoWay<1>;
   using TimeStepper = TimeStepperSUNDIALS_IDA_BoostABM<HybridAssembler<Model>>;
@@ -297,7 +297,7 @@ TEST_CASE("Hybrid ABM coupling-mode scan, dt_impl<<dt_expl, two-way",
 }
 
 TEST_CASE("Hybrid ABM coupling-mode scan, dt_impl<<dt_expl, smooth",
-          "[timestepping][sundials_ida_boost][abm][scan][modes]")
+          "[timestepping][sundials_ida_boost][abm][.][scan][modes]")
 {
   using Model = Testing::ModelHybridSmooth<1>;
   using TimeStepper = TimeStepperSUNDIALS_IDA_BoostABM<HybridAssembler<Model>>;
@@ -317,7 +317,7 @@ TEST_CASE("Hybrid ABM coupling-mode scan, dt_impl<<dt_expl, smooth",
 // harmless here. This isolates how the v-serving choice affects the *implicit* (u)
 // accuracy in the dt_impl<<dt_expl regime, and checks mode 2 specifically.
 TEST_CASE("Hybrid ABM coupling-mode scan, dt_impl<<dt_expl, weak coupling",
-          "[timestepping][sundials_ida_boost][abm][scan][modes]")
+          "[timestepping][sundials_ida_boost][abm][.][scan][modes]")
 {
   using Model = Testing::ModelHybridWeakCoupling<1>;
   using TimeStepper = TimeStepperSUNDIALS_IDA_BoostABM<HybridAssembler<Model>>;
@@ -336,7 +336,7 @@ TEST_CASE("Hybrid ABM coupling-mode scan, dt_impl<<dt_expl, weak coupling",
 // riding on half-step-EXTRAPOLATED coupling should overshoot, while LAG's interpolated
 // coupling stays bounded -- i.e. where LAG can beat STAGGER. Non-gating diagnostic.
 TEST_CASE("Hybrid ABM coupling-mode scan, stiff under-resolved one-way",
-          "[timestepping][sundials_ida_boost][abm][scan][stiff]")
+          "[timestepping][sundials_ida_boost][abm][.][scan][stiff]")
 {
   using Model = Testing::ModelHybridSmooth<1>;
   using TimeStepper = TimeStepperSUNDIALS_IDA_BoostABM<HybridAssembler<Model>>;
