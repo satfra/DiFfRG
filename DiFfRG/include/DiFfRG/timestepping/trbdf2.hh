@@ -38,12 +38,12 @@ namespace DiFfRG
    *   k = \frac{-3\gamma^2 + 4\gamma - 2}{12(2-\gamma)}\,.
    * \f]
    * A step is rejected and retried with a smaller \f$\Delta t\f$ if
-   * \f$\sqrt{\frac1N\sum_i (e_i / (\text{atol} + \text{rtol}\,|u_i|))^2} > 1\f$, with atol, rtol =
+   * \f$\sqrt{\frac1N\sum_i (e_i / (\text{atol} + \text{rtol}\max(|u_{n,i}|, |u_{n+1,i}|)))^2} > 1\f$, with atol, rtol =
    * /timestepping/implicit/abs_tol, rel_tol (which also set Newton's tolerance). Steps stay in
    * [implicit/minimal_dt, implicit/maximal_dt]; at minimal_dt a step is accepted regardless of the error estimate
    * and of Newton convergence.
-   * Frames are written at \f$t_\text{start} + n\,\f$output_dt, interpolated within the step that reaches them
-   * (quadratically through \f$u_n\f$, \f$u_\gamma\f$ and \f$u_{n+1}\f$).
+   * Frames are written at \f$t_\text{start} + n\,\f$output_dt, and at the final time, interpolated within the step that
+   * reaches them (quadratically through \f$u_n\f$, \f$u_\gamma\f$ and \f$u_{n+1}\f$).
    *
    * Only the FE part is integrated; a flow with variables throws. Serial only; the mesh adaptor is called
    * before every step.

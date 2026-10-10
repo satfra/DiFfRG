@@ -456,13 +456,12 @@ TEST_CASE("A stuck timestep controller throws instead of ending early", "[snapsh
     double get_error() const { return 1.; }
     void set_ignore_nonconv(bool) {}
   } solver;
-  TC_PI<FailingSolver> tc(solver, 1, 0., 1., 1e-2, 1e-7, 1e-1, 1e-1);
+  TC_PI<FailingSolver> tc(solver, 1, 0., 1., 1e-2, 1e-7, 1e-1);
   auto never_converges = [](double, double) { throw std::runtime_error("no convergence"); };
-  auto no_output = [](double) {};
   REQUIRE_THROWS_WITH(
       [&]() {
         while (!tc.finished())
-          tc.advance(never_converges, no_output);
+          tc.advance(never_converges);
       }(),
       Catch::Matchers::ContainsSubstring("stuck"));
 }

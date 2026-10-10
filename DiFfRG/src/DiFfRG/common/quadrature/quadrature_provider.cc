@@ -1,3 +1,7 @@
+// standard library
+#include <algorithm>
+#include <cmath>
+
 // DiFfRG
 #include <DiFfRG/common/init.hh>
 #include <DiFfRG/common/mpi.hh>

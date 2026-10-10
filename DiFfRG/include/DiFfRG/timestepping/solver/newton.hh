@@ -29,8 +29,8 @@ namespace DiFfRG
    * timesteppers pass their local error tolerances, so the remaining Newton error is a tenth of what a step may make.
    *
    * The Jacobian is not rebuilt in the first iteration (the one from the previous call, or from reinit(), is reused);
-   * later iterations rebuild it whenever \f$E_\text{new} / E_\text{old} \ge\f$ `assemble_threshold`, i.e. when
-   * Newton contracts too slowly.
+   * later iterations rebuild it whenever the previous one contracted too slowly,
+   * \f$\|F\|_\text{new} / \|F\|_\text{old} \ge\f$ `assemble_threshold`.
    *
    * @tparam VectorType_ a serial deal.II vector type.
    */
@@ -42,7 +42,7 @@ namespace DiFfRG
     /**
      * @param abstol_ absolute tolerance in \f$E\f$.
      * @param reltol_ relative tolerance in \f$E\f$.
-     * @param assemble_threshold_ rebuild the Jacobian if \f$E_\text{new} / E_\text{old} \ge\f$ this.
+     * @param assemble_threshold_ rebuild the Jacobian if an iteration reduced \f$\|F\|_2\f$ by a factor \f$\ge\f$ this.
      * @param max_steps_ maximal number of iterations.
      * @param n_stepsize_iterations_ maximal number of step halvings per iteration.
      */
@@ -72,7 +72,6 @@ namespace DiFfRG
 
       converged = false;
       step = 0;
-      update_measure = 1.;
       jacobians = 0;
 
       initial_vector = iterate;
@@ -86,7 +85,8 @@ namespace DiFfRG
       residual(residual_vector, u);
       if (!std::isfinite(residual_vector.l2_norm())) throw std::runtime_error("Initial residual non-finite!");
       update_measure = std::numeric_limits<double>::infinity();
-      double old_update_measure = 0.;
+      // ||F||_2 after an iteration relative to before it; decides whether the next one rebuilds the Jacobian.
+      double residual_ratio = 0.;
       double res_l2 = residual_vector.l2_norm();
       double assembly_time = 0.;
 
@@ -94,7 +94,7 @@ namespace DiFfRG
         step++;
 
         // assemble (Df(u), v)
-        if ((step > 1) && (update_measure / old_update_measure >= assemble_threshold)) {
+        if ((step > 1) && (residual_ratio >= assemble_threshold)) {
           Timer timer_assembly;
           update_jacobian(u);
           assembly_time += timer_assembly.wall_time();
@@ -109,7 +109,6 @@ namespace DiFfRG
         }
 
         u.add(-1., Du);
-        old_update_measure = update_measure;
         double old_res_l2 = res_l2;
 
         residual(residual_vector, u);
@@ -128,6 +127,7 @@ namespace DiFfRG
           res_l2 = residual_vector.l2_norm();
         }
 
+        residual_ratio = res_l2 / old_res_l2;
         update_measure = update_norm();
       }
 
@@ -143,8 +143,8 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Set `assemble_threshold`: the Jacobian is rebuilt when \f$E_\text{new} / E_\text{old} \ge\f$ this in an
-     * iteration.
+     * @brief Set `assemble_threshold`: the Jacobian is rebuilt when \f$\|F\|_\text{new} / \|F\|_\text{old} \ge\f$ this
+     * in an iteration.
      *
      * @return the previous threshold.
      */
@@ -155,8 +155,6 @@ namespace DiFfRG
       return t;
     }
 
-    /// \f$F\f$ at the last iterate.
-    const VectorType &get_residual() const { return residual_vector; }
     /// The initial guess of the last solve.
     const VectorType &get_initial() const { return initial_vector; }
     /// The last iterate.

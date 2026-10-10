@@ -1046,7 +1046,8 @@ namespace DiFfRG
     w_init = x_hi_init - x_lo_init;
     m_converged = false;
     answer_found = false;
-    if (std::isfinite(seeded_exponent) && seeded_exponent > 0.) model_beta = seeded_exponent;
+    if (std::isfinite(seeded_exponent) && seeded_exponent >= beta_min && seeded_exponent <= beta_max)
+      model_beta = seeded_exponent;
 
     for (iter = 0; iter < max_iter; ++iter) {
       const double x = propose();

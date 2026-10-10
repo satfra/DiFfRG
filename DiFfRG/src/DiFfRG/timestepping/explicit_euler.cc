@@ -70,6 +70,10 @@ namespace DiFfRG
     }
 
     // After the swap at the end of the loop body, old_solution holds the state at t.
+    output_grid.finish(stop, [&](const double t_end) {
+      assembler.set_time(t_end);
+      data_out.write_frame(t_end, [&](auto &frame) { assembler.attach_data_output(frame, old_solution); });
+    });
     initial_condition.spatial_data() = old_solution;
     this->drain_output();
   }

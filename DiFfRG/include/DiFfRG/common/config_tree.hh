@@ -17,8 +17,8 @@
  * empty key `""` is the whole tree. A `/` or `~` inside a key name is written as `~1` or `~0`.
  *
  * ### Reading parameters
- * Every getter comes in three forms. They differ in what happens when the key is missing, or present but
- * not readable as the requested type (e.g. a string where a number is expected):
+ * Every getter comes in three forms. They differ in what happens when the key is missing; a present entry that is
+ * not readable as the requested type (e.g. a string where a number is expected) always throws:
  *
  * | Form                          | missing key                   | unreadable value              |
  * |-------------------------------|-------------------------------|-------------------------------|

@@ -39,7 +39,7 @@ namespace DiFfRG
     newton.set_report_port(this->log);
 
     // create time controller instance
-    TC_PI tc(*this, 1, start, stop, impl.dt, impl.minimal_dt, impl.maximal_dt, output_dt);
+    TC_PI tc(*this, 1, start, stop, impl.dt, impl.minimal_dt, impl.maximal_dt);
     assembler.set_time(start);
 
     // create jacobian and solver for inverse jacobian
@@ -146,13 +146,15 @@ namespace DiFfRG
       solution = old_solution;
       newton(solution);
 
-      // Local error of backward Euler, (dt/2)(f_{n+1} - f_n) with M f = -R(u), filtered by (M + dt J)^{-1}.
+      // Local error of backward Euler, (dt/2)(f_{n+1} - f_n) with M f = -R(u), filtered by (M + dt J)^{-1}, i.e. by
+      // the Newton matrix last factorized (possibly at an earlier dt; it only damps stiff components).
       evaluate_R(R_new, solution, t + dt);
       error_rhs = R_old;
       error_rhs -= R_new;
       error_rhs *= dt / 2.;
       error.reinit(solution);
-      linSolver.solve(error_rhs, error, impl.abs_tol);
+      // The estimate needs only a few digits.
+      linSolver.solve(error_rhs, error, std::max(impl.abs_tol, 1e-3 * error_rhs.l2_norm()));
       error_estimate = internal::weighted_rms(error, old_solution, solution, impl.abs_tol, impl.rel_tol);
       if (error_estimate > 1. && dt > impl.minimal_dt * (1. + 1e-10))
         throw internal::StepRejected("ImplicitEuler: local error estimate " + std::to_string(error_estimate) + " > 1");
@@ -170,7 +172,6 @@ namespace DiFfRG
 
     // the actual time loop
     save_data(start, old_solution);
-    const auto no_controller_output = [](double) {};
     while (!tc.finished()) {
       if (adaptor(tc.get_t(), old_solution)) {
         solution = old_solution;
@@ -180,9 +181,10 @@ namespace DiFfRG
       }
       const double t_before_attempt = tc.get_t();
       const double attempted_h = tc.get_dt();
-      tc.advance(dt_step, no_controller_output);
+      tc.advance(dt_step);
       this->jacobian_diagnostics_state.finish_attempt(tc.get_t() > t_before_attempt, attempted_h);
     }
+    output_grid.finish(stop, [&](const double t) { save_data(t, old_solution); });
 
     initial_condition.spatial_data() = solution;
     this->drain_output();

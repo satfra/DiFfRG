@@ -27,9 +27,8 @@ namespace DiFfRG
   {
   public:
     using Base = TC_Default<NEWT>;
-    TC_PI(NEWT &newton_, unsigned int alg_order_, double t_, double max_t_, double dt_, double min_dt_, double max_dt_,
-          double output_dt_)
-        : Base(newton_, alg_order_, t_, max_t_, dt_, min_dt_, max_dt_, output_dt_)
+    TC_PI(NEWT &newton_, unsigned int alg_order_, double t_, double max_t_, double dt_, double min_dt_, double max_dt_)
+        : Base(newton_, alg_order_, t_, max_t_, dt_, min_dt_, max_dt_)
     {
       // Close to the PI defaults of OrdinaryDiffEq.jl, with a dead band [qsteady_min, qsteady_max] in which the
       // step size is kept.
@@ -74,7 +73,7 @@ namespace DiFfRG
      * @brief On a fail, decrease the timestep by at least a factor of 2 relative to the failed step.
      *
      * The error estimate alone cannot guarantee that: a failure need not come with EEst > 1, and the failed step may
-     * have been clipped below sug_dt (to hit max_t or an output time), so scaling sug_dt could retry the same step.
+     * have been clipped below sug_dt (to hit max_t), so scaling sug_dt could retry the same step.
      */
     virtual void step_fail(const std::exception &) override
     {

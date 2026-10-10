@@ -32,12 +32,11 @@ namespace DiFfRG
    *   (M + \Delta t\, J)\, e = \frac{\Delta t}{2}\big(R(u_n) - R(u_{n+1})\big)\,, \qquad J = \partial R/\partial u\,,
    * \f]
    * i.e. \f$\frac{\Delta t}{2}(\dot u_{n+1} - \dot u_n)\f$ damped in stiff directions. A step is rejected and retried
-   * with a smaller \f$\Delta t\f$ if \f$\sqrt{\frac1N\sum_i (e_i / (\text{atol} + \text{rtol}\,|u_i|))^2} > 1\f$, with
-   * atol, rtol = /timestepping/implicit/abs_tol, rel_tol (which also set Newton's tolerance). Steps stay in
-   * [implicit/minimal_dt, implicit/maximal_dt]; at minimal_dt a step is accepted regardless of the error estimate
-   * and of Newton convergence.
-   * Frames are written at \f$t_\text{start} + n\,\f$output_dt, interpolated within the step that reaches them
-   * (linearly).
+   * with a smaller \f$\Delta t\f$ if \f$\sqrt{\frac1N\sum_i (e_i / (\text{atol} + \text{rtol}\max(|u_{n,i}|,
+   * |u_{n+1,i}|)))^2} > 1\f$, with atol, rtol = /timestepping/implicit/abs_tol, rel_tol (which also set Newton's
+   * tolerance). Steps stay in [implicit/minimal_dt, implicit/maximal_dt]; at minimal_dt a step is accepted regardless
+   * of the error estimate and of Newton convergence. Frames are written at \f$t_\text{start} + n\,\f$output_dt, and at
+   * the final time, interpolated within the step that reaches them (linearly).
    *
    * Only the FE part is integrated; a flow with variables throws. Serial only; the mesh adaptor is called
    * before every step.

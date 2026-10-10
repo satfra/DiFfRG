@@ -152,11 +152,8 @@ namespace DiFfRG
      * @brief Read an integer regardless of which arm boost::json stored it in.
      *
      * boost::json keeps a signed C++ integer as int64 and an unsigned one as uint64, and
-     * `as_int64()` throws on the uint64 arm. A config parsed from a file therefore reads fine
-     * while the same config built in C++ from an `unsigned` does not -- which made get_uint, the
-     * accessor that exists precisely for unsigned values, unable to read them. The failure is
-     * quiet where it matters: get_uint(key, def) catches the exception and falls back to its
-     * default, so a caller silently gets the default value instead of the one it set.
+     * `as_int64()` throws on the uint64 arm, so a config built in C++ from an `unsigned` could not
+     * be read by the integer getters.
      */
     std::int64_t as_int64_relaxed(const boost::json::value &v)
     {

@@ -22,7 +22,7 @@ namespace
   using Discretization = DG::Discretization<Model, RectangularMeshSerial<dim>>;
   using Assembler = DG::Assembler<Discretization>;
 
-  ConfigTree make_config()
+  ConfigTree make_config(const double final_time)
   {
     return json::value(
         {{"physical", {{"Lambda", 1.}}},
@@ -40,7 +40,7 @@ namespace
              {"refine_percent", 1e-1},
              {"coarsen_percent", 0.}}}}},
          {"timestepping",
-          {{"final_time", 0.3},
+          {{"final_time", final_time},
            {"output_dt", 0.1},
            {"explicit",
             {{"dt", 7e-3}, {"minimal_dt", 1e-7}, {"maximal_dt", 1e-2}, {"abs_tol", 1e-8}, {"rel_tol", 1e-8}}},
@@ -49,9 +49,10 @@ namespace
          {"output", {{"verbosity", 0}, {"vtk", false}}}});
   }
 
-  template <template <typename> typename TimeStepperFor> std::vector<double> frame_times(const std::string &name)
+  template <template <typename> typename TimeStepperFor>
+  std::vector<double> frame_times(const std::string &name, const double final_time)
   {
-    const auto config = make_config();
+    const auto config = make_config(final_time);
     const auto path = OutputPath::temporary(TemporaryRetention::remove_on_destruction, name, name);
     {
       Testing::PhysicalParameters p_prm{};
@@ -78,10 +79,15 @@ namespace
 
   template <template <typename> typename TimeStepperFor> void require_frames_on_grid(const std::string &name)
   {
-    const auto times = frame_times<TimeStepperFor>(name);
+    const auto times = frame_times<TimeStepperFor>(name, 0.3);
     REQUIRE(times.size() == 4);
     for (unsigned i = 0; i < times.size(); ++i)
       REQUIRE_THAT(times[i], Catch::Matchers::WithinAbs(0.1 * i, 1e-12));
+
+    // A final time off the grid gets a frame of its own.
+    const auto off_grid = frame_times<TimeStepperFor>(name + "_off", 0.35);
+    REQUIRE(off_grid.size() == 5);
+    REQUIRE_THAT(off_grid.back(), Catch::Matchers::WithinAbs(0.35, 1e-12));
   }
 
   template <typename Assembler> using ImplicitEuler = TimeStepperImplicitEuler<Assembler>;

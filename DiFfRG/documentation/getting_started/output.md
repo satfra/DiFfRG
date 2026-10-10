@@ -65,12 +65,11 @@ names and schemas remain unchanged.
 
 `CsvOutput` writes one header row and then one row per output step, comma-separated, with numbers in
 scientific notation. `DiFfRG/common/csv.hh` defines the same format for reading it back, and the
-Julia (`julia/src/io/csv.jl`) and Python (`DiFfRG.file_io.csv`) helpers follow it too, so a file a
-run wrote loads identically in all three languages:
+Python helper (`DiFfRG.file_io.csv`) follows it too, so a file a run wrote loads identically in both:
 
 - `#` comment lines and blank lines are skipped.
-- A cell that is not a finite number reads back as `NaN` rather than raising, so a run that wrote an
-  inf or left a gap still loads and the gap stays visible in the data.
+- An empty or non-numeric cell reads back as `NaN` rather than raising, so a gap stays visible in the
+  data; `inf` and `-inf` read back as infinities.
 - Rows whose field count does not match the header are skipped.
 - Column names may be quoted, which is the only way a name can contain the separator. Names written
   by `CsvOutput` pass through `strip_name` and so never need it.
@@ -113,8 +112,8 @@ for other steppers. `current_h` is the attempted step size and `last_h` is the p
 `beta` are the mass-Jacobian weights from the
 assembler interface, while `residual_weight` is the residual-Jacobian weight. For implicit Euler these are
 `alpha=beta=1` and `residual_weight=h`. For TRBDF2, the TR stage uses `alpha=beta=1` and
-`residual_weight=gamma*h/2`; the BDF2 stage uses `alpha=beta=2-gamma` and
-`residual_weight=(1-gamma)*h`, where `gamma=2-sqrt(2)`.
+`residual_weight=gamma*h/2`, and so does the BDF2 stage, which is scaled to share the TR stage's Jacobian
+(`gamma=2-sqrt(2)`).
 
 Each record also contains matrix dimensions, actual nonzero count, entry and matrix norms, diagonal and row/column
 scale measures, and factorization diagnostics. `min_diagonal_dominance` is the minimum of

@@ -58,7 +58,7 @@ namespace DiFfRG
     newton_BDF2.set_report_port(this->log);
 
     // create time controller instance
-    TC_PI tc(*this, 2, start, stop, impl.dt, impl.minimal_dt, impl.maximal_dt, output_dt);
+    TC_PI tc(*this, 2, start, stop, impl.dt, impl.minimal_dt, impl.maximal_dt);
     assembler.set_time(start);
 
     // shared jacobian matrix and linear solver (TR and BDF2 stages are sequential, never simultaneous)
@@ -205,7 +205,7 @@ namespace DiFfRG
     // Local error estimate of Bank et al. (1985): with f = -M^{-1} R,
     //   M e = 2 k dt (f_n / gamma - f_gamma / (gamma (1 - gamma)) + f_np1 / (1 - gamma)),
     //   k = (-3 gamma^2 + 4 gamma - 2) / (12 (2 - gamma)),
-    // filtered by the stage matrix (M + gamma dt J / 2)^{-1}.
+    // filtered by the stage matrix (M + gamma dt J / 2)^{-1}, as last factorized by Newton.
     const double k_err = (-3. * gamma * gamma + 4. * gamma - 2.) / (12. * (2. - gamma));
 
     auto dt_step = [&](double t, double dt) {
@@ -225,7 +225,8 @@ namespace DiFfRG
       error_rhs.add(-1. / (1. - gamma), R_np1);
       error_rhs *= 2. * k_err * dt;
       error.reinit(u_n);
-      linSolver.solve(error_rhs, error, impl.abs_tol);
+      // The estimate needs only a few digits.
+      linSolver.solve(error_rhs, error, std::max(impl.abs_tol, 1e-3 * error_rhs.l2_norm()));
       error_estimate = internal::weighted_rms(error, u_n, u_np1, impl.abs_tol, impl.rel_tol);
       if (error_estimate > 1. && dt > impl.minimal_dt * (1. + 1e-10))
         throw internal::StepRejected("TRBDF2: local error estimate " + std::to_string(error_estimate) + " > 1");
@@ -248,7 +249,6 @@ namespace DiFfRG
 
     // the actual time loop
     save_data(start, u_n);
-    const auto no_controller_output = [](double) {};
     while (!tc.finished()) {
       if (adaptor(tc.get_t(), u_n)) {
         u_np1 = u_n;
@@ -261,9 +261,10 @@ namespace DiFfRG
       this->log.progress({.topic = progress_topics::timestep, .time = tc.get_t(), .minimum_verbosity = 1});
       const double t_before_attempt = tc.get_t();
       const double attempted_h = tc.get_dt();
-      tc.advance(dt_step, no_controller_output);
+      tc.advance(dt_step);
       this->jacobian_diagnostics_state.finish_attempt(tc.get_t() > t_before_attempt, attempted_h);
     }
+    output_grid.finish(stop, [&](const double t) { save_data(t, u_n); });
 
     initial_condition.spatial_data() = u_n;
     this->drain_output();

@@ -461,14 +461,13 @@ This is a DiFfRG simulation. You can pass the following optional parameters to t
     const std::string file_name = std::filesystem::path(parameter_file)
                                       .replace_extension(format == GeneratedFormat::json ? ".json" : ".toml")
                                       .string();
-    // Every rank looks before rank 0 writes, so that no rank mistakes the new file for an old one.
-    if (MPI::any_of(MPI_COMM_WORLD, std::filesystem::exists(file_name))) {
-      if (MPI::rank(MPI_COMM_WORLD) == 0)
-        std::cerr << "The parameter file '" << file_name
-                  << "' already exists and is not replaced. Remove it, or name another file with -p." << std::endl;
+    // Only rank 0 checks and writes, without any collective: the other ranks just exit.
+    if (MPI::rank(MPI_COMM_WORLD) != 0) return;
+    if (std::filesystem::exists(file_name)) {
+      std::cerr << "The parameter file '" << file_name
+                << "' already exists and is not replaced. Remove it, or name another file with -p." << std::endl;
       exit(1);
     }
-    if (MPI::rank(MPI_COMM_WORLD) != 0) return;
 
     const auto temporary = file_name + ".tmp";
     {

@@ -438,9 +438,8 @@ namespace DiFfRG
       // it -- e.g. to find where the flow diverged. Drain here, once for every stepper: this pushes
       // rank 0's pending frames to disk (its async writer must not race a reader in the same
       // process; HDF5 is not thread safe in this build) and holds the other ranks until it has.
-      // No extra frame is written: the steppers output every accepted step already, and the state
-      // at the failure is often non-finite. The barrier assumes the failure is collective, which
-      // flow-driven failures are, since every rank computes a bitwise identical flow.
+      // No extra frame is written: the state at the failure is often non-finite. The barrier assumes the failure is
+      // collective, which flow-driven failures are, since every rank computes a bitwise identical flow.
       try {
         double t = t_start;
         for (const double t_snapshot : snapshot_times) {
