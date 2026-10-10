@@ -369,7 +369,8 @@ namespace DiFfRG
     };
 
     //  Calculate the residual of y_dot + F(y)
-    time_stepper.residual = [&](const double t, const VectorType &y, const VectorType &y_dot, VectorType &res) -> int {
+    time_stepper.residual = internal::throw_on_ida_failure([&](const double t, const VectorType &y,
+                                                               const VectorType &y_dot, VectorType &res) -> int {
       CalcDtTimer calc_timer;
       if (is_close(t, stuck_t))
         stuck++;
@@ -405,13 +406,21 @@ namespace DiFfRG
         return agreed_ida_result(assembler.get_communicator(), true);
       }
 
-      assembler.set_time(t);
+      try {
+        assembler.set_time(t);
 
-      res = 0;
-      y_state.refresh(y);
-      y_dot_state.refresh(y_dot);
-      assembler.residual(res, y_state.get(), 1., y_dot_state.get(), 1.);
-      residual = &res;
+        res = 0;
+        y_state.refresh(y);
+        y_dot_state.refresh(y_dot);
+        assembler.residual(res, y_state.get(), 1., y_dot_state.get(), 1.);
+        residual = &res;
+      } catch (std::exception &e) {
+        callback_diagnostics.residual_exceptions++;
+        ++failure_counter;
+        callback_trace.record("residual", t, failure_counter, time_stepper, callback_diagnostics, "exception", &y,
+                              &y_dot, &res, e.what());
+        return agreed_ida_result(assembler.get_communicator(), true);
+      }
 
       if (!std::isfinite(res.l1_norm())) {
         callback_diagnostics.nonfinite_residual_failures++;
@@ -432,10 +441,11 @@ namespace DiFfRG
 
       failure_counter = 0;
       return agreed_ida_result(assembler.get_communicator(), false);
-    };
+    });
     // Calculate the jacobian d(y_dot + F(y))/dy + d(y_dot*alpha)/dy_dot
-    time_stepper.setup_jacobian = [&](const double t, const VectorType &y, const VectorType &y_dot,
-                                      const double alpha) -> int {
+    time_stepper.setup_jacobian = internal::throw_on_ida_failure([&](const double t, const VectorType &y,
+                                                                     const VectorType &y_dot,
+                                                                     const double alpha) -> int {
       CalcDtTimer calc_timer;
       if (failure_counter > 200) throw std::runtime_error("timestep failure at jacobian");
 
@@ -513,10 +523,11 @@ namespace DiFfRG
                             nullptr);
       failure_counter = 0;
       return agreed_ida_result(assembler.get_communicator(), false);
-    };
+    });
 
     // Solve the linear system J dst = src
-    time_stepper.solve_with_jacobian = [&](const VectorType &src, VectorType &dst, const double tol) -> int {
+    time_stepper.solve_with_jacobian = internal::throw_on_ida_failure([&](const VectorType &src, VectorType &dst,
+                                                                          const double tol) -> int {
       CalcDtTimer calc_timer;
       try {
         if (!is_finite_vector(src)) {
@@ -554,7 +565,7 @@ namespace DiFfRG
       callback_trace.record("linear-solve", stuck_t, failure_counter, time_stepper, callback_diagnostics, "success",
                             &src, &dst, nullptr);
       return agreed_ida_result(assembler.get_communicator(), false);
-    };
+    });
 
     // Start the time loop
     try {
@@ -576,10 +587,10 @@ namespace DiFfRG
                                                                                           const double t_stop)
   {
     if (initial_data.n_blocks() != 2)
-      throw std::runtime_error("TimeStepperSUNDIALS_ARKode_vars::run: y must have two blocks!");
+      throw std::runtime_error("TimeStepperSUNDIALS_IDA_impl::run: y must have two blocks!");
     if (initial_data.block(1).size() == 0)
       throw std::runtime_error(
-          "TimeStepperSUNDIALS_ARKode_vars::run: y contains no variables, use a different timestepper!");
+          "TimeStepperSUNDIALS_IDA_impl::run: y contains no variables, use a different timestepper!");
     // Start by setting up all needed matrices, i.e. jacobian, inverse of jacobian and the mass matrix (with two
     // sparsity patterns)
     SparseMatrixType spatial_jacobian;
@@ -705,8 +716,9 @@ namespace DiFfRG
     };
 
     //  Calculate the residual of y_dot + F(y)
-    time_stepper.residual = [&](const double t, const BlockVectorType &y, const BlockVectorType &y_dot,
-                                BlockVectorType &res) -> int {
+    time_stepper.residual = internal::throw_on_ida_failure([&](const double t, const BlockVectorType &y,
+                                                               const BlockVectorType &y_dot,
+                                                               BlockVectorType &res) -> int {
       CalcDtTimer calc_timer;
       if (is_close(t, stuck_t, impl.minimal_dt))
         stuck++;
@@ -778,10 +790,11 @@ namespace DiFfRG
 
       failure_counter = 0;
       return agreed_ida_result(assembler.get_communicator(), false);
-    };
+    });
     // Calculate the jacobian d(y_dot + F(y))/dy + d(y_dot*alpha)/dy_dot
-    time_stepper.setup_jacobian = [&](const double t, const BlockVectorType &y, const BlockVectorType &y_dot,
-                                      const double alpha) -> int {
+    time_stepper.setup_jacobian = internal::throw_on_ida_failure([&](const double t, const BlockVectorType &y,
+                                                                     const BlockVectorType &y_dot,
+                                                                     const double alpha) -> int {
       CalcDtTimer calc_timer;
       if (failure_counter > 200) throw std::runtime_error("timestep failure at jacobian");
 
@@ -823,7 +836,6 @@ namespace DiFfRG
         y_vars_state.refresh(y.block(1));
         assembler.jacobian(spatial_jacobian, y_state.get(), 1., y_dot_state.get(), alpha, 1., y_vars_state.get());
         assembler.jacobian_variables(variable_jacobian, y_vars_state.get(), y_state.get());
-        variable_jacobian *= -1.;
         variable_jacobian.diagadd(alpha);
         if (jacobian_diagnostics_enabled) {
           spatial_matrix_diagnostics = analyze_jacobian_matrix(spatial_jacobian);
@@ -892,10 +904,12 @@ namespace DiFfRG
                             nullptr);
       failure_counter = 0;
       return agreed_ida_result(assembler.get_communicator(), false);
-    };
+    });
 
     // Solve the linear system J dst = src
-    time_stepper.solve_with_jacobian = [&](const BlockVectorType &src, BlockVectorType &dst, const double tol) -> int {
+    time_stepper.solve_with_jacobian = internal::throw_on_ida_failure([&](const BlockVectorType &src,
+                                                                          BlockVectorType &dst,
+                                                                          const double tol) -> int {
       CalcDtTimer calc_timer;
       try {
         if (!is_finite_vector(src)) {
@@ -934,7 +948,7 @@ namespace DiFfRG
       callback_trace.record("linear-solve", stuck_t, failure_counter, time_stepper, callback_diagnostics, "success",
                             &src, &dst, nullptr);
       return agreed_ida_result(assembler.get_communicator(), false);
-    };
+    });
 
     // Start the time loop
     try {
@@ -1017,7 +1031,8 @@ namespace DiFfRG
     };
 
     //  Calculate the residual of y_dot + F(y)
-    time_stepper.residual = [&](const double t, const VectorType &y, const VectorType &y_dot, VectorType &res) -> int {
+    time_stepper.residual = internal::throw_on_ida_failure([&](const double t, const VectorType &y,
+                                                               const VectorType &y_dot, VectorType &res) -> int {
       CalcDtTimer calc_timer;
       if (is_close(t, stuck_t, impl.minimal_dt))
         stuck++;
@@ -1082,10 +1097,11 @@ namespace DiFfRG
 
       failure_counter = 0;
       return agreed_ida_result(assembler.get_communicator(), false);
-    };
+    });
     // Calculate the jacobian d(y_dot + F(y))/dy + d(y_dot*alpha)/dy_dot
-    time_stepper.setup_jacobian = [&](const double t, const VectorType &y, const VectorType &y_dot,
-                                      const double alpha) -> int {
+    time_stepper.setup_jacobian = internal::throw_on_ida_failure([&](const double t, const VectorType &y,
+                                                                     const VectorType &y_dot,
+                                                                     const double alpha) -> int {
       CalcDtTimer calc_timer;
       if (failure_counter > 200) throw std::runtime_error("timestep failure at jacobian");
 
@@ -1116,7 +1132,6 @@ namespace DiFfRG
         variable_jacobian = 0;
         assembler.set_time(t);
         assembler.jacobian_variables(variable_jacobian, y, VectorType());
-        variable_jacobian *= -1.;
         variable_jacobian.diagadd(alpha);
         if (jacobian_diagnostics_enabled) matrix_diagnostics = analyze_jacobian_matrix(variable_jacobian);
 
@@ -1164,10 +1179,11 @@ namespace DiFfRG
 
       failure_counter = 0;
       return agreed_ida_result(assembler.get_communicator(), false);
-    };
+    });
 
     // Solve the linear system J dst = src
-    time_stepper.solve_with_jacobian = [&](const VectorType &src, VectorType &dst, const double) -> int {
+    time_stepper.solve_with_jacobian = internal::throw_on_ida_failure([&](const VectorType &src, VectorType &dst,
+                                                                          const double) -> int {
       try {
         if (!is_finite_vector(src)) {
           callback_diagnostics.linear_solver_failures++;
@@ -1195,7 +1211,7 @@ namespace DiFfRG
       callback_trace.record("linear-solve", stuck_t, failure_counter, time_stepper, callback_diagnostics, "success",
                             &src, &dst, nullptr);
       return agreed_ida_result(assembler.get_communicator(), false);
-    };
+    });
 
     // Start the time loop
     try {

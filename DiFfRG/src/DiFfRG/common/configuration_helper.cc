@@ -375,7 +375,7 @@ This is a DiFfRG simulation. You can pass the following optional parameters to t
            {"cos2_order", 8},
            {"phi_order", 8},
            {"x_extent_tolerance", 1e-5},
-           {"jacobian_quadrature_factor", 0.5},
+           {"jacobian_quadrature_factor", 0.8},
            {"vacuum_quad_size", 64},
            {"matsubara_precision_factor", 1},
            {"min_matsubara_size", 8},
@@ -384,7 +384,7 @@ This is a DiFfRG simulation. You can pass the following optional parameters to t
           {{"fe_order", 3},
            {"threads", 0},
            {"overintegration", 0},
-           {"output_subdivisions", 2},
+           {"output_subdivisions", 1},
 
            {"EoM_abs_tol", Config::EoMConfig::default_abs_tol},
            {"EoM_max_iter", Config::EoMConfig::default_max_iter},
@@ -409,19 +409,19 @@ This is a DiFfRG simulation. You can pass the following optional parameters to t
            {"output_dt", 1e-1},
            {"explicit",
             {{"dt", 1e-2},
-             {"minimal_dt", 1e-6},
-             {"maximal_dt", 1e-1},
-             {"abs_tol", 1e-4},
-             {"rel_tol", 1e-4},
+             {"minimal_dt", 1e-16},
+             {"maximal_dt", 1e16},
+             {"abs_tol", 1e-3},
+             {"rel_tol", 1e-3},
              {"coupling_mode", 1}}},
            {"implicit",
             {{"dt", 1e-4},
-             {"minimal_dt", 1e-6},
-             {"maximal_dt", 1e-1},
+             {"minimal_dt", 1e-8},
+             {"maximal_dt", 1.},
              {"abs_tol", 1e-13},
              {"rel_tol", 1e-7},
              {"max_steps", 1000000}}}}},
-         {"output", {{"verbosity", 0}, {"folder", "output/"}, {"name", "output"}, {"max_pending_frames", 2}}}});
+         {"output", {{"verbosity", 0}, {"folder", "./"}, {"name", "output"}, {"max_pending_frames", 2}}}});
 
     const auto temporary = parameter_file + ".tmp";
     {

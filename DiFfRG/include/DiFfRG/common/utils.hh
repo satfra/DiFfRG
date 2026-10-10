@@ -67,7 +67,8 @@ namespace DiFfRG
   template <typename T> std::string to_string_with_digits(const T number, const int digits)
   {
     if (digits <= 0) throw std::runtime_error("to_string_with_digits: digits must be > 0");
-    const int d = int(std::ceil(std::log10(number < 0 ? -number : number)));
+    // Number of digits before the decimal point (zero or negative for |number| < 1).
+    const int d = number == 0 ? 1 : int(std::floor(std::log10(number < 0 ? -number : number))) + 1;
     std::stringstream stream;
     stream << std::fixed << std::setprecision(std::max(digits - d, 0)) << number;
     return stream.str();

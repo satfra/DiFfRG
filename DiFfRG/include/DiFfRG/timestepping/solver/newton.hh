@@ -222,7 +222,7 @@ namespace DiFfRG
       if (step == 0) return true;
       // Convergence is tested before the step limit, so that the last allowed step can still converge.
       converged = get_EEst() <= 1.;
-      return !converged && step <= max_steps;
+      return !converged && step < max_steps;
     }
   };
 } // namespace DiFfRG

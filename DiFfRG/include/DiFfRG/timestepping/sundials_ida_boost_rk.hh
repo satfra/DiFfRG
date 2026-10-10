@@ -59,7 +59,6 @@ namespace DiFfRG
 
   private:
     void run(BlockVectorType &initial_data, const double t_start, const double t_stop);
-    void update_variables(VectorType &variable_y, const VectorType &spatial_y, const double t);
   };
 
   // ##############################################################################

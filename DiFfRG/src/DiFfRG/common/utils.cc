@@ -25,7 +25,7 @@ namespace DiFfRG
     return f.good();
   }
 
-  std::string make_folder(const std::string &path) { return path.back() != '/' ? path + '/' : path; }
+  std::string make_folder(const std::string &path) { return path.empty() || path.back() != '/' ? path + '/' : path; }
 
   bool create_folder(const std::string &path_)
   {

@@ -1,6 +1,7 @@
 #pragma once
 
 // standard library
+#include <memory>
 #include <vector>
 
 // external libraries
@@ -47,15 +48,6 @@ namespace DiFfRG
       Barycentric();
 
       /**
-       * @brief Check whether the interpolator is consistent with the original data.
-       * The interpolator checks if it can reproduce the original data with a given relative precision.
-       *
-       * @param tolerance The relative precision to use.
-       * @return true If the interpolator is consistent with the original data.
-       */
-      bool check_consistency(double tolerance) const;
-
-      /**
        * @brief Interpolate the data to a given x.
        *
        * @param x The x to interpolate to.
@@ -93,6 +85,9 @@ namespace DiFfRG
       CubicSpline(const std::vector<double> &x, const std::vector<double> &y);
 
       ~CubicSpline();
+
+      CubicSpline(const CubicSpline &) = delete;
+      CubicSpline &operator=(const CubicSpline &) = delete;
 
       double operator()(double x) const;
 

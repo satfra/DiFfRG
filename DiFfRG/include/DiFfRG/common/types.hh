@@ -21,12 +21,6 @@ namespace DiFfRG
   template <typename T>
   concept is_container = requires(T x) { x[0]; };
 
-  template <size_t N, typename T>
-  concept is_sized_container = requires(T x) {
-    x[0];
-    requires x.size() == N;
-  };
-
   // we need a concept to check if a type has an operator() with N arguments of type ValueType
   template <typename T, typename ValueType, size_t N> struct has_n_call_operator_helper {
     template <size_t... Is> static constexpr bool tryit(std::integer_sequence<size_t, Is...>)

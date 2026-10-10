@@ -4,6 +4,10 @@
 #include <deal.II/base/timer.h>
 #include <deal.II/lac/block_vector.h>
 
+// standard library
+#include <algorithm>
+#include <cmath>
+
 // DiFfRG
 #include <DiFfRG/common/eigen.hh>
 #include <DiFfRG/common/types.hh>
@@ -70,7 +74,7 @@ namespace DiFfRG
         last_save = t;
       }
     };
-    const auto output_each = uint(output_dt / expl.dt);
+    const uint output_each = std::max(1u, uint(std::round(output_dt / expl.dt)));
 
     TimeStepping::runge_kutta_method used_method;
     switch (method) {
@@ -119,8 +123,8 @@ namespace DiFfRG
           time.get_current_time(), time.get_next_step_size(), y);
       time.advance_time();
 
-      // output the solution every output_each steps
-      if (time.get_step_number() % output_each == 0) {
+      // output the solution every output_each steps and at the end
+      if (time.get_step_number() % output_each == 0 || time.is_at_end()) {
         // also, check if the solution contains NaNs, if so, throw an error
         if (!std::isfinite(y.l2_norm())) throw std::runtime_error("TimeStepperRK_impl::run: NaNs in solution");
 

@@ -426,7 +426,8 @@ namespace DiFfRG
     };
 
     //  Calculate the residual of y_dot + F(y)
-    time_stepper.residual = [&](const double t, const VectorType &y, const VectorType &y_dot, VectorType &res) -> int {
+    time_stepper.residual = internal::throw_on_ida_failure([&](const double t, const VectorType &y,
+                                                               const VectorType &y_dot, VectorType &res) -> int {
       CalcDtTimer calc_timer;
       if (is_close(t, stuck_t, impl.minimal_dt * 1e-1))
         stuck++;
@@ -482,10 +483,11 @@ namespace DiFfRG
 
       failure_counter = 0;
       return 0;
-    };
+    });
     // Calculate the jacobian d(y_dot + F(y))/dy + d(y_dot*alpha)/dy_dot
-    time_stepper.setup_jacobian = [&](const double t, const VectorType &y, const VectorType &y_dot,
-                                      const double alpha) -> int {
+    time_stepper.setup_jacobian = internal::throw_on_ida_failure([&](const double t, const VectorType &y,
+                                                                     const VectorType &y_dot,
+                                                                     const double alpha) -> int {
       CalcDtTimer calc_timer;
       if (failure_counter > 200) throw std::runtime_error("timestep failure at jacobian");
 
@@ -547,10 +549,11 @@ namespace DiFfRG
 
       failure_counter = 0;
       return 0;
-    };
+    });
 
     // Solve the linear system J dst = src
-    time_stepper.solve_with_jacobian = [&](const VectorType &src, VectorType &dst, const double tol) -> int {
+    time_stepper.solve_with_jacobian = internal::throw_on_ida_failure([&](const VectorType &src, VectorType &dst,
+                                                                          const double tol) -> int {
       CalcDtTimer calc_timer;
       bool failed = false;
       try {
@@ -570,7 +573,7 @@ namespace DiFfRG
       }
       if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
       return 0;
-    };
+    });
 
     // Start the time loop
     try {

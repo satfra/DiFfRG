@@ -3,6 +3,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iostream>
+#include <sstream>
 
 #include <DiFfRG/common/config_tree.hh>
 
@@ -235,4 +237,20 @@ TEST_CASE("Warning getters return the value when present and the default when no
 
   // Repeated reads of the same missing key stay consistent (the warning itself is once-only).
   CHECK(config.get_double_or_warn("/physical/T", 0.1) == Catch::Approx(0.1));
+}
+
+TEST_CASE("ConfigTree *_or_warn getters warn when a present key can not be read", "[config][common]")
+{
+  const ConfigTree config = boost::json::value({{"order", 2.5}, {"name", "x"}});
+
+  std::stringstream captured;
+  auto *const old = std::cerr.rdbuf(captured.rdbuf());
+  const auto order = config.get_uint_or_warn("/order", 3);
+  const auto name = config.get_double_or_warn("/name", 1.0);
+  std::cerr.rdbuf(old);
+
+  REQUIRE(order == 3);
+  REQUIRE(name == Catch::Approx(1.0));
+  REQUIRE(captured.str().find("'/order' could not be read") != std::string::npos);
+  REQUIRE(captured.str().find("'/name' could not be read") != std::string::npos);
 }

@@ -15,18 +15,6 @@
 namespace DiFfRG
 {
   /**
-   * @brief Concept for a named tuple.
-   */
-  template <typename T>
-  concept NamedTuple = requires(T t) {
-    typename T::tuple_type;
-    typename T::tuple_names;
-    { t.tuple } -> std::same_as<typename T::tuple_type>;
-    { t.names } -> std::same_as<typename T::tuple_names>;
-    { t.size } -> std::same_as<size_t>;
-  };
-
-  /**
    * @brief Check if two strings are equal at compile time.
    */
   constexpr bool strings_equal(char const *a, char const *b) { return std::string_view(a) == b; }

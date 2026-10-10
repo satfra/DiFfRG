@@ -294,8 +294,8 @@ namespace DiFfRG
       }
       std::cerr << " Running with " << threads << " CPU threads, from " << r.winner << ".\n"
                 << " Precedence: DiFfRG_NUM_THREADS > launcher allocation (CPU affinity, then\n"
-                << " SLURM_*) > /discretization/threads > OMP_NUM_THREADS / DEAL_II_NUM_THREADS\n"
-                << " > automatic.\n"
+                << " SLURM_*) > /discretization/threads > OMP_NUM_THREADS / DEAL_II_NUM_THREADS /\n"
+                << " KOKKOS_NUM_THREADS > automatic.\n"
                 << "=========================================================================\n"
                 << std::endl;
     }
@@ -455,7 +455,7 @@ namespace DiFfRG
     case ThreadSource::config:
       return "/discretization/threads";
     case ThreadSource::other_env:
-      return "OMP_NUM_THREADS / DEAL_II_NUM_THREADS";
+      return "OMP_NUM_THREADS / DEAL_II_NUM_THREADS / KOKKOS_NUM_THREADS";
     case ThreadSource::automatic:
       return "the available CPUs";
     }

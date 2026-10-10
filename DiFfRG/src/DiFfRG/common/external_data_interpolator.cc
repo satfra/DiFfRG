@@ -75,12 +75,9 @@ namespace DiFfRG
     for (uint i = 0; i < file_data.size(); ++i)
       interpolators.emplace_back(file_data[x_column].begin(), file_data[x_column].end(), file_data[i].begin(), order);
 
-    max_x = 0.;
-    min_x = 1e200;
-    for (const auto &x : file_data[x_column]) {
-      max_x = std::max(max_x, x);
-      min_x = std::min(min_x, x);
-    }
+    const auto [min_it, max_it] = std::minmax_element(file_data[x_column].begin(), file_data[x_column].end());
+    min_x = *min_it;
+    max_x = *max_it;
 
     // Check consistency
     if (!check_consistency(1e-4, x_column))

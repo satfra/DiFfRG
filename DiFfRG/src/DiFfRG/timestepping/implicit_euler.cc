@@ -120,7 +120,7 @@ namespace DiFfRG
 
       data_out.write_frame(t, [&](auto &frame) {
         if (t > start)
-          assembler.attach_data_output(frame, solution, newton.get_residual());
+          assembler.attach_data_output(frame, solution, VectorType(), VectorType(), newton.get_residual());
         else
           assembler.attach_data_output(frame, solution);
       });
@@ -135,7 +135,11 @@ namespace DiFfRG
     // the actual time loop
     save_data(start);
     while (!tc.finished()) {
-      if (adaptor(tc.get_t(), old_solution)) solution = old_solution;
+      if (adaptor(tc.get_t(), old_solution)) {
+        solution = old_solution;
+        jacobian.reinit(assembler.get_sparsity_pattern_jacobian());
+        newton.reinit(old_solution);
+      }
       const double t_before_attempt = tc.get_t();
       const double attempted_h = tc.get_dt();
       tc.advance(dt_step, save_data);

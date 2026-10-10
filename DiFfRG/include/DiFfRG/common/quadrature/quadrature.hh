@@ -43,7 +43,7 @@ namespace DiFfRG
 
   struct QuadratureType {
     enum QuadratureKind { legendre, chebyshev, chebyshev2, laguerre, hermite, jacobi, trapezoidal, count };
-    QuadratureKind kind;
+    QuadratureKind kind = legendre;
     double a = 0., b = 1.;
     double alpha = 1., beta = 2.;
 
@@ -88,7 +88,7 @@ namespace DiFfRG
 
   private:
     QuadratureType _t;
-    unsigned order;
+    unsigned order = 0;
 
     Kokkos::View<NT *, GPU_memory> device_nodes;
     Kokkos::View<NT *, GPU_memory> device_weights;

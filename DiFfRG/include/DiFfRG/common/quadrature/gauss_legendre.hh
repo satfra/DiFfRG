@@ -1,9 +1,12 @@
 #pragma once
 
+// standard library
+#include <cstddef>
+
 namespace DiFfRG
 {
   template <size_t N, typename ctype> struct GLQuadrature {
-    static_assert(N, "Requested quadrature order has not been implemented.");
+    static_assert(sizeof(ctype) == 0, "Requested quadrature order has not been implemented.");
   };
 
   template <typename ctype> struct GLQuadrature<1, ctype> {

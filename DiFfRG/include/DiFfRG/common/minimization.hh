@@ -276,6 +276,7 @@ namespace DiFfRG
         result[i] = gsl_vector_get(s->x, i);
 
       gsl_multimin_fminimizer_free(s);
+      gsl_vector_free(init_step);
       gsl_vector_free(x);
 
       // Only a genuine solver breakdown is fatal. Stopping short of the target still yields the
@@ -383,31 +384,27 @@ namespace DiFfRG
       double x_lo = this->min_x;
       double x_hi = this->max_x;
 
-      gsl_min_fminimizer_set(s, &gsl_f, x, x_lo, x_hi);
+      if (gsl_min_fminimizer_set(s, &gsl_f, x, x_lo, x_hi) != GSL_SUCCESS) {
+        gsl_min_fminimizer_free(s);
+        throw std::runtime_error("Minimization failed: f(x0) must be smaller than f at both bounds.");
+      }
 
-      double prev_x = -x;
       int status;
       this->iter = 0;
-      int stuck = 0;
       do {
         this->iter++;
         status = gsl_min_fminimizer_iterate(s);
+        if (status != GSL_SUCCESS) break;
 
         x = gsl_min_fminimizer_x_minimum(s);
         x_lo = gsl_min_fminimizer_x_lower(s);
         x_hi = gsl_min_fminimizer_x_upper(s);
 
         status = gsl_min_test_interval(x_lo, x_hi, this->abs_tol, this->rel_tol);
-
-        if (is_close(x, prev_x)) stuck++;
-        if (stuck > 3) std::runtime_error("Minimization got stuck at x = " + std::to_string(x));
-        prev_x = x;
-
       } while (status == GSL_CONTINUE && this->iter < this->max_iter);
 
-      if (status != GSL_SUCCESS) throw std::runtime_error("Minimization failed.");
-
       gsl_min_fminimizer_free(s);
+      if (status != GSL_SUCCESS) throw std::runtime_error("Minimization failed.");
 
       return {x};
     }

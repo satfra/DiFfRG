@@ -39,11 +39,13 @@ namespace DiFfRG
       unsigned int subdivisions = 1;
       /** Mirrors /output/verbosity, which the timesteppers already read. It sets how much of the run log
        * reaches the console: at 0 only warnings and errors, at 1 the ordinary messages, from 2 upwards also
-       * debug records. The log file always receives everything, independent of this.
+       * debug records. The log file is filtered by /output/log_level instead (an spdlog level, default 2 =
+       * info), independent of this.
        *
        * At 3 and above the output sinks additionally emit one per-frame timing line and one
        * output_timings.csv row. The aggregate timing report at the end of a run is a debug record:
-       * it is always written to the log file, and reaches the console from verbosity 2 upwards. */
+       * it reaches the log file when /output/log_level is 1 (debug) or lower, and the console from verbosity 2
+       * upwards. */
       int verbosity = 0;
       std::size_t log_queue_size = 8192;
       spdlog::level::level_enum log_level = spdlog::level::info;

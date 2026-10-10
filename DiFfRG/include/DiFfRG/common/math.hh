@@ -256,14 +256,14 @@ namespace DiFfRG
 
     template <size_t N, typename T>
       requires std::is_arithmetic_v<T>
-    constexpr KOKKOS_FORCEINLINE_FUNCTION T conj(const autodiff::Real<N, T> x)
+    constexpr KOKKOS_FORCEINLINE_FUNCTION autodiff::Real<N, T> conj(const autodiff::Real<N, T> x)
     {
       return x;
     }
 
     template <size_t N, typename T>
       requires std::is_arithmetic_v<T>
-    constexpr KOKKOS_FORCEINLINE_FUNCTION T conj(const cxReal<N, T> x)
+    constexpr KOKKOS_FORCEINLINE_FUNCTION cxReal<N, T> conj(const cxReal<N, T> x)
     {
       cxReal<N, T> res;
       autodiff::detail::For<0, N + 1>([&](auto i) constexpr { res[i] = Kokkos::conj(x[i]); });

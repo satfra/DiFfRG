@@ -155,9 +155,8 @@ namespace DiFfRG
      * `as_int64()` throws on the uint64 arm. A config parsed from a file therefore reads fine
      * while the same config built in C++ from an `unsigned` does not -- which made get_uint, the
      * accessor that exists precisely for unsigned values, unable to read them. The failure is
-     * quiet where it matters: get_uint_or_warn catches the exception and falls back to its
+     * quiet where it matters: get_uint(key, def) catches the exception and falls back to its
      * default, so a caller silently gets the default value instead of the one it set.
-     * as_double_relaxed above already handles both arms; these did not.
      */
     std::int64_t as_int64_relaxed(const boost::json::value &v)
     {
@@ -228,8 +227,7 @@ namespace DiFfRG
   {
     // as_int64_relaxed, not as_int64: this overload swallows the exception and returns def, so
     // reading the wrong boost::json arm here is not an error the caller ever sees -- it is a
-    // silent substitution of the default for the value they set. get_*_or_warn delegates here,
-    // so this is the path that actually bites.
+    // silent substitution of the default for the value they set.
     try {
       return internal::as_int64_relaxed(value.at_pointer(key));
     } catch (const std::exception &e) {
@@ -281,12 +279,14 @@ namespace DiFfRG
   namespace internal
   {
     /**
-     * @brief Report that a key is missing and a guessed default is being used.
+     * @brief Report that a key is missing or unreadable and a guessed default is being used.
      *
      * Kept to one message per key and process, so that reading the same parameter from many
      * integrators or assemblers does not flood the log.
+     *
+     * @param error empty if the key is missing, otherwise why its value could not be read.
      */
-    void warn_missing_key(const std::string &key, const std::string &def)
+    void warn_fallback(const std::string &key, const std::string &def, const std::string &error = "")
     {
       static std::mutex mutex;
       static std::set<std::string> already_warned;
@@ -296,9 +296,29 @@ namespace DiFfRG
         if (!already_warned.insert(key).second) return;
       }
 
-      std::cerr << "WARNING: configuration key '" << key << "' is missing; falling back to " << def
-                << ". This default is a guess, not a safe choice - set the key explicitly in your parameter file."
-                << std::endl;
+      if (error.empty())
+        std::cerr << "WARNING: configuration key '" << key << "' is missing; falling back to " << def
+                  << ". This default is a guess, not a safe choice - set the key explicitly in your parameter file."
+                  << std::endl;
+      else
+        std::cerr << "WARNING: configuration key '" << key << "' could not be read (" << error << "); falling back to "
+                  << def << ". Check the type of its value in your parameter file." << std::endl;
+    }
+
+    /// Read `key` with `get`; on a missing or unreadable key warn and return `def`.
+    template <typename T, typename Getter>
+    T get_or_warn(const ConfigTree &tree, const std::string &key, const T &def, const std::string &def_str, Getter get)
+    {
+      if (!tree.contains(key)) {
+        warn_fallback(key, def_str);
+        return def;
+      }
+      try {
+        return get(key);
+      } catch (const std::exception &e) {
+        warn_fallback(key, def_str, e.what());
+        return def;
+      }
     }
 
     std::string format_double(double value)
@@ -311,37 +331,31 @@ namespace DiFfRG
 
   double ConfigTree::get_double_or_warn(const std::string &key, const double def) const
   {
-    if (contains(key)) return get_double(key, def);
-    internal::warn_missing_key(key, internal::format_double(def));
-    return def;
+    return internal::get_or_warn(*this, key, def, internal::format_double(def),
+                                 [&](const std::string &k) { return get_double(k); });
   }
 
   int ConfigTree::get_int_or_warn(const std::string &key, const int def) const
   {
-    if (contains(key)) return get_int(key, def);
-    internal::warn_missing_key(key, std::to_string(def));
-    return def;
+    return internal::get_or_warn(*this, key, def, std::to_string(def),
+                                 [&](const std::string &k) { return get_int(k); });
   }
 
   uint ConfigTree::get_uint_or_warn(const std::string &key, const uint def) const
   {
-    if (contains(key)) return get_uint(key, def);
-    internal::warn_missing_key(key, std::to_string(def));
-    return def;
+    return internal::get_or_warn(*this, key, def, std::to_string(def),
+                                 [&](const std::string &k) { return get_uint(k); });
   }
 
   std::string ConfigTree::get_string_or_warn(const std::string &key, const std::string &def) const
   {
-    if (contains(key)) return get_string(key, def);
-    internal::warn_missing_key(key, "'" + def + "'");
-    return def;
+    return internal::get_or_warn(*this, key, def, "'" + def + "'", [&](const std::string &k) { return get_string(k); });
   }
 
   bool ConfigTree::get_bool_or_warn(const std::string &key, const bool def) const
   {
-    if (contains(key)) return get_bool(key, def);
-    internal::warn_missing_key(key, def ? "true" : "false");
-    return def;
+    return internal::get_or_warn(*this, key, def, def ? "true" : "false",
+                                 [&](const std::string &k) { return get_bool(k); });
   }
 
   void ConfigTree::set_double(const std::string &key, double value)

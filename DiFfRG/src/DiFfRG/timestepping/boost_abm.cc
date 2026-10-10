@@ -114,10 +114,10 @@ namespace DiFfRG
 
       sol_save = sol;
 
-      while (n_saves <= uint((t - t_start + 1e-3 * output_dt) / output_dt)) {
+      while (n_saves <= uint((t - t_start) / output_dt + 1e-3)) {
         // Interpolate the solution to the output time
         double t_save = t_start + output_dt * n_saves;
-        if (t_save > t) break;
+        if (!is_close(t_save, t, 1e-6 * output_dt) && t_save > t) break;
         n_saves++;
         if (output_times.size() >= 2) {
           const double t_prev = output_times[output_times.size() - 2];
@@ -158,7 +158,7 @@ namespace DiFfRG
       inverse_mass_matrix.solve(dy_dealii);
 
       if (!std::isfinite(dy_dealii.l2_norm()))
-        throw std::runtime_error("TimeStepperBoostRK_impl::run_vars: dy is not finite!");
+        throw std::runtime_error("TimeStepperBoostABM_impl::run: dy is not finite!");
 
       dealii_to_eigen(dy_dealii, dxdt);
 
@@ -182,9 +182,10 @@ namespace DiFfRG
   void TimeStepperBoostABM_impl<VectorType, SparseMatrixType, dim>::run(BlockVectorType &initial_data,
                                                                         const double t_start, const double t_stop)
   {
-    if (initial_data.n_blocks() != 2) throw std::runtime_error("TimeStepperBoostRK_impl::run: y must have two blocks!");
+    if (initial_data.n_blocks() != 2)
+      throw std::runtime_error("TimeStepperBoostABM_impl::run: y must have two blocks!");
     if (initial_data.block(1).size() == 0)
-      throw std::runtime_error("TimeStepperBoostRK_impl::run: y contains no variables, use a different timestepper!");
+      throw std::runtime_error("TimeStepperBoostABM_impl::run: y contains no variables, use a different timestepper!");
 
     const SparseMatrixType &mass_matrix = assembler.get_mass_matrix();
     InverseSparseMatrixType inverse_mass_matrix;
@@ -206,10 +207,10 @@ namespace DiFfRG
 
       sol_save = sol;
 
-      while (n_saves <= uint((t - t_start + 1e-3 * output_dt) / output_dt)) {
+      while (n_saves <= uint((t - t_start) / output_dt + 1e-3)) {
         // Interpolate the solution to the output time
         double t_save = t_start + output_dt * n_saves;
-        if (t_save > t) break;
+        if (!is_close(t_save, t, 1e-6 * output_dt) && t_save > t) break;
         n_saves++;
         if (output_times.size() >= 2) {
           const double t_prev = output_times[output_times.size() - 2];
@@ -251,7 +252,7 @@ namespace DiFfRG
       inverse_mass_matrix.solve(dy_dealii.block(0));
 
       if (!std::isfinite(dy_dealii.l2_norm()))
-        throw std::runtime_error("TimeStepperBoostRK_impl::run_vars: dy is not finite!");
+        throw std::runtime_error("TimeStepperBoostABM_impl::run: dy is not finite!");
 
       dealii_to_eigen(dy_dealii, dxdt);
 
@@ -276,7 +277,8 @@ namespace DiFfRG
                                                                              const double t_start, const double t_stop)
   {
     if (initial_data.size() == 0)
-      throw std::runtime_error("TimeStepperRK_impl::run: y contains no variables, use a different timestepper!");
+      throw std::runtime_error(
+          "TimeStepperBoostABM_impl::run_vars: y contains no variables, use a different timestepper!");
 
     // At output_dt intervals this function saves intermediate solutions
     dealii::Vector<double> output_dealii(initial_data.size());
