@@ -7,7 +7,11 @@
 #include <DiFfRG/discretization/data/snapshot.hh>
 
 // standard library
+#include <algorithm>
+#include <cctype>
 #include <charconv>
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -21,8 +25,8 @@ namespace DiFfRG
     /**
      * @brief Assign @p value at the JSON pointer @p path, creating missing objects on the way.
      *
-     * -sd and friends deliberately refuse keys the parameter file does not have, which catches
-     * typos. The snapshot flags set keys most parameter files never mention, so they create them.
+     * Used for keys the parameter file does not have: those set by -sd & co. (with a warning) and by the
+     * snapshot flags.
      */
     void assign_creating(json::value &root, const std::string &path, const json::value &value)
     {
@@ -75,10 +79,71 @@ namespace DiFfRG
       if (values.empty()) throw std::runtime_error("Error: flag '" + flag + "' expects at least one number.");
       return values;
     }
+
+    /// @p text as a number; the whole string has to be one.
+    double parse_number(const std::string &text)
+    {
+      std::size_t used = 0;
+      const double value = std::stod(text, &used);
+      if (used != text.size()) throw std::invalid_argument("'" + text + "' is not a number");
+      return value;
+    }
+
+    /// @p text as a boolean: true, false, 1 or 0, in any case.
+    bool parse_bool(const std::string &text)
+    {
+      std::string lower = text;
+      std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+      if (lower == "true" || lower == "1") return true;
+      if (lower == "false" || lower == "0") return false;
+      throw std::invalid_argument("'" + text + "' is not true, false, 1 or 0");
+    }
+
+    /// A new entry from the command-line value @p text, typed by the flag: "double", "int", "bool" or "string".
+    json::value new_entry(const std::string &text, const std::string &type)
+    {
+      if (type == "double") return parse_number(text);
+      if (type == "bool") return parse_bool(text);
+      if (type == "string") return json::string(text);
+      const double value = parse_number(text);
+      if (value != std::floor(value) || std::abs(value) > 9007199254740992.)
+        throw std::invalid_argument("-si expects an integer, '" + text + "' is not");
+      return static_cast<std::int64_t>(value);
+    }
+
+    /**
+     * @brief Set the existing entry @p entry from the command-line value @p text, keeping the entry's type.
+     *
+     * @param type "double", "int", "bool" or "string", from -sd, -si, -sb or -ss.
+     */
+    void assign_override(json::value &entry, const std::string &text, const std::string &type)
+    {
+      const bool numeric_flag = type == "double" || type == "int";
+      if (entry.is_int64() || entry.is_uint64()) {
+        if (!numeric_flag) throw std::invalid_argument("the entry is an integer; use -si or -sd");
+        const double value = parse_number(text);
+        if (value != std::floor(value) || std::abs(value) > 9007199254740992.)
+          throw std::invalid_argument("the entry is an integer, '" + text + "' is not");
+        entry = static_cast<std::int64_t>(value);
+      } else if (entry.is_double()) {
+        if (!numeric_flag) throw std::invalid_argument("the entry is a number; use -sd");
+        const double value = parse_number(text);
+        if (type == "int" && value != std::floor(value))
+          throw std::invalid_argument("-si expects an integer, '" + text + "' is not");
+        entry = value;
+      } else if (entry.is_bool()) {
+        if (type != "bool") throw std::invalid_argument("the entry is a boolean; use -sb");
+        entry = parse_bool(text);
+      } else if (entry.is_string()) {
+        if (type != "string") throw std::invalid_argument("the entry is a string; use -ss");
+        entry = text;
+      } else
+        throw std::invalid_argument("only numbers, booleans and strings can be set from the command line");
+    }
   } // namespace
 
   ConfigurationHelper::ConfigurationHelper(int argc, char *argv[], const std::string parameter_file)
-      : parsed(false), parameter_file(parameter_file)
+      : parameter_file(parameter_file)
   {
     for (int i = 1; i < argc; ++i)
       args.emplace_back(argv[i]);
@@ -91,17 +156,7 @@ namespace DiFfRG
     }
   }
 
-  ConfigurationHelper::ConfigurationHelper(const ConfigTree &config) : config(config), parsed(true) {}
-
-  ConfigurationHelper::ConfigurationHelper(const ConfigurationHelper &other)
-  {
-    if (other.parsed) throw std::runtime_error("A parsed ConfigurationHelper can not be copied!");
-
-    parameter_file = other.parameter_file;
-
-    args = other.args;
-    cli_parameters = other.cli_parameters;
-  }
+  ConfigurationHelper::ConfigurationHelper(const ConfigTree &config) : config(config) {}
 
   ConfigTree &ConfigurationHelper::get_config() { return config; }
   const ConfigTree &ConfigurationHelper::get_config() const { return config; }
@@ -128,8 +183,6 @@ namespace DiFfRG
 
   void ConfigurationHelper::parse()
   {
-    parsed = true;
-
     try {
       parse_cli();
     } catch (const std::exception &e) {
@@ -159,24 +212,25 @@ namespace DiFfRG
 
       std::vector<std::string> overrides;
       for (const auto &param : cli_parameters) {
-        std::string path, value, buf;
-
-        // separate the str into a path to an entry and a value
-        std::istringstream ss1(param.first);
-        std::getline(ss1, path, '=');
-        std::getline(ss1, value, '=');
+        // <path>=<value>; only the first '=' separates them, a string value may contain more.
+        const auto separator = param.first.find('=');
+        const std::string path = param.first.substr(0, separator);
+        const std::string value = separator == std::string::npos ? "" : param.first.substr(separator + 1);
 
         try {
-          const auto old_value = format_value(config().at_pointer(path));
-          if (param.second == "double")
-            config().at_pointer(path) = std::stod(value);
-          else if (param.second == "bool")
-            config().at_pointer(path) = (value == "true");
-          else if (param.second == "int")
-            config().at_pointer(path) = std::stoi(value);
-          else if (param.second == "string")
-            config().at_pointer(path) = value;
-          overrides.push_back(path + ": " + old_value + " -> " + format_value(config().at_pointer(path)));
+          if (separator == std::string::npos) throw std::invalid_argument("expected <key>=<value>");
+          if (config.contains(path)) {
+            const auto old_value = format_value(config().at_pointer(path));
+            assign_override(config().at_pointer(path), value, param.second);
+            overrides.push_back(path + ": " + old_value + " -> " + format_value(config().at_pointer(path)));
+          } else {
+            // A key the file does not have is created, typed by the flag. Say so: it may be a typo.
+            assign_creating(config(), path, new_entry(value, param.second));
+            overrides.push_back(path + ": (new) " + format_value(config().at_pointer(path)));
+            if (!quiet && MPI::rank(MPI_COMM_WORLD) == 0)
+              std::cerr << "WARNING: '" << path << "' is not in the parameter file; created it from the command line."
+                        << std::endl;
+          }
         } catch (const std::exception &e) {
           throw std::runtime_error("Failed to parse CLI parameter '" + path + "=" + value + "' as " + param.second +
                                    ": " + e.what());
@@ -236,21 +290,6 @@ namespace DiFfRG
     std::cout << rule << std::endl;
   }
 
-  void ConfigurationHelper::append(std::string str)
-  {
-    std::istringstream ss(str);
-    std::string argv;
-    while (std::getline(ss, argv, ' '))
-      args.emplace_back(argv);
-    try {
-      parse_cli();
-    } catch (const std::exception &e) {
-      std::cerr << "While reading the CLI arguments an error occurred:\n    " << e.what() << "\n" << std::endl;
-      print_usage_message();
-      exit(1);
-    }
-  }
-
   void ConfigurationHelper::print_usage_message()
   {
     std::string help_text = R"(
@@ -264,16 +303,19 @@ namespace DiFfRG
 
 This is a DiFfRG simulation. You can pass the following optional parameters to this executable:
   --help                      shows this text
-  --generate-parameter-file   generates a parameter file with some default values, in the
-                              format implied by the parameter file name (JSON or TOML)
+  --generate-parameter-file   writes a TOML parameter file with default values (rank 0 only; an existing
+  --gen-toml, --gen-json      file is never replaced) named like the parameter file, then exits.
+                              --gen-toml is the same, --gen-json writes JSON.
   -p                          specifiy a parameter file other than the standard parameter.json/toml
                               Files ending in .toml are read as TOML, everything else as JSON.
                               If no parameter file is given and parameter.json is absent, but
                               parameter.toml is present, the latter is used.
-  -sd                         overwrite a double parameter. This should be in the format '-sd /physical/T=0.1'
-  -si                         overwrite an integer parameter. This should be in the format '-si /physical/Nc=1'
-  -sb                         overwrite a boolean parameter. This should be in the format '-sb /physical/use_sth=true'
-  -ss                         overwrite a string parameter. This should be in the format '-ss /physical/a=hello'
+  -sd                         overwrite a number, e.g. '-sd /physical/T=0.1'
+  -si                         overwrite an integer, e.g. '-si /physical/Nc=3'
+  -sb                         overwrite a boolean (true/false/1/0), e.g. '-sb /physical/use_sth=true'
+  -ss                         overwrite a string, e.g. '-ss /physical/a=hello'
+                              Existing keys keep their type; a missing key is created (with a warning),
+                              typed by the flag.
   --restart <file>            continue the flow from a snapshot instead of starting at the initial scale.
                               The configuration is the snapshot's (no parameter file is read, -p is an
                               error); -sd/-si/-sb/-ss override it. From one of the run's own
@@ -289,15 +331,10 @@ This is a DiFfRG simulation. You can pass the following optional parameters to t
   void ConfigurationHelper::parse_cli()
   {
     while (args.size()) {
-      if (args.front() == std::string("--generate-parameter-file")) {
-        // Both of these terminate the program, which a probe() must never do; the application's
-        // own parse hits them a moment later and acts on them.
-        if (quiet) {
-          args.pop_front();
-          continue;
-        }
-        generate_parameter_file();
-        exit(0);
+      if (args.front() == "--generate-parameter-file" || args.front() == "--gen-toml" || args.front() == "--gen-json") {
+        // Acted on after all flags are read, so that a -p anywhere names the file.
+        generate = args.front() == "--gen-json" ? GeneratedFormat::json : GeneratedFormat::toml;
+        args.pop_front();
       } else if (args.front() == std::string("--help")) {
         if (quiet) {
           args.pop_front();
@@ -355,9 +392,15 @@ This is a DiFfRG simulation. You can pass the following optional parameters to t
         args.pop_front();
       }
     }
+
+    // Terminates the program, which a probe() must never do; the application's own parse acts on it a moment later.
+    if (generate != GeneratedFormat::none && !quiet) {
+      generate_parameter_file(generate);
+      exit(0);
+    }
   }
 
-  void ConfigurationHelper::generate_parameter_file()
+  void ConfigurationHelper::generate_parameter_file(const GeneratedFormat format)
   {
     ConfigTree config = json::value(
         // json::object() rather than {}: an empty braced list is deduced as an array, so
@@ -415,20 +458,31 @@ This is a DiFfRG simulation. You can pass the following optional parameters to t
             {{"dt", 1e-4}, {"minimal_dt", 1e-8}, {"maximal_dt", 1.}, {"abs_tol", 1e-13}, {"rel_tol", 1e-7}}}}},
          {"output", {{"verbosity", 0}, {"folder", "./"}, {"name", "output"}, {"max_pending_frames", 2}}}});
 
-    const auto temporary = parameter_file + ".tmp";
+    const std::string file_name = std::filesystem::path(parameter_file)
+                                      .replace_extension(format == GeneratedFormat::json ? ".json" : ".toml")
+                                      .string();
+    // Every rank looks before rank 0 writes, so that no rank mistakes the new file for an old one.
+    if (MPI::any_of(MPI_COMM_WORLD, std::filesystem::exists(file_name))) {
+      if (MPI::rank(MPI_COMM_WORLD) == 0)
+        std::cerr << "The parameter file '" << file_name
+                  << "' already exists and is not replaced. Remove it, or name another file with -p." << std::endl;
+      exit(1);
+    }
+    if (MPI::rank(MPI_COMM_WORLD) != 0) return;
+
+    const auto temporary = file_name + ".tmp";
     {
       std::ofstream file(temporary, std::ofstream::trunc);
-      if (!file) throw std::runtime_error("Could not create parameter file '" + parameter_file + "'.");
-      // Write in whichever format the requested file name implies.
-      if (internal::has_toml_extension(parameter_file))
-        config.print_toml(file);
-      else
+      if (!file) throw std::runtime_error("Could not create parameter file '" + file_name + "'.");
+      if (format == GeneratedFormat::json)
         config.print(file);
-      if (!file) throw std::runtime_error("Failed while writing parameter file '" + parameter_file + "'.");
+      else
+        config.print_toml(file);
+      if (!file) throw std::runtime_error("Failed while writing parameter file '" + file_name + "'.");
     }
-    std::filesystem::rename(temporary, parameter_file);
+    std::filesystem::rename(temporary, file_name);
 
-    std::cout << "\nGenerated parameter file: " << parameter_file << "\n\n"
+    std::cout << "\nGenerated parameter file: " << file_name << "\n\n"
               << "Parameter sections:\n"
               << "  /physical          Physical parameters (e.g. temperature, couplings, cutoff scale)\n"
               << "  /integration       Quadrature settings for momentum-space loop integrals\n"

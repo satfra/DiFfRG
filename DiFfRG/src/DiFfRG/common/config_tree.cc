@@ -214,56 +214,29 @@ namespace DiFfRG
     }
   }
 
+  // The getters with a default fall back only for a missing key; a key that is present but cannot be read as the
+  // requested type throws like the one-argument getters, instead of silently replacing the user's value.
+
   double ConfigTree::get_double(const std::string &key, const double def) const
   {
-    try {
-      return internal::as_double_relaxed(value.at_pointer(key));
-    } catch (const std::exception &e) {
-      return def;
-    }
+    return contains(key) ? get_double(key) : def;
   }
 
-  int ConfigTree::get_int(const std::string &key, const int def) const
-  {
-    // as_int64_relaxed, not as_int64: this overload swallows the exception and returns def, so
-    // reading the wrong boost::json arm here is not an error the caller ever sees -- it is a
-    // silent substitution of the default for the value they set.
-    try {
-      return internal::as_int64_relaxed(value.at_pointer(key));
-    } catch (const std::exception &e) {
-      return def;
-    }
-  }
+  int ConfigTree::get_int(const std::string &key, const int def) const { return contains(key) ? get_int(key) : def; }
 
   uint ConfigTree::get_uint(const std::string &key, const uint def) const
   {
-    // See the note on get_int(key, def) above.
-    try {
-      const std::int64_t val = internal::as_int64_relaxed(value.at_pointer(key));
-      if (val < 0 || static_cast<std::uint64_t>(val) > std::numeric_limits<uint>::max())
-        throw std::runtime_error("value is negative or does not fit in an unsigned int");
-      return static_cast<uint>(val);
-    } catch (const std::exception &e) {
-      return def;
-    }
+    return contains(key) ? get_uint(key) : def;
   }
 
   std::string ConfigTree::get_string(const std::string &key, const std::string &def) const
   {
-    try {
-      return value.at_pointer(key).as_string().c_str();
-    } catch (const std::exception &e) {
-      return def;
-    }
+    return contains(key) ? get_string(key) : def;
   }
 
   bool ConfigTree::get_bool(const std::string &key, const bool def) const
   {
-    try {
-      return value.at_pointer(key).as_bool();
-    } catch (const std::exception &e) {
-      return def;
-    }
+    return contains(key) ? get_bool(key) : def;
   }
 
   bool ConfigTree::contains(const std::string &key) const
@@ -279,14 +252,12 @@ namespace DiFfRG
   namespace internal
   {
     /**
-     * @brief Report that a key is missing or unreadable and a guessed default is being used.
+     * @brief Report that a key is missing and a guessed default is being used.
      *
      * Kept to one message per key and process, so that reading the same parameter from many
      * integrators or assemblers does not flood the log.
-     *
-     * @param error empty if the key is missing, otherwise why its value could not be read.
      */
-    void warn_fallback(const std::string &key, const std::string &def, const std::string &error = "")
+    void warn_missing_key(const std::string &key, const std::string &def)
     {
       static std::mutex mutex;
       static std::set<std::string> already_warned;
@@ -296,29 +267,9 @@ namespace DiFfRG
         if (!already_warned.insert(key).second) return;
       }
 
-      if (error.empty())
-        std::cerr << "WARNING: configuration key '" << key << "' is missing; falling back to " << def
-                  << ". This default is a guess, not a safe choice - set the key explicitly in your parameter file."
-                  << std::endl;
-      else
-        std::cerr << "WARNING: configuration key '" << key << "' could not be read (" << error << "); falling back to "
-                  << def << ". Check the type of its value in your parameter file." << std::endl;
-    }
-
-    /// Read `key` with `get`; on a missing or unreadable key warn and return `def`.
-    template <typename T, typename Getter>
-    T get_or_warn(const ConfigTree &tree, const std::string &key, const T &def, const std::string &def_str, Getter get)
-    {
-      if (!tree.contains(key)) {
-        warn_fallback(key, def_str);
-        return def;
-      }
-      try {
-        return get(key);
-      } catch (const std::exception &e) {
-        warn_fallback(key, def_str, e.what());
-        return def;
-      }
+      std::cerr << "WARNING: configuration key '" << key << "' is missing; falling back to " << def
+                << ". This default is a guess, not a safe choice - set the key explicitly in your parameter file."
+                << std::endl;
     }
 
     std::string format_double(double value)
@@ -331,31 +282,37 @@ namespace DiFfRG
 
   double ConfigTree::get_double_or_warn(const std::string &key, const double def) const
   {
-    return internal::get_or_warn(*this, key, def, internal::format_double(def),
-                                 [&](const std::string &k) { return get_double(k); });
+    if (contains(key)) return get_double(key);
+    internal::warn_missing_key(key, internal::format_double(def));
+    return def;
   }
 
   int ConfigTree::get_int_or_warn(const std::string &key, const int def) const
   {
-    return internal::get_or_warn(*this, key, def, std::to_string(def),
-                                 [&](const std::string &k) { return get_int(k); });
+    if (contains(key)) return get_int(key);
+    internal::warn_missing_key(key, std::to_string(def));
+    return def;
   }
 
   uint ConfigTree::get_uint_or_warn(const std::string &key, const uint def) const
   {
-    return internal::get_or_warn(*this, key, def, std::to_string(def),
-                                 [&](const std::string &k) { return get_uint(k); });
+    if (contains(key)) return get_uint(key);
+    internal::warn_missing_key(key, std::to_string(def));
+    return def;
   }
 
   std::string ConfigTree::get_string_or_warn(const std::string &key, const std::string &def) const
   {
-    return internal::get_or_warn(*this, key, def, "'" + def + "'", [&](const std::string &k) { return get_string(k); });
+    if (contains(key)) return get_string(key);
+    internal::warn_missing_key(key, "'" + def + "'");
+    return def;
   }
 
   bool ConfigTree::get_bool_or_warn(const std::string &key, const bool def) const
   {
-    return internal::get_or_warn(*this, key, def, def ? "true" : "false",
-                                 [&](const std::string &k) { return get_bool(k); });
+    if (contains(key)) return get_bool(key);
+    internal::warn_missing_key(key, def ? "true" : "false");
+    return def;
   }
 
   void ConfigTree::set_double(const std::string &key, double value)

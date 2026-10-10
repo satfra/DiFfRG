@@ -18,12 +18,13 @@
  * | Flag                              | Effect                                                                  |
  * |-----------------------------------|-------------------------------------------------------------------------|
  * | `--help`                          | print the usage message and exit                                        |
- * | `--generate-parameter-file`       | write a parameter file with default values and exit (see below)         |
+ * | `--generate-parameter-file`       | write a TOML parameter file with default values and exit (see below)    |
+ * | `--gen-toml`, `--gen-json`        | the same, as TOML or JSON                                               |
  * | `-p <file>`                       | read `<file>` instead of the default parameter file                     |
  * | `-sd <key>=<value>`               | set a number, e.g. `-sd /physical/T=0.1`                                |
  * | `-si <key>=<value>`               | set an integer, e.g. `-si /integration/x_order=64`                      |
- * | `-sb <key>=<value>`               | set a boolean; `true` gives true, anything else false                   |
- * | `-ss <key>=<value>`               | set a string, e.g. `-ss /output/name=run1`                              |
+ * | `-sb <key>=<value>`               | set a boolean: `true`, `false`, `1` or `0` (any case)                   |
+ * | `-ss <key>=<value>`               | set a string, e.g. `-ss /output/name=run1`; the value may contain `=`   |
  * | `--restart <snapshot>`            | continue from a snapshot file (see below)                               |
  * | `--snapshots-k <k1,k2,...>`       | write snapshots at these RG scales: `/timestepping/snapshots/k`         |
  * | `--snapshots-t <t1,t2,...>`       | write snapshots at these RG times: `/timestepping/snapshots/t`          |
@@ -32,12 +33,14 @@
  * Flags are read left to right; a later override of the same key wins. Unknown flags are ignored with a
  * warning.
  *
- * - `-sd`, `-si`, `-sb`, `-ss` only change keys that exist in the parameter file; a missing key is an error.
- *   They replace the entry including its type: `-sd` on an integer entry stores a floating-point number,
- *   which integer getters then no longer read (see config_tree.hh). Use `-si` for integer entries.
+ * - `-sd`, `-si`, `-sb`, `-ss` on an existing entry keep its type: an integer entry accepts `-sd` or `-si`
+ *   with an integral value (`2` or `2.0`), a floating-point entry any number, a boolean entry only `-sb`, a
+ *   string entry only `-ss`. A key that is not in the parameter file is created, with the type of the flag
+ *   (`-sd` a floating-point number, `-si` an integer, ...), together with missing parent sections; a warning
+ *   names it, as it may be a typo. The value must parse completely (`-si x=1.5` and `-sd x=0.1abc` are errors).
  * - The snapshot flags create their keys if needed.
- * - `--generate-parameter-file` writes to the parameter file name as known at that point, so put `-p` before
- *   it. An existing file of that name is overwritten. JSON or TOML is chosen from the file extension.
+ * - The generated parameter file is named like the parameter file (the application's default, or `-p`), with
+ *   extension `.toml` or `.json`. It is written by MPI rank 0 only and never replaces an existing file.
  * - With `--restart` the configuration is taken from the snapshot and no parameter file is read; `-p` is then
  *   an error, overrides with `-sd` etc. still apply. `/restart/file` is set to the snapshot.
  *
@@ -47,7 +50,7 @@
  *
  * ### Errors
  * On a malformed command line or parameter file the constructor prints the error and the usage message and
- * terminates the process with exit code 1. `--help` and `--generate-parameter-file` terminate with exit code 0.
+ * terminates the process with exit code 1. `--help` and a generated parameter file terminate with exit code 0.
  */
 // clang-format on
 
@@ -66,7 +69,7 @@ namespace DiFfRG
      * @brief Parse the command line and read the parameter file.
      *
      * Everything happens here: the flags are parsed, the file is read and the overrides are applied. On
-     * errors, `--help` and `--generate-parameter-file` the process is terminated, see configuration_helper.hh.
+     * errors, `--help` and when generating a parameter file the process is terminated, see configuration_helper.hh.
      *
      * @param argc Forwarded argc from main().
      * @param argv Forwarded argv from main().
@@ -76,29 +79,11 @@ namespace DiFfRG
     ConfigurationHelper(int argc, char *argv[], const std::string parameter_file = "parameter.json");
 
     /**
-     * @brief Copy an unparsed helper.
-     *
-     * @throws std::runtime_error if `other` has already read its configuration, which is the case for every
-     * helper built by the public constructors.
-     */
-    ConfigurationHelper(const ConfigurationHelper &other);
-
-    /**
      * @brief Wrap an existing configuration; no command line and no file are read.
      *
      * @param config The configuration.
      */
     ConfigurationHelper(const ConfigTree &config);
-
-    /**
-     * @brief Parse further command-line arguments, given as one space-separated string.
-     *
-     * The configuration has already been read by the constructor, so `-sd`, `-si`, `-sb`, `-ss`, `-p` and the
-     * snapshot flags given here do not change get_config().
-     *
-     * @param arg The arguments, e.g. "-sd /physical/T=0.1".
-     */
-    void append(std::string arg);
 
     /// The configuration, with all command-line overrides applied.
     ConfigTree &get_config();
@@ -135,7 +120,7 @@ namespace DiFfRG
      * @brief Read the configuration without printing anything or terminating.
      *
      * Same as the (argc, argv, parameter_file) constructor, including `-p`, the `.toml` substitution, the
-     * overrides, `--restart` and the snapshot flags, but `--help` and `--generate-parameter-file` are skipped,
+     * overrides, `--restart` and the snapshot flags, but `--help` and the parameter-file generation flags are skipped,
      * unknown flags are not reported, and any error yields an empty tree. DiFfRG::Init uses it to read a few
      * parameters before MPI and Kokkos are started.
      */
@@ -147,23 +132,26 @@ namespace DiFfRG
     void parse();
     void parse_cli();
     void print_usage_message();
-    void generate_parameter_file();
+    /// The format of the parameter file to generate; none if no generation was requested.
+    enum class GeneratedFormat { none, toml, json };
+    void generate_parameter_file(GeneratedFormat format);
     /// The snapshot's configuration, without the seed run's own /restart.
     ConfigTree read_restart_configuration() const;
     void print_restart_banner(const std::vector<std::string> &overrides, bool continuing) const;
 
     std::list<std::string> args;
     std::list<std::pair<std::string, std::string>> cli_parameters;
-    /// Set by the snapshot flags; unlike -sd & co. these create their key if the parameter file lacks it.
+    /// Set by the snapshot flags.
     std::list<std::pair<std::string, json::value>> cli_created_parameters;
     /// Set by --restart: the snapshot whose configuration replaces the parameter file.
     std::string restart_file;
 
     ConfigTree config;
 
-    bool parsed = false;
-
     std::string parameter_file;
+
+    /// Set by the parameter-file generation flags.
+    GeneratedFormat generate = GeneratedFormat::none;
 
     /// Whether parameter_file was named explicitly with -p, which disables the fallback to
     /// a TOML file of the same name.

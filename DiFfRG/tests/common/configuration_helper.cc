@@ -1,4 +1,7 @@
 #define CATCH_CONFIG_MAIN
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <catch2/catch_all.hpp>
 #include <deal.II/base/multithread_info.h>
 #include <fstream>
@@ -148,8 +151,11 @@ TEST_CASE("A restart takes its configuration from the snapshot", "[config][commo
   SECTION("Invalid combinations are errors")
   {
     // probe() returns an empty tree where the application's own parse would stop with an error.
-    REQUIRE_FALSE(parse({"-sd", "/physical/not_in_the_snapshot=1"}).contains("/physical"));
     REQUIRE_FALSE(parse({"-p", parameter_file}).contains("/physical"));
+  }
+  SECTION("An override of a key the snapshot lacks creates it")
+  {
+    REQUIRE(parse({"-sd", "/physical/not_in_the_snapshot=1"}).get_double("/physical/not_in_the_snapshot") == 1.);
   }
   SECTION("A restart from the run's own snapshot continues it, with its schedule")
   {
@@ -288,7 +294,93 @@ TEST_CASE("probe() reads the configuration without diagnostics or exiting", "[co
 
     CHECK_FALSE(config.contains("/discretization/threads"));
     CHECK_FALSE(std::filesystem::exists("test_probe_does_not_exist.json"));
+    CHECK_FALSE(std::filesystem::exists("test_probe_does_not_exist.toml"));
   }
+}
+
+TEST_CASE("Command-line overrides keep the type of the entry", "[config][common]")
+{
+  const std::string filename = "test_override_types.json";
+  std::ofstream(filename, std::ofstream::trunc) << R"JSON({"a": {"i": 3, "d": 0.5, "b": true, "s": "x"}})JSON";
+
+  // probe() returns an empty tree on any error, so a rejected override shows up as a missing section.
+  const auto probe = [&](const std::string &flag, const std::string &assignment) {
+    std::vector<std::string> args{"test", "-p", filename, flag, assignment};
+    std::vector<char *> argv;
+    for (auto &arg : args)
+      argv.push_back(arg.data());
+    return ConfigurationHelper::probe(static_cast<int>(argv.size()), argv.data());
+  };
+  const auto entry = [](ConfigTree config, const std::string &key) -> json::value { return config().at_pointer(key); };
+
+  // An integral value keeps an integer entry an integer, whichever numeric flag sets it.
+  CHECK(entry(probe("-sd", "/a/i=2"), "/a/i") == json::value(std::int64_t(2)));
+  CHECK(entry(probe("-sd", "/a/i=2.0"), "/a/i") == json::value(std::int64_t(2)));
+  CHECK_FALSE(probe("-sd", "/a/i=2.5").contains("/a"));
+  // A floating-point entry stays floating-point.
+  CHECK(entry(probe("-si", "/a/d=4"), "/a/d").is_double());
+  CHECK_FALSE(probe("-si", "/a/d=1.5").contains("/a"));
+  // Values must parse completely.
+  CHECK_FALSE(probe("-sd", "/a/d=0.1abc").contains("/a"));
+  // Booleans: true, false, 1, 0 in any case.
+  CHECK(entry(probe("-sb", "/a/b=FALSE"), "/a/b") == json::value(false));
+  CHECK(entry(probe("-sb", "/a/b=1"), "/a/b") == json::value(true));
+  CHECK_FALSE(probe("-sb", "/a/b=yes").contains("/a"));
+  // A string value may contain '='.
+  CHECK(entry(probe("-ss", "/a/s=b=c"), "/a/s") == json::value("b=c"));
+  // The flag must fit the entry.
+  CHECK_FALSE(probe("-sd", "/a/s=1").contains("/a"));
+  CHECK_FALSE(probe("-ss", "/a/d=1").contains("/a"));
+  // A missing key is created with the flag's type, including missing sections.
+  CHECK(entry(probe("-si", "/new/section/n=4"), "/new/section/n") == json::value(std::int64_t(4)));
+  CHECK(entry(probe("-sd", "/a/x=4"), "/a/x").is_double());
+  CHECK(entry(probe("-sb", "/a/flag=true"), "/a/flag") == json::value(true));
+  CHECK(entry(probe("-ss", "/a/name=hi"), "/a/name") == json::value("hi"));
+  CHECK_FALSE(probe("-si", "/a/y=0.5").contains("/a"));
+
+  std::filesystem::remove(filename);
+}
+
+TEST_CASE("Parameter file generation", "[config][common]")
+{
+  // Generation terminates the process, so it runs in a child.
+  const auto generate = [](std::vector<std::string> args) {
+    args.insert(args.begin(), "test");
+    const pid_t pid = fork();
+    if (pid == 0) {
+      std::vector<char *> argv;
+      for (auto &arg : args)
+        argv.push_back(arg.data());
+      ConfigurationHelper(static_cast<int>(argv.size()), argv.data(), "test_generated.json");
+      _exit(2); // not reached
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  };
+  for (const auto *name : {"test_generated.toml", "test_generated.json", "test_generated_p.json"})
+    std::filesystem::remove(name);
+
+  SECTION("TOML by default, named like the parameter file")
+  {
+    CHECK(generate({"--generate-parameter-file"}) == 0);
+    CHECK(std::filesystem::exists("test_generated.toml"));
+    CHECK(ConfigTree("test_generated.toml").get_double("/timestepping/output_dt") == Catch::Approx(0.1));
+  }
+  SECTION("JSON on request, and -p may come after the flag")
+  {
+    CHECK(generate({"--gen-json", "-p", "test_generated_p.toml"}) == 0);
+    CHECK(std::filesystem::exists("test_generated_p.json"));
+  }
+  SECTION("An existing file is not replaced")
+  {
+    std::ofstream("test_generated.toml") << "keep = 1\n";
+    CHECK(generate({"--gen-toml"}) == 1);
+    CHECK(ConfigTree("test_generated.toml").get_int("/keep") == 1);
+  }
+
+  for (const auto *name : {"test_generated.toml", "test_generated.json", "test_generated_p.json"})
+    std::filesystem::remove(name);
 }
 
 TEST_CASE("contains() distinguishes a missing key from a present one", "[config][common]")

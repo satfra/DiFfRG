@@ -23,8 +23,8 @@
  * | Form                          | missing key                   | unreadable value              |
  * |-------------------------------|-------------------------------|-------------------------------|
  * | `get_double(key)`             | throws `std::runtime_error`   | throws `std::runtime_error`   |
- * | `get_double(key, def)`        | returns `def`                 | returns `def`, silently       |
- * | `get_double_or_warn(key, def)`| returns `def`, warns once     | returns `def`, warns once     |
+ * | `get_double(key, def)`        | returns `def`                 | throws `std::runtime_error`   |
+ * | `get_double_or_warn(key, def)`| returns `def`, warns once     | throws `std::runtime_error`   |
  *
  * and likewise for `int`, `uint`, `string` and `bool`. Numbers are converted only in one direction: an
  * integer entry (`2`) can be read with `get_double`, but a floating-point entry (`2.0`) cannot be read with
@@ -180,7 +180,7 @@ namespace DiFfRG
      * @brief Read a number, or return `def`. Integer entries are accepted as well.
      *
      * @param key The key, e.g. "/physical/T".
-     * @param def Returned if the key is missing or its entry is not a number.
+     * @param def Returned if the key is missing; an entry that is not a number throws.
      */
     double get_double(const std::string &key, const double def) const;
 
@@ -188,7 +188,7 @@ namespace DiFfRG
      * @brief Read an integer, or return `def`.
      *
      * @param key The key.
-     * @param def Returned if the key is missing or its entry is not an integer (e.g. `2.0`).
+     * @param def Returned if the key is missing; an entry that is not an integer (e.g. `2.0`) throws.
      */
     int get_int(const std::string &key, const int def) const;
 
@@ -196,7 +196,7 @@ namespace DiFfRG
      * @brief Read a non-negative integer, or return `def`.
      *
      * @param key The key.
-     * @param def Returned if the key is missing, or its entry is not an integer or is negative.
+     * @param def Returned if the key is missing; an entry that is not a non-negative integer throws.
      */
     uint get_uint(const std::string &key, const uint def) const;
 
@@ -204,7 +204,7 @@ namespace DiFfRG
      * @brief Read a string, or return `def`.
      *
      * @param key The key.
-     * @param def Returned if the key is missing or its entry is not a string.
+     * @param def Returned if the key is missing; an entry that is not a string throws.
      */
     std::string get_string(const std::string &key, const std::string &def) const;
 
@@ -212,7 +212,7 @@ namespace DiFfRG
      * @brief Read a boolean, or return `def`.
      *
      * @param key The key.
-     * @param def Returned if the key is missing or its entry is not a boolean.
+     * @param def Returned if the key is missing; an entry that is not a boolean throws.
      */
     bool get_bool(const std::string &key, const bool def) const;
 
@@ -226,7 +226,7 @@ namespace DiFfRG
     /** @name Getters that warn when they fall back to the default
      *
      * Like the two-argument getters, but they print a warning to stderr (once per key and process) whenever
-     * `def` is returned, i.e. when the key is missing or its entry cannot be read as the requested type. Use
+     * `def` is returned, i.e. when the key is missing. Use
      * them for parameters whose default is a guess rather than a safe choice: quadrature orders, solver
      * tolerances, grids, the cutoff scale.
      * @{

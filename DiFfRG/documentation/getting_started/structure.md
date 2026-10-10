@@ -65,7 +65,7 @@ x_grid = "0:1e-2:1"
 
 Nothing else changes with the format. Parameters are always addressed by the same path, both from C++ (`config.get_double("/physical/T")`) and on the command line (`-sd /physical/T=0.1`), and the configuration log written next to the output is always JSON.
 
-If no parameter file is given with `-p` and the default `parameter.json` does not exist, but `parameter.toml` does, the latter is used. A file named explicitly with `-p` is never substituted. `--generate-parameter-file` writes whichever format the parameter file name implies.
+If no parameter file is given with `-p` and the default `parameter.json` does not exist, but `parameter.toml` does, the latter is used. A file named explicitly with `-p` is never substituted. `--generate-parameter-file` (or `--gen-toml`) writes a TOML file with the default values, `--gen-json` a JSON file; the file is named like the parameter file and an existing file is never replaced.
 
 `ConfigTree` was previously called `JSONValue`; that name still works as a deprecated alias.
 
