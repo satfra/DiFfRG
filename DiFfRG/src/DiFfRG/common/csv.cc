@@ -1,5 +1,6 @@
 // standard library
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <fstream>
@@ -99,20 +100,28 @@ namespace DiFfRG
       if (text.empty()) return nan_value;
     }
 
-    // Anything the parser could not consume in full is not a number, and a non-finite value is
-    // normalised to NaN so that downstream NaN filtering sees every gap in the data.
+    // Anything the parser could not consume in full is not a number. Infinities are kept, every NaN
+    // spelling becomes the same NaN.
     double value = nan_value;
 #if defined(__cpp_lib_to_chars)
     const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-    if (error != std::errc{} || end != text.data() + text.size() || !std::isfinite(value)) return nan_value;
+    if (error != std::errc{} || end != text.data() + text.size() || std::isnan(value)) return nan_value;
 #else
     // Older libc++ (e.g. AppleClang 15) has no floating-point from_chars; a classic-locale stream
-    // keeps the parse locale-independent. Unlike from_chars, a stream would accept "++5".
+    // keeps the parse locale-independent. Unlike from_chars, a stream would accept "++5", and it
+    // does not read infinities.
     if (text.front() == '+') return nan_value;
+    {
+      const bool negative = text.front() == '-';
+      std::string lower(negative ? text.substr(1) : text);
+      std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+      if (lower == "inf" || lower == "infinity")
+        return negative ? -std::numeric_limits<double>::infinity() : std::numeric_limits<double>::infinity();
+    }
     std::istringstream stream{std::string(text)};
     stream.imbue(std::locale::classic());
     stream >> value;
-    if (stream.fail() || !stream.eof() || !std::isfinite(value)) return nan_value;
+    if (stream.fail() || !stream.eof() || std::isnan(value)) return nan_value;
 #endif
     return value;
   }
@@ -184,14 +193,19 @@ namespace DiFfRG
   void write_csv_header(std::ostream &stream, const std::vector<std::string> &names, const CsvDialect &dialect)
   {
     // Callers that route names through strip_name never need quoting, but a name is free-form text
-    // in general and must not be allowed to forge a field boundary.
-    const std::string forbidden{dialect.separator, '"', '\n'};
+    // in general and must not be allowed to forge a field boundary. The reader splits records at line
+    // breaks, so those become spaces; a name opening with the comment character is quoted, or the
+    // whole header line would read as a comment.
+    const std::string forbidden{dialect.separator, '"'};
 
     for (size_t i = 0; i < names.size(); ++i) {
       if (i > 0) stream << dialect.separator;
 
-      const auto &name = names[i];
-      if (name.find_first_of(forbidden) == std::string::npos)
+      std::string name = names[i];
+      std::replace_if(name.begin(), name.end(), [](const char c) { return c == '\n' || c == '\r'; }, ' ');
+      const auto leading = trim(name);
+      const bool opens_comment = dialect.comment != '\0' && !leading.empty() && leading.front() == dialect.comment;
+      if (name.find_first_of(forbidden) == std::string::npos && !opens_comment)
         stream << name;
       else {
         stream << '"';

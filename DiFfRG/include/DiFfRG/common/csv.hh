@@ -19,8 +19,8 @@ namespace DiFfRG
    * The Python reader python/DiFfRG/file_io/csv.py implements the same rules.
    *
    * - Data cells hold numbers only; parsing does not depend on the locale.
-   * - A cell that is empty, does not parse, or is infinite reads as NaN, so gaps stay visible in the data.
-   *   In particular `inf` and `-inf` are read back as NaN.
+   * - A cell that is empty or does not parse reads as NaN, so gaps stay visible in the data. `inf` and `-inf` are
+   *   read as infinities.
    * - Header names may be quoted with `"` (a quote inside is written `""`), which is the only way a name can
    *   contain the separator. A quoted name cannot span several lines.
    * - Rows whose number of fields differs from the first row (the header, if there is one) are skipped with a
@@ -92,14 +92,15 @@ namespace DiFfRG
   std::vector<std::string> split_csv_line(std::string_view line, char separator);
 
   /**
-   * @brief Parse a single numeric cell; NaN for anything that is not a finite number.
+   * @brief Parse a single numeric cell; NaN for anything that is not a number (infinities are kept).
    *
    * @param field The cell text; surrounding whitespace and a leading `+` are allowed.
    */
   double parse_csv_cell(std::string_view field);
 
   /**
-   * @brief Write a header row. Names containing the separator, `"` or a line break are quoted.
+   * @brief Write a header row. Line breaks in names become spaces; names containing the separator or `"`, or
+   * starting with the comment character, are quoted.
    *
    * @param stream The stream to write to.
    * @param names The column names.

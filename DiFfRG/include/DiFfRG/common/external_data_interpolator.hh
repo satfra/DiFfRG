@@ -15,8 +15,8 @@ namespace DiFfRG
    *
    * The columns of all files are placed side by side and numbered consecutively: with two files of three columns
    * each, the columns of the second file are 3, 4, 5. All files must have the same number of rows. Rows that contain
-   * a NaN in any column are dropped. Column `i` is then interpolated as a function of column `x_column` with a
-   * barycentric rational interpolant (see Interpolation::Barycentric).
+   * a NaN or an infinity in any column are dropped. Column `i` is then interpolated as a function of column `x_column`
+   * with a barycentric rational interpolant (see Interpolation::Barycentric).
    *
    * Outside the range of the data, value() returns the value at the nearest end of the range and derivative() the
    * derivative there. The constructor checks that the interpolant reproduces every data point to a relative
