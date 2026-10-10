@@ -180,8 +180,7 @@ namespace
              {"minimal_dt", dt * 1.0e-8},
              {"maximal_dt", dt},
              {"abs_tol", 1.0e-9},
-             {"rel_tol", 1.0e-9},
-             {"max_steps", 1000000}}}}},
+             {"rel_tol", 1.0e-9}}}}},
          {"output", {{"verbosity", 1}, {"vtk", true}, {"hdf5", true}}}});
   }
 

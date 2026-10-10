@@ -167,8 +167,7 @@ namespace on_kt_3D
              {"minimal_dt", 1.0e-14},
              {"maximal_dt", 1.0},
              {"abs_tol", ida_abs_tol},
-             {"rel_tol", ida_rel_tol},
-             {"max_steps", 5'000'000}}}}},
+             {"rel_tol", ida_rel_tol}}}}},
          {"output", {{"verbosity", 1}, {"vtk", false}, {"hdf5", false}}}});
   }
 

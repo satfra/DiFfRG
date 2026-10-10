@@ -18,6 +18,7 @@
 #include <DiFfRG/discretization/data/output_session.hh>
 #include <DiFfRG/timestepping/abm_error_control.hh>
 #include <DiFfRG/timestepping/ida_rank_agreement.hh>
+#include <DiFfRG/timestepping/ida_step_bounds.hh>
 #include <DiFfRG/timestepping/linear_solver/GMRES.hh>
 #include <DiFfRG/timestepping/linear_solver/PETScDirect.hh>
 #include <DiFfRG/timestepping/linear_solver/PETScKrylov.hh>
@@ -71,6 +72,7 @@ namespace DiFfRG
                                                                 impl.max_non_linear_iterations, 0, impl.abs_tol,
                                                                 impl.rel_tol);
     typename SUNDIALS::IDA<VectorType> time_stepper(ida_data);
+    internal::set_ida_step_bounds(time_stepper, impl.minimal_dt, impl.maximal_dt);
 
     // Initialize initial condition
     VectorType spatial_y = initial_data.block(0);
@@ -343,12 +345,12 @@ namespace DiFfRG
     // away from fast features (a jump in the variables' right-hand side, say) nothing changes;
     // across one the step shrinks and grows back.
     internal::ABMStepControl step_control({.enabled = expl.error_control,
-                                                  .aligned = false,
-                                                  .t0 = t_start,
-                                                  .base_dt = base_dt,
-                                                  .minimal_dt = expl.minimal_dt,
-                                                  .abs_tol = expl.abs_tol,
-                                                  .rel_tol = expl.rel_tol});
+                                           .aligned = false,
+                                           .t0 = t_start,
+                                           .base_dt = base_dt,
+                                           .minimal_dt = expl.minimal_dt,
+                                           .abs_tol = expl.abs_tol,
+                                           .rel_tol = expl.rel_tol});
     auto explicit_step = [&](double &step_time) {
       step_control.step(variable_stepper, get_variable_residual, variable_sol, step_time, cur_dt,
                         [&](const double t, const double dt, const double err) {
@@ -724,151 +726,150 @@ namespace DiFfRG
     };
 
     //  Calculate the residual of y_dot + F(y)
-    time_stepper.residual = internal::throw_on_ida_failure([&](const double t, const VectorType &y,
-                                                               const VectorType &y_dot, VectorType &res) -> int {
-      CalcDtTimer calc_timer;
-      if (is_close(t, stuck_t, impl.minimal_dt * 1e-1))
-        stuck++;
-      else {
-        stuck = 0;
-        stuck_t = t;
-      }
+    time_stepper.residual = internal::throw_on_ida_failure(
+        [&](const double t, const VectorType &y, const VectorType &y_dot, VectorType &res) -> int {
+          CalcDtTimer calc_timer;
+          if (is_close(t, stuck_t, impl.minimal_dt * 1e-1))
+            stuck++;
+          else {
+            stuck = 0;
+            stuck_t = t;
+          }
 
-      if (stuck > 200) throw std::runtime_error("timestepping got stuck at t = " + std::to_string(t));
-      if (failure_counter > 200) {
-        throw std::runtime_error("timestep failure, at t = " + std::to_string(t));
-      }
-      if (!std::isfinite(y.l1_norm())) {
-        callback_diagnostics.nonfinite_solution_failures++;
-        return ++failure_counter;
-      }
+          if (stuck > 200) throw std::runtime_error("timestepping got stuck at t = " + std::to_string(t));
+          if (failure_counter > 200) {
+            throw std::runtime_error("timestep failure, at t = " + std::to_string(t));
+          }
+          if (!std::isfinite(y.l1_norm())) {
+            callback_diagnostics.nonfinite_solution_failures++;
+            return ++failure_counter;
+          }
 
-      bool failed = false;
-      try {
-        res = 0;
-        assembler.set_time(t);
-        const auto request_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
-        ProgressEvent variables_event{.topic = progress_topics::variables, .time = t, .minimum_verbosity = 2};
-        request_diagnostics.append_to(variables_event);
-        this->log.progress(variables_event);
-        request_variables(variable_y, y, t);
-        y_state.refresh(y);
-        y_dot_state.refresh(y_dot);
-        assembler.residual(res, y_state.get(), 1., y_dot_state.get(), 1., variable_y);
-        residual = &res;
-      } catch (std::exception &e) {
-        callback_diagnostics.residual_exceptions++;
-        failed = true;
-      }
-      // An exception is local to the rank that threw; agree before the next collective.
-      if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
+          bool failed = false;
+          try {
+            res = 0;
+            assembler.set_time(t);
+            const auto request_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
+            ProgressEvent variables_event{.topic = progress_topics::variables, .time = t, .minimum_verbosity = 2};
+            request_diagnostics.append_to(variables_event);
+            this->log.progress(variables_event);
+            request_variables(variable_y, y, t);
+            y_state.refresh(y);
+            y_dot_state.refresh(y_dot);
+            assembler.residual(res, y_state.get(), 1., y_dot_state.get(), 1., variable_y);
+            residual = &res;
+          } catch (std::exception &e) {
+            callback_diagnostics.residual_exceptions++;
+            failed = true;
+          }
+          // An exception is local to the rank that threw; agree before the next collective.
+          if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
 
-      if (!std::isfinite(res.l1_norm())) {
-        callback_diagnostics.nonfinite_residual_failures++;
-        return ++failure_counter;
-      }
+          if (!std::isfinite(res.l1_norm())) {
+            callback_diagnostics.nonfinite_residual_failures++;
+            return ++failure_counter;
+          }
 
-      const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
-      ProgressEvent residual_event{.topic = progress_topics::implicit_residual,
-                                   .time = t,
-                                   .duration_ms = calc_timer.lap(),
-                                   .minimum_verbosity = 1};
-      current_diagnostics.append_to(residual_event);
-      this->log.progress(residual_event);
-
-      failure_counter = 0;
-      return 0;
-    });
-    // Calculate the jacobian d(y_dot + F(y))/dy + d(y_dot*alpha)/dy_dot
-    time_stepper.setup_jacobian = internal::throw_on_ida_failure([&](const double t, const VectorType &y,
-                                                                     const VectorType &y_dot,
-                                                                     const double alpha) -> int {
-      CalcDtTimer calc_timer;
-      if (failure_counter > 200) throw std::runtime_error("timestep failure at jacobian");
-
-      const auto build_diagnostics = make_ida_jacobian_build_diagnostics(time_stepper, this->next_jacobian_build_id++,
-                                                                         alpha, ImplicitTimestepperKind::ida_boost_abm);
-      JacobianMatrixDiagnostics matrix_diagnostics;
-      matrix_diagnostics.n_rows = spatial_jacobian.m();
-      JacobianFactorizationDiagnostics factorization_diagnostics;
-      bool diagnostics_recorded = false;
-      const auto record_diagnostics = [&]() {
-        if (diagnostics_recorded) return;
-        diagnostics_recorded = true;
-        record_jacobian_diagnostics(jacobian_diagnostic_port, "jacobian_diagnostics.csv", t, build_diagnostics,
-                                    matrix_diagnostics, factorization_diagnostics);
-      };
-
-      bool failed = false;
-      try {
-        spatial_jacobian = 0;
-        assembler.set_time(t);
-        const auto request_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
-        ProgressEvent variables_event{.topic = progress_topics::variables, .time = t, .minimum_verbosity = 2};
-        request_diagnostics.append_to(variables_event);
-        this->log.progress(variables_event);
-        request_variables(variable_y, y, t);
-        y_state.refresh(y);
-        y_dot_state.refresh(y_dot);
-        assembler.jacobian(spatial_jacobian, y_state.get(), 1., y_dot_state.get(), alpha, 1., variable_y);
-        if (jacobian_diagnostics_enabled) matrix_diagnostics = analyze_jacobian_matrix(spatial_jacobian);
-        linSolver.init(spatial_jacobian);
-
-        const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
-        ProgressEvent jacobian_event{
-            .topic = progress_topics::jacobian, .time = t, .duration_ms = calc_timer.lap(), .minimum_verbosity = 2};
-        current_diagnostics.append_to(jacobian_event);
-        this->log.progress(jacobian_event);
-
-        factorize_with_diagnostics(linSolver, spatial_jacobian, factorization_diagnostics,
-                                   jacobian_diagnostics_enabled);
-        if (factorization_diagnostics.factorization_success == 1.) {
           const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
-          ProgressEvent factorization_event{.topic = progress_topics::factorization,
-                                            .time = t,
-                                            .duration_ms = calc_timer.lap(),
-                                            .minimum_verbosity = 3};
-          current_diagnostics.append_to(factorization_event);
-          this->log.progress(factorization_event);
-        }
-        record_diagnostics();
-      } catch (std::exception &e) {
-        if constexpr (decltype(linSolver)::performs_factorization)
-          if (std::isnan(factorization_diagnostics.factorization_success))
-            factorization_diagnostics.factorization_success = 0.;
-        record_diagnostics();
-        callback_diagnostics.jacobian_failures++;
-        failed = true;
-      }
-      if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
+          ProgressEvent residual_event{.topic = progress_topics::implicit_residual,
+                                       .time = t,
+                                       .duration_ms = calc_timer.lap(),
+                                       .minimum_verbosity = 1};
+          current_diagnostics.append_to(residual_event);
+          this->log.progress(residual_event);
 
-      failure_counter = 0;
-      return 0;
-    });
+          failure_counter = 0;
+          return 0;
+        });
+    // Calculate the jacobian d(y_dot + F(y))/dy + d(y_dot*alpha)/dy_dot
+    time_stepper.setup_jacobian = internal::throw_on_ida_failure(
+        [&](const double t, const VectorType &y, const VectorType &y_dot, const double alpha) -> int {
+          CalcDtTimer calc_timer;
+          if (failure_counter > 200) throw std::runtime_error("timestep failure at jacobian");
+
+          const auto build_diagnostics = make_ida_jacobian_build_diagnostics(
+              time_stepper, this->next_jacobian_build_id++, alpha, ImplicitTimestepperKind::ida_boost_abm);
+          JacobianMatrixDiagnostics matrix_diagnostics;
+          matrix_diagnostics.n_rows = spatial_jacobian.m();
+          JacobianFactorizationDiagnostics factorization_diagnostics;
+          bool diagnostics_recorded = false;
+          const auto record_diagnostics = [&]() {
+            if (diagnostics_recorded) return;
+            diagnostics_recorded = true;
+            record_jacobian_diagnostics(jacobian_diagnostic_port, "jacobian_diagnostics.csv", t, build_diagnostics,
+                                        matrix_diagnostics, factorization_diagnostics);
+          };
+
+          bool failed = false;
+          try {
+            spatial_jacobian = 0;
+            assembler.set_time(t);
+            const auto request_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
+            ProgressEvent variables_event{.topic = progress_topics::variables, .time = t, .minimum_verbosity = 2};
+            request_diagnostics.append_to(variables_event);
+            this->log.progress(variables_event);
+            request_variables(variable_y, y, t);
+            y_state.refresh(y);
+            y_dot_state.refresh(y_dot);
+            assembler.jacobian(spatial_jacobian, y_state.get(), 1., y_dot_state.get(), alpha, 1., variable_y);
+            if (jacobian_diagnostics_enabled) matrix_diagnostics = analyze_jacobian_matrix(spatial_jacobian);
+            linSolver.init(spatial_jacobian);
+
+            const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
+            ProgressEvent jacobian_event{
+                .topic = progress_topics::jacobian, .time = t, .duration_ms = calc_timer.lap(), .minimum_verbosity = 2};
+            current_diagnostics.append_to(jacobian_event);
+            this->log.progress(jacobian_event);
+
+            factorize_with_diagnostics(linSolver, spatial_jacobian, factorization_diagnostics,
+                                       jacobian_diagnostics_enabled);
+            if (factorization_diagnostics.factorization_success == 1.) {
+              const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
+              ProgressEvent factorization_event{.topic = progress_topics::factorization,
+                                                .time = t,
+                                                .duration_ms = calc_timer.lap(),
+                                                .minimum_verbosity = 3};
+              current_diagnostics.append_to(factorization_event);
+              this->log.progress(factorization_event);
+            }
+            record_diagnostics();
+          } catch (std::exception &e) {
+            if constexpr (decltype(linSolver)::performs_factorization)
+              if (std::isnan(factorization_diagnostics.factorization_success))
+                factorization_diagnostics.factorization_success = 0.;
+            record_diagnostics();
+            callback_diagnostics.jacobian_failures++;
+            failed = true;
+          }
+          if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
+
+          failure_counter = 0;
+          return 0;
+        });
 
     // Solve the linear system J dst = src
-    time_stepper.solve_with_jacobian = internal::throw_on_ida_failure([&](const VectorType &src, VectorType &dst,
-                                                                          const double tol) -> int {
-      CalcDtTimer calc_timer;
-      bool failed = false;
-      try {
-        const auto sol_iterations = linSolver.solve(src, dst, tol);
-        // A direct solver reports no iterations (-1), but its time counts all the same.
-        const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
-        ProgressEvent solve_event{.topic = progress_topics::implicit_linear_solve,
-                                  .time = stuck_t,
-                                  .duration_ms = calc_timer.lap(),
-                                  .iterations = sol_iterations,
-                                  .minimum_verbosity = 2};
-        current_diagnostics.append_to(solve_event);
-        this->log.progress(solve_event);
-      } catch (std::exception &) {
-        callback_diagnostics.linear_solver_failures++;
-        failed = true;
-      }
-      if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
-      return 0;
-    });
+    time_stepper.solve_with_jacobian =
+        internal::throw_on_ida_failure([&](const VectorType &src, VectorType &dst, const double tol) -> int {
+          CalcDtTimer calc_timer;
+          bool failed = false;
+          try {
+            const auto sol_iterations = linSolver.solve(src, dst, tol);
+            // A direct solver reports no iterations (-1), but its time counts all the same.
+            const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
+            ProgressEvent solve_event{.topic = progress_topics::implicit_linear_solve,
+                                      .time = stuck_t,
+                                      .duration_ms = calc_timer.lap(),
+                                      .iterations = sol_iterations,
+                                      .minimum_verbosity = 2};
+            current_diagnostics.append_to(solve_event);
+            this->log.progress(solve_event);
+          } catch (std::exception &) {
+            callback_diagnostics.linear_solver_failures++;
+            failed = true;
+          }
+          if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
+          return 0;
+        });
 
     // Start the time loop
     try {

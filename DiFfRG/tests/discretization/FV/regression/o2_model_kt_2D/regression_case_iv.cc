@@ -187,8 +187,7 @@ namespace
              {"minimal_dt", 1.0e-14},
              {"maximal_dt", 1.0},
              {"abs_tol", 1.0e-12},
-             {"rel_tol", 1.0e-10},
-             {"max_steps", 5000000}}}}},
+             {"rel_tol", 1.0e-10}}}}},
          {"output", {{"verbosity", 3}, {"vtk", params.write_output}, {"hdf5", params.write_output}}}});
   }
 

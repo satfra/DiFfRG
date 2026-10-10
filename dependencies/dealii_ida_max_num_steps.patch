@@ -1,6 +1,8 @@
+diff --git a/include/deal.II/sundials/ida.h b/include/deal.II/sundials/ida.h
+index a228d8f..926c34e 100644
 --- a/include/deal.II/sundials/ida.h
 +++ b/include/deal.II/sundials/ida.h
-@@ -611,6 +611,28 @@
+@@ -859,6 +859,28 @@ namespace SUNDIALS
       */
      ~IDA();
  
@@ -29,9 +31,25 @@
      /**
       * Integrate differential-algebraic equations. This function returns the
       * final number of computed steps.
+@@ -1062,6 +1084,13 @@ namespace SUNDIALS
+      */
+     std::function<VectorType &()> get_local_tolerances;
+ 
++    /**
++     * Called with the IDA memory block at the end of every (re)initialization,
++     * after all options set by this class, to set further SUNDIALS options
++     * (e.g. IDASetMinStep, IDASetMaxStep). Optional.
++     */
++    std::function<void(void *ida_mem)> custom_setup;
++
+     /**
+      * Handle IDA exceptions.
+      */
+diff --git a/source/sundials/ida.cc b/source/sundials/ida.cc
+index dd1d09e..14f754b 100644
 --- a/source/sundials/ida.cc
 +++ b/source/sundials/ida.cc
-@@ -39,6 +39,7 @@
+@@ -44,6 +44,7 @@
  
  #  include <iomanip>
  #  include <iostream>
@@ -39,7 +57,7 @@
  
  DEAL_II_NAMESPACE_OPEN
  
-@@ -165,6 +166,66 @@
+@@ -90,6 +91,66 @@ namespace SUNDIALS
  #  endif
    }
  
@@ -106,7 +124,7 @@
  
  
    template <typename VectorType>
-@@ -325,7 +361,8 @@
+@@ -322,13 +383,17 @@ namespace SUNDIALS
      status = IDASetSuppressAlg(ida_mem, data.ignore_algebraic_terms_for_errors);
      AssertIDA(status);
  
@@ -116,3 +134,12 @@
      status = IDASetStopTime(ida_mem, data.final_time);
      AssertIDA(status);
  
+     status = IDASetMaxNonlinIters(ida_mem, data.maximum_non_linear_iterations);
+     AssertIDA(status);
+ 
++    if (custom_setup)
++      custom_setup(ida_mem);
++
+     // Initialize solver
+     SUNMatrix       J  = nullptr;
+     SUNLinearSolver LS = nullptr;

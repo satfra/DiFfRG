@@ -213,7 +213,6 @@ namespace
              {"maximal_dt", 1.0},
              {"abs_tol", 1.0e-12},
              {"rel_tol", 1.0e-12},
-             {"max_steps", 5000000},
              {"ida_error_dof_diagnostics", params.inspect_ida_error_dofs},
              {"ida_error_dof_diagnostics_top_n", static_cast<std::int64_t>(params.ida_error_dof_top_n)}}}}},
          {"output", {{"verbosity", 3}, {"vtk", true}, {"hdf5", true}}}});

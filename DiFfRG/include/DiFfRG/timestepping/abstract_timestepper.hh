@@ -75,11 +75,10 @@
  * |--------------------------------------------------|--------|---------|---------|
  * | `/timestepping/output_dt`                        | double | 0.1     | all: output every `output_dt` in \f$t\f$ |
  * | `/timestepping/implicit/dt`                      | double | 1e-4    | initial step of the implicit steppers |
- * | `/timestepping/implicit/minimal_dt`              | double | 1e-8    | ImplicitEuler, TRBDF2: smallest step; below it Newton failures are accepted. Currently no effect on the IDA step size (IDA: only the time resolution of its stuck check). |
- * | `/timestepping/implicit/maximal_dt`              | double | 1       | ImplicitEuler, TRBDF2: largest step. Currently no effect on IDA. |
+ * | `/timestepping/implicit/minimal_dt`              | double | 1e-8    | smallest step. IDA steppers: bound on IDA's step size (needs DiFfRG's deal.II patch) and time resolution of the stuck check; ImplicitEuler, TRBDF2: below it Newton failures are accepted. |
+ * | `/timestepping/implicit/maximal_dt`              | double | 1       | largest step (IDA steppers: needs DiFfRG's deal.II patch). |
  * | `/timestepping/implicit/abs_tol`                 | double | 1e-13 (warns) | IDA: local error test; ImplicitEuler, TRBDF2: Newton convergence |
  * | `/timestepping/implicit/rel_tol`                 | double | 1e-7 (warns)  | as abs_tol |
- * | `/timestepping/implicit/max_steps`               | uint   | 1e6     | currently no effect |
  * | `/timestepping/implicit/max_non_linear_iterations` | uint | 10      | IDA steppers: Newton iterations per step |
  * | `/timestepping/implicit/local_tolerance_refresh` | double | 4       | IDA without variables and the IDA hybrids, for models with per-dof tolerances; see LocalAbsTolerances |
  * | `/timestepping/implicit/iterative_refinement`    | bool   | true    | UMFPack: refine every direct solve |
@@ -294,7 +293,6 @@ namespace DiFfRG
         impl.dt = config.get_double("/timestepping/implicit/dt", 1e-4);
         impl.minimal_dt = config.get_double("/timestepping/implicit/minimal_dt", 1e-8);
         impl.maximal_dt = config.get_double("/timestepping/implicit/maximal_dt", 1.);
-        impl.max_steps = config.get_uint("/timestepping/implicit/max_steps", 1e6);
         impl.max_non_linear_iterations = config.get_uint("/timestepping/implicit/max_non_linear_iterations", 10);
         impl.jacobian_diagnostics = config.get_bool("/timestepping/implicit/jacobian_diagnostics", false);
         impl.ida_callback_trace = config.get_bool("/timestepping/implicit/ida_callback_trace", false);
@@ -634,7 +632,6 @@ namespace DiFfRG
        * inside IDA the Newton iteration corrects the solve's error anyway (2D O(2) KT flow, 80^2: 16.3 -> 12.8 s),
        * but a badly scaled system then only gets ~1e-7 relative accuracy per solve. */
       bool iterative_refinement;
-      uint max_steps;
       uint max_non_linear_iterations;
       /** Enables the `<run>_jacobian_diagnostics.csv` tables. Off by default because the records
        * are not free: each one costs a full sweep over the assembled Jacobian and, for factorizing

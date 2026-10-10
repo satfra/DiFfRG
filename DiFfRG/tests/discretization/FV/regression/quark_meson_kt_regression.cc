@@ -399,7 +399,6 @@ namespace
              {"maximal_dt", 1.0e-0},
              {"abs_tol", 1.0e-12},
              {"rel_tol", 1.0e-12},
-             {"max_steps", 20000000},
              {"ida_callback_trace", std::is_same_v<Case, LitimLambda12>},
              {"ida_callback_trace_min_t", 3.0},
              {"ida_callback_trace_max_lines", 1200},

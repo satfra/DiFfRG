@@ -185,8 +185,7 @@ namespace DiFfRG
       // Restarting from one of this run's own snapshots continues the run, which keeps its snapshot
       // schedule. Any other restart is a new run and writes snapshots only if the command line asks.
       // Either way, snapshot flags on the command line replace the schedule as a whole.
-      const bool continuing =
-          !restart_file.empty() && own_snapshot_index(OutputPath(config), restart_file).has_value();
+      const bool continuing = !restart_file.empty() && own_snapshot_index(OutputPath(config), restart_file).has_value();
       if (!restart_file.empty() && (!continuing || !cli_created_parameters.empty()))
         if (auto *timestepping = config().as_object().if_contains("timestepping");
             timestepping && timestepping->is_object())
@@ -220,15 +219,13 @@ namespace DiFfRG
     return ConfigTree(snapshot_config);
   }
 
-  void ConfigurationHelper::print_restart_banner(const std::vector<std::string> &overrides,
-                                                 const bool continuing) const
+  void ConfigurationHelper::print_restart_banner(const std::vector<std::string> &overrides, const bool continuing) const
   {
     const std::string rule(78, '=');
     std::cout << rule << "\n"
               << "Restarting from the snapshot '" << restart_file << "'.\n"
               << "The configuration is the snapshot's; no parameter file is read.\n";
-    if (continuing)
-      std::cout << "This continues the run that wrote the snapshot, with its snapshot schedule.\n";
+    if (continuing) std::cout << "This continues the run that wrote the snapshot, with its snapshot schedule.\n";
     if (overrides.empty())
       std::cout << "No parameters are overridden on the command line.\n";
     else {
@@ -415,12 +412,7 @@ This is a DiFfRG simulation. You can pass the following optional parameters to t
              {"rel_tol", 1e-3},
              {"coupling_mode", 1}}},
            {"implicit",
-            {{"dt", 1e-4},
-             {"minimal_dt", 1e-8},
-             {"maximal_dt", 1.},
-             {"abs_tol", 1e-13},
-             {"rel_tol", 1e-7},
-             {"max_steps", 1000000}}}}},
+            {{"dt", 1e-4}, {"minimal_dt", 1e-8}, {"maximal_dt", 1.}, {"abs_tol", 1e-13}, {"rel_tol", 1e-7}}}}},
          {"output", {{"verbosity", 0}, {"folder", "./"}, {"name", "output"}, {"max_pending_frames", 2}}}});
 
     const auto temporary = parameter_file + ".tmp";
