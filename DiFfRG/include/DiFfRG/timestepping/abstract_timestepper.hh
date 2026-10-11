@@ -512,7 +512,7 @@ namespace DiFfRG
       assembler.reinit_solution_view(spatial_view);
       spatial_view.refresh(state.spatial_data());
       if (has_variables) {
-        reinit_variables_view(variables_view, data.block(1).size(), assembler.get_communicator());
+        internal::reinit_variables_view(variables_view, data.block(1).size(), assembler.get_communicator());
         variables_view.refresh(data.block(1));
       }
 

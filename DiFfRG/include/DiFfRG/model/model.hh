@@ -111,31 +111,6 @@ namespace DiFfRG
       }
 
       /**
-       * @brief If not using a DAE, the mass matrix \f$m_{ij}(x)\f$ is implemented in this method.
-       *
-       * @remarks Note, that the precise template structure is not important, the only important thing is that the types
-       * are consistent with the rest of the model. It is however necessary to leave at least the NumberType, Vector,
-       * and Vector_dot template parameters, as these can differ between calls (e.g. when doing automatic
-       * differentiation).
-       *
-       * @note The standard implementation of this method simply sets \f$m_{ij} = \delta_{ij}\f$.
-       *
-       * @param m_ij the resulting mass matrix \f$m_{ij}\f$, with \f$N_f\f$ components in each dimension.
-       * This method should fill this argument with the desired structure of the flow equation.
-       * @param x a d-dimensional dealii::Point<dim> representing field coordinates.
-       */
-      template <int dim, typename NumberType, size_t n_fe_functions>
-      void mass(std::array<std::array<NumberType, n_fe_functions>, n_fe_functions> &m_ij,
-                [[maybe_unused]] const Point<dim> &x) const
-      {
-        for (uint i = 0; i < n_fe_functions; ++i)
-          for (uint j = 0; j < n_fe_functions; ++j)
-            m_ij[i][j] = 0.;
-        for (uint i = 0; i < n_fe_functions; ++i)
-          m_ij[i][i] = 1.;
-      }
-
-      /**
        * @brief The flux function \f$F_i(u_j, \partial_x u_j, \partial_x^2 u_j, e_b, v_a, x)\f$ is implemented by this
        * method.
        *

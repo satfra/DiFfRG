@@ -122,10 +122,10 @@ namespace DiFfRG
     void flush(double time);
 
     /** Timing buckets accumulated since the last call, and reset by it. */
-    FrameTimings take_frame_timings()
+    internal::FrameTimings take_frame_timings()
     {
-      const FrameTimings taken = frame_timings;
-      frame_timings = FrameTimings{};
+      const internal::FrameTimings taken = frame_timings;
+      frame_timings = internal::FrameTimings{};
       return taken;
     }
 
@@ -201,7 +201,7 @@ namespace DiFfRG
 
     bool save_vtk;
 
-    FrameTimings frame_timings;
+    internal::FrameTimings frame_timings;
   };
 
   template <typename VectorType> class FEOutput<0, VectorType>
@@ -228,7 +228,7 @@ namespace DiFfRG
     }
     void drain() {}
     void finish() {}
-    FrameTimings take_frame_timings() { return {}; }
+    internal::FrameTimings take_frame_timings() { return {}; }
   };
 
 } // namespace DiFfRG

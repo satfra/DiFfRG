@@ -125,32 +125,14 @@ namespace DiFfRG
       template <uint to, typename NT, typename Solution>
       void jacobian_variables(FullMatrix<NT> &jac, const Solution &sol) const
       {
+        static_assert(to == 0, "Only the jacobian with respect to the variables is provided.");
         const auto &variables = get<0>(sol);
-        if constexpr (to == 0) {
-          AssertThrow(jac.m() == variables.size() && jac.n() == variables.size(),
-                      ExcMessage("Assure that the jacobian has the right dimension!"));
-        } else if constexpr (to == 1) {
-          // Only read here: a pure-variables solution has no extractor entry.
-          AssertThrow(jac.m() == variables.size() && jac.n() == get<1>(sol).size(),
-                      ExcMessage("Assure that the jacobian has the right dimension!"));
-        }
-
-        if constexpr (to == 0) {
+        AssertThrow(jac.m() == variables.size() && jac.n() == variables.size(),
+                    ExcMessage("Assure that the jacobian has the right dimension!"));
+        {
           auto du = AD_tools::template vector_to_AD<Model::Components::count_variables()>(variables);
           auto ad_sol = std::tuple_cat(tuple_first<to>(sol), std::tie(du), tuple_last<Solution::size - to - 1>(sol));
           for (uint j = 0; j < Model::Components::count_variables(); ++j) {
-            std::array<AD_type, Model::Components::count_variables()> res{{}};
-            seed(du[j]);
-            asImp().dt_variables(res, Solution::as(ad_sol));
-            for (uint i = 0; i < Model::Components::count_variables(); ++i) {
-              jac(i, j) = grad(res[i]);
-            }
-            unseed(du[j]);
-          }
-        } else if constexpr (to == 1) {
-          auto du = AD_tools::template vector_to_AD<Model::Components::count_extractors()>(get<1>(sol));
-          auto ad_sol = std::tuple_cat(tuple_first<to>(sol), std::tie(du), tuple_last<Solution::size - to - 1>(sol));
-          for (uint j = 0; j < Model::Components::count_extractors(); ++j) {
             std::array<AD_type, Model::Components::count_variables()> res{{}};
             seed(du[j]);
             asImp().dt_variables(res, Solution::as(ad_sol));

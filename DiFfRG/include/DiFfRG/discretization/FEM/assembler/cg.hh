@@ -22,11 +22,14 @@ namespace DiFfRG
     using namespace dealii;
     using std::array;
 
-    template <typename... T> auto i_tie(T &&...t)
+    namespace internal
     {
-      return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "fe_derivatives", "fe_hessians">>(
-          std::tie(t...));
-    }
+      template <typename... T> auto i_tie(T &&...t)
+      {
+        return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "fe_derivatives", "fe_hessians">>(
+            std::tie(t...));
+      }
+    } // namespace internal
 
     /**
      * @brief The CG assembler for models with flux and source.
@@ -39,7 +42,7 @@ namespace DiFfRG
      *     source in a flat parallel loop; a model can override it to evaluate its momentum integrals
      *     with one map_points() call per batch, on the CPU or the GPU;
      *  3. scatter: the contraction with the shape functions, in a parallel loop over cell colors, see
-     *     internal::ColoredCells.
+     *     DiFfRG::internal::ColoredCells.
      *
      * Each MPI rank batches its own cells and phase 2 communicates nothing. The results do not depend on
      * the thread count: contributions to a global entry are summed in color order.
@@ -100,9 +103,9 @@ namespace DiFfRG
         for (const auto &row : discretization.get_locally_relevant_dofs())
           for (const auto &col : extractor_dof_indices)
             dsp.add(row, col);
-        finalize_la_sparsity<SparseMatrixType>(dsp, sparsity_pattern_jacobian, discretization.get_locally_owned_dofs(),
-                                               discretization.get_locally_relevant_dofs(),
-                                               discretization.get_communicator());
+        DiFfRG::internal::finalize_la_sparsity<SparseMatrixType>(
+            dsp, sparsity_pattern_jacobian, discretization.get_locally_owned_dofs(),
+            discretization.get_locally_relevant_dofs(), discretization.get_communicator());
       }
 
       /// The model's cell_indicator integrated over each cell; CG has no face contribution.
@@ -124,7 +127,8 @@ namespace DiFfRG
             fe_v.get_function_hessians(solution_global, s.hessians);
             double value = 0., local = 0.;
             for (const auto &q : fe_v.quadrature_point_indices()) {
-              model.cell_indicator(local, fe_v.quadrature_point(q), i_tie(s.values[q], s.gradients[q], s.hessians[q]));
+              model.cell_indicator(local, fe_v.quadrature_point(q),
+                                   internal::i_tie(s.values[q], s.gradients[q], s.hessians[q]));
               value += fe_v.JxW(q) * local;
             }
             indicator[cells[k]->active_cell_index()] += value;
@@ -167,7 +171,7 @@ namespace DiFfRG
           cell_result.reinit(cell_batch.size(), Term::flux | Term::source);
           model.evaluate_batch(cell_result, cell_batch);
           face_result.reinit(face_batch.size(), Term::flux);
-          evaluate_boundary_numflux(model, face_result, face_normals, face_batch);
+          DiFfRG::internal::evaluate_boundary_numflux(model, face_result, face_normals, face_batch);
         }
         phase.lap(&PhaseTimes::evaluate);
         scatter_residual(residual, [&](const size_t k, CellScratch &s, Vector<NumberType> &r) {
@@ -237,9 +241,10 @@ namespace DiFfRG
         phase.lap(&PhaseTimes::gather);
         {
           const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
-          evaluate_flux_source_jacobian(model, cell_jacobians, cell_batch, max_stacked_points, cell_workspace);
-          evaluate_boundary_numflux_jacobian(model, face_jacobians, face_normals, face_batch, max_stacked_points,
-                                             face_workspace);
+          DiFfRG::internal::evaluate_flux_source_jacobian(model, cell_jacobians, cell_batch, max_stacked_points,
+                                                          cell_workspace);
+          DiFfRG::internal::evaluate_boundary_numflux_jacobian(model, face_jacobians, face_normals, face_batch,
+                                                               max_stacked_points, face_workspace);
         }
         phase.lap(&PhaseTimes::evaluate);
         scatter_jacobian(jacobian, [&](const size_t k, CellScratch &s, LocalData &out) {
@@ -418,7 +423,7 @@ namespace DiFfRG
       }
 
       /// Phase 3: assemble(k, scratch, local) every owned cell, after reinit of its FEValues and dof indices,
-      /// and insert(local) the result; see internal::ColoredCells::scatter.
+      /// and insert(local) the result; see DiFfRG::internal::ColoredCells::scatter.
       template <typename Global, typename Assemble, typename Insert>
       void scatter(Global &global, const Assemble &assemble, const Insert &insert)
       {
@@ -550,8 +555,8 @@ namespace DiFfRG
       Batch cell_batch, face_batch;
       std::vector<Tensor<1, dim>> face_normals;
       BatchOutput<dim, NumberType, n_fe> cell_result, face_result;
-      std::vector<PointJacobian<dim, n_fe, n_fe, n_extr>> cell_jacobians, face_jacobians;
-      SeedStackWorkspace<Batch, n_fe> cell_workspace, face_workspace;
+      std::vector<DiFfRG::internal::PointJacobian<dim, n_fe, n_fe, n_extr>> cell_jacobians, face_jacobians;
+      DiFfRG::internal::SeedStackWorkspace<Batch, n_fe> cell_workspace, face_workspace;
     };
   } // namespace CG
 } // namespace DiFfRG

@@ -85,7 +85,7 @@ namespace DiFfRG
     // process-local vectors. Under MPI the variables block of the state is owned by rank 0 alone and is read through
     // a replicated view; serially the view is a passthrough and these are plain vectors as before.
     SolutionView<VectorType> initial_variables_view;
-    reinit_variables_view(initial_variables_view, n_vars, comm);
+    internal::reinit_variables_view(initial_variables_view, n_vars, comm);
     initial_variables_view.refresh(initial_data.block(1));
     const VectorType initial_variables = initial_variables_view.get();
     VectorType variable_y = initial_variables;
@@ -605,8 +605,9 @@ namespace DiFfRG
     initial_data.block(0) = spatial_y;
     commit_variables(variable_y, spatial_y, t_stop);
     VectorType variables_scratch;
-    reinit_local_variables_vector(variables_scratch, n_vars);
-    compute_variables_into(initial_data.block(1), variables_scratch, [&](VectorType &out) { out = variable_y; });
+    internal::reinit_local_variables_vector(variables_scratch, n_vars);
+    internal::compute_variables_into(initial_data.block(1), variables_scratch,
+                                     [&](VectorType &out) { out = variable_y; });
     this->drain_output();
   }
 } // namespace DiFfRG

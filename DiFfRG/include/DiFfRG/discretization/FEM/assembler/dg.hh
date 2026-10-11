@@ -22,11 +22,14 @@ namespace DiFfRG
     using namespace dealii;
     using std::array;
 
-    template <typename... T> auto i_tie(T &&...t)
+    namespace internal
     {
-      return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "fe_derivatives", "fe_hessians">>(
-          std::tie(t...));
-    }
+      template <typename... T> auto i_tie(T &&...t)
+      {
+        return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "fe_derivatives", "fe_hessians">>(
+            std::tie(t...));
+      }
+    } // namespace internal
 
     /**
      * @brief The DG assembler for models with flux, source and numerical flux.
@@ -104,9 +107,9 @@ namespace DiFfRG
         for (const auto &row : discretization.get_locally_relevant_dofs())
           for (const auto &col : extractor_dof_indices)
             dsp.add(row, col);
-        finalize_la_sparsity<SparseMatrixType>(dsp, sparsity_pattern_jacobian, discretization.get_locally_owned_dofs(),
-                                               discretization.get_locally_relevant_dofs(),
-                                               discretization.get_communicator());
+        DiFfRG::internal::finalize_la_sparsity<SparseMatrixType>(
+            dsp, sparsity_pattern_jacobian, discretization.get_locally_owned_dofs(),
+            discretization.get_locally_relevant_dofs(), discretization.get_communicator());
       }
 
       /**
@@ -145,7 +148,8 @@ namespace DiFfRG
             face_values[f] = {0., 0.};
             for (const auto &q : fe_iv.quadrature_point_indices()) {
               model.face_indicator(local, fe_iv.normal_vector(q), fe_iv.quadrature_point(q),
-                                   i_tie(u_s[q], du_s[q], ddu_s[q]), i_tie(u_n[q], du_n[q], ddu_n[q]));
+                                   internal::i_tie(u_s[q], du_s[q], ddu_s[q]),
+                                   internal::i_tie(u_n[q], du_n[q], ddu_n[q]));
               face_values[f][0] += fe_iv.JxW(q) * local[0] * (1. + face.cell[0]->at_boundary());
               face_values[f][1] += fe_iv.JxW(q) * local[1] * (1. + face.cell[1]->at_boundary());
             }
@@ -159,7 +163,7 @@ namespace DiFfRG
             const auto [u, du, ddu] = evaluate(fe_v, fe_v.n_quadrature_points);
             double value = 0., local = 0.;
             for (const auto &q : fe_v.quadrature_point_indices()) {
-              model.cell_indicator(local, fe_v.quadrature_point(q), i_tie(u[q], du[q], ddu[q]));
+              model.cell_indicator(local, fe_v.quadrature_point(q), internal::i_tie(u[q], du[q], ddu[q]));
               value += fe_v.JxW(q) * local;
             }
             for (size_t i = topology.face_ref_begin[k]; i < topology.face_ref_begin[k + 1]; ++i)
@@ -200,9 +204,9 @@ namespace DiFfRG
           cell_result.reinit(cell_batch.size(), Term::flux | Term::source);
           model.evaluate_batch(cell_result, cell_batch);
           boundary_result.reinit(boundary_batch.size(), Term::flux);
-          evaluate_boundary_numflux(model, boundary_result, boundary_normals, boundary_batch);
+          DiFfRG::internal::evaluate_boundary_numflux(model, boundary_result, boundary_normals, boundary_batch);
           face_result.reinit(face_batch[0].size(), Term::flux);
-          evaluate_numflux(model, face_result, face_normals, face_batch[0], face_batch[1]);
+          DiFfRG::internal::evaluate_numflux(model, face_result, face_normals, face_batch[0], face_batch[1]);
         }
         phase.lap(&PhaseTimes::evaluate);
         scatter_residual(residual, [&](const size_t k, CellScratch &s, Vector<NumberType> &r) {
@@ -278,11 +282,12 @@ namespace DiFfRG
         phase.lap(&PhaseTimes::gather);
         {
           const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
-          evaluate_flux_source_jacobian(model, cell_jacobians, cell_batch, max_stacked_points, cell_workspace);
-          evaluate_boundary_numflux_jacobian(model, boundary_jacobians, boundary_normals, boundary_batch,
-                                             max_stacked_points, boundary_workspace);
-          evaluate_numflux_jacobian(model, face_jacobians, face_normals, face_batch[0], face_batch[1],
-                                    max_stacked_points, face_workspace);
+          DiFfRG::internal::evaluate_flux_source_jacobian(model, cell_jacobians, cell_batch, max_stacked_points,
+                                                          cell_workspace);
+          DiFfRG::internal::evaluate_boundary_numflux_jacobian(model, boundary_jacobians, boundary_normals,
+                                                               boundary_batch, max_stacked_points, boundary_workspace);
+          DiFfRG::internal::evaluate_numflux_jacobian(model, face_jacobians, face_normals, face_batch[0], face_batch[1],
+                                                      max_stacked_points, face_workspace);
         }
         phase.lap(&PhaseTimes::evaluate);
         scatter_jacobian(jacobian, [&](const size_t k, CellScratch &s, LocalData &out) {
@@ -705,10 +710,10 @@ namespace DiFfRG
       std::array<Batch, 2> face_batch;
       std::vector<Tensor<1, dim>> boundary_normals, face_normals;
       BatchOutput<dim, NumberType, n_fe> cell_result, boundary_result, face_result;
-      std::vector<PointJacobian<dim, n_fe, n_fe, n_extr>> cell_jacobians, boundary_jacobians;
-      std::vector<FaceJacobian<dim, n_fe, n_fe, n_extr>> face_jacobians;
-      SeedStackWorkspace<Batch, n_fe> cell_workspace, boundary_workspace;
-      SeedStackWorkspace<Batch, n_fe, 2> face_workspace;
+      std::vector<DiFfRG::internal::PointJacobian<dim, n_fe, n_fe, n_extr>> cell_jacobians, boundary_jacobians;
+      std::vector<DiFfRG::internal::FaceJacobian<dim, n_fe, n_fe, n_extr>> face_jacobians;
+      DiFfRG::internal::SeedStackWorkspace<Batch, n_fe> cell_workspace, boundary_workspace;
+      DiFfRG::internal::SeedStackWorkspace<Batch, n_fe, 2> face_workspace;
     };
   } // namespace DG
 } // namespace DiFfRG

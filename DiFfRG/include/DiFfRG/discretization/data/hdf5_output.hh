@@ -119,7 +119,7 @@ namespace DiFfRG
       const bool create = info->second.count == 0;
       const hsize_t offset = static_cast<hsize_t>(info->second.count++);
 
-      staged.actions.emplace_back([name, v = value_type(value), create, offset](HDF5FrameContext &context) {
+      staged.actions.emplace_back([name, v = value_type(value), create, offset](internal::HDF5FrameContext &context) {
         auto &group = context.group("scalars");
         auto type = DiFfRG::hdf5::type_of<value_type>();
         if (create) {
@@ -158,7 +158,7 @@ namespace DiFfRG
 
       coord_identifiers[name] = coordinates.to_string();
 
-      staged.actions.emplace_back([name, dims, grid = std::move(grid_data)](HDF5FrameContext &context) {
+      staged.actions.emplace_back([name, dims, grid = std::move(grid_data)](internal::HDF5FrameContext &context) {
         auto space = DiFfRG::hdf5::Dataspace::simple(dims);
         auto dataset = context.group("coordinates").create_dataset(name, DiFfRG::hdf5::type_of<coord_type>(), space);
         dataset.write(grid);
@@ -258,7 +258,7 @@ namespace DiFfRG
      * thread safe here and two writers would call into it concurrently. Passing nullptr (the
      * default) keeps everything on the calling thread.
      */
-    void set_writer(HDF5FrameWriter *writer) { this->writer = writer; }
+    void set_writer(internal::HDF5FrameWriter *writer) { this->writer = writer; }
 
     /** Wait for this sink's queued frames to reach disk and surface any writer error. */
     void drain();
@@ -278,10 +278,10 @@ namespace DiFfRG
     void close_file();
 
     /** Timing buckets accumulated since the last call, and reset by it. */
-    FrameTimings take_frame_timings()
+    internal::FrameTimings take_frame_timings()
     {
-      const FrameTimings taken = frame_timings;
-      frame_timings = FrameTimings{};
+      const internal::FrameTimings taken = frame_timings;
+      frame_timings = internal::FrameTimings{};
       return taken;
     }
 
@@ -302,19 +302,19 @@ namespace DiFfRG
       const bool create_parent = created_map_groups.insert(name).second;
 
       written_map_series.emplace_back(name, series);
-      staged.actions.emplace_back(
-          [name, coord_name, dims, series, create_parent, data = std::move(payload)](HDF5FrameContext &context) {
-            auto &maps_group = context.group("maps");
-            auto parent = create_parent ? maps_group.create_group(name) : maps_group.open_group(name);
-            auto group = parent.create_group(std::to_string(series));
-            write_series_record(group, static_cast<int>(series));
+      staged.actions.emplace_back([name, coord_name, dims, series, create_parent,
+                                   data = std::move(payload)](internal::HDF5FrameContext &context) {
+        auto &maps_group = context.group("maps");
+        auto parent = create_parent ? maps_group.create_group(name) : maps_group.open_group(name);
+        auto group = parent.create_group(std::to_string(series));
+        write_series_record(group, static_cast<int>(series));
 
-            auto space = DiFfRG::hdf5::Dataspace::simple(dims);
-            auto dataset = group.create_dataset("data", DiFfRG::hdf5::type_of<T>(), space);
-            dataset.write(data);
+        auto space = DiFfRG::hdf5::Dataspace::simple(dims);
+        auto dataset = group.create_dataset("data", DiFfRG::hdf5::type_of<T>(), space);
+        dataset.write(data);
 
-            group.create_soft_link("coordinates", "/coordinates/" + coord_name);
-          });
+        group.create_soft_link("coordinates", "/coordinates/" + coord_name);
+      });
     }
 
     const std::string top_folder;
@@ -333,9 +333,9 @@ namespace DiFfRG
     std::set<std::string> created_map_groups;
 
     /** Writes accumulated for the frame in progress; executed by flush(). */
-    HDF5Frame staged;
+    internal::HDF5Frame staged;
     /** Not owned; shared with every other HDF5Output of the same run. */
-    HDF5FrameWriter *writer = nullptr;
+    internal::HDF5FrameWriter *writer = nullptr;
 
     std::list<std::string> written_scalars;
     /** (name, series) of every map written this frame. Carries the series number rather than
@@ -366,6 +366,6 @@ namespace DiFfRG
 
     std::filesystem::path path;
 
-    FrameTimings frame_timings;
+    internal::FrameTimings frame_timings;
   };
 } // namespace DiFfRG

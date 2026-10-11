@@ -64,6 +64,12 @@ namespace DiFfRG
       double max;
       double step;
 
+      [[deprecated("Use get_step_widths")]] std::vector<double> get_stepwiths(const bool origin_cell_centered = false,
+                                                                          const uint refinement = 0) const
+      {
+        return get_step_widths(origin_cell_centered, refinement);
+      }
+
       /**
        * Return a vector of uniform step widths covering [min, max].
        * If the configured step fits the interval (within is_close) it is used;
@@ -73,7 +79,7 @@ namespace DiFfRG
        * configured width and which permits the first final cell to be centered on the origin after @p refinement
        * levels of global refinement. The range must start at zero in that case.
        */
-      std::vector<double> get_stepwiths(const bool origin_cell_centered = false, const uint refinement = 0) const
+      std::vector<double> get_step_widths(const bool origin_cell_centered = false, const uint refinement = 0) const
       {
         if (origin_cell_centered) {
           if (!is_close(min, 0.0))
@@ -208,7 +214,7 @@ namespace DiFfRG
           data.upper_right[i] = grids[i].back().max;
           for (std::size_t subrange = 0; subrange < grids[i].size(); ++subrange) {
             const bool center_first_subrange = origin_cell_centered && subrange == 0;
-            internal::append_range(data.step_sizes[i], grids[i][subrange].get_stepwiths(center_first_subrange, refine));
+            internal::append_range(data.step_sizes[i], grids[i][subrange].get_step_widths(center_first_subrange, refine));
           }
         }
 
@@ -222,9 +228,14 @@ namespace DiFfRG
         return data;
       }
 
-      inline std::vector<std::vector<double>> get_step_withs_for_triangulation() const
+      inline std::vector<std::vector<double>> get_step_widths_for_triangulation() const
       {
         return get_triangulation_data().step_sizes;
+      }
+      [[deprecated("Use get_step_widths_for_triangulation")]] std::vector<std::vector<double>>
+      get_step_withs_for_triangulation() const
+      {
+        return get_step_widths_for_triangulation();
       }
 
       inline dealii::Point<dim, double> get_lower_left() const { return get_triangulation_data().lower_left; }

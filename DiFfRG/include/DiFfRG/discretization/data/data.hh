@@ -138,8 +138,8 @@ namespace DiFfRG
       template <typename Model> void interpolate(const Model &model)
       {
         auto block_structure = discretization.get_block_structure();
-        reinit_la_block_vector(m_data, block_structure, discretization.get_locally_owned_dofs(),
-                               discretization.get_communicator());
+        internal::reinit_la_block_vector(m_data, block_structure, discretization.get_locally_owned_dofs(),
+                                         discretization.get_communicator());
 
         if constexpr (Model::Components::count_fe_functions() > 0) {
           auto interpolating_function = [&model](const auto &p, auto &values) { model.initial_condition(p, values); };
@@ -152,9 +152,9 @@ namespace DiFfRG
           // which elsewhere would stage off-process inserts that the next compress() of the block flushes over the
           // owner's values. compute_variables_into lands only what each rank owns.
           VectorType scratch;
-          reinit_local_variables_vector(scratch, block_structure[1]);
-          compute_variables_into(m_data.block(1), scratch,
-                                 [&](VectorType &out) { model.initial_condition_variables(out); });
+          internal::reinit_local_variables_vector(scratch, block_structure[1]);
+          internal::compute_variables_into(m_data.block(1), scratch,
+                                           [&](VectorType &out) { model.initial_condition_variables(out); });
         }
       }
 
@@ -235,8 +235,8 @@ namespace DiFfRG
       template <typename Model> void interpolate(const Model &model)
       {
         auto block_structure = discretization.get_block_structure();
-        reinit_la_block_vector(m_data, block_structure, discretization.get_locally_owned_dofs(),
-                               discretization.get_communicator());
+        internal::reinit_la_block_vector(m_data, block_structure, discretization.get_locally_owned_dofs(),
+                                         discretization.get_communicator());
 
         if constexpr (Model::Components::count_fe_functions() > 0) {
           const auto &fe = discretization.get_fe();
@@ -290,9 +290,9 @@ namespace DiFfRG
           // which elsewhere would stage off-process inserts that the next compress() of the block flushes over the
           // owner's values. compute_variables_into lands only what each rank owns.
           VectorType scratch;
-          reinit_local_variables_vector(scratch, block_structure[1]);
-          compute_variables_into(m_data.block(1), scratch,
-                                 [&](VectorType &out) { model.initial_condition_variables(out); });
+          internal::reinit_local_variables_vector(scratch, block_structure[1]);
+          internal::compute_variables_into(m_data.block(1), scratch,
+                                           [&](VectorType &out) { model.initial_condition_variables(out); });
         }
       }
 

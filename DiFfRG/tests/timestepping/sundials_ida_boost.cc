@@ -172,7 +172,7 @@ bool run_hybrid(const std::string &test_name, double expected_precision, double 
   SolutionView<VectorType> fem_view, variables_view;
   assembler.reinit_solution_view(fem_view);
   fem_view.refresh(initial_condition.data().block(0));
-  reinit_variables_view(variables_view, initial_condition.data().block(1).size(), comm);
+  DiFfRG::internal::reinit_variables_view(variables_view, initial_condition.data().block(1).size(), comm);
   variables_view.refresh(initial_condition.data().block(1));
 
   // block 0: FEM solution

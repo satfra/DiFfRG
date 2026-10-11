@@ -652,7 +652,7 @@ namespace DiFfRG
     time_stepper.reinit_vector = [&](BlockVectorType &v) {
       v.reinit(2);
       assembler.reinit_vector(v.block(0));
-      reinit_la_variables_vector(v.block(1), n_vars, assembler.get_communicator());
+      internal::reinit_la_variables_vector(v.block(1), n_vars, assembler.get_communicator());
       v.collect_sizes();
     };
 
@@ -662,7 +662,7 @@ namespace DiFfRG
     assembler.reinit_solution_view(sol_view);
     assembler.reinit_solution_view(sol_dot_view);
     assembler.reinit_solution_view(residual_view);
-    reinit_variables_view(vars_view, n_vars, assembler.get_communicator());
+    internal::reinit_variables_view(vars_view, n_vars, assembler.get_communicator());
 
     // Replicated views of the state handed to the assemblers.
     //
@@ -680,7 +680,7 @@ namespace DiFfRG
     SolutionView<VectorType> y_state, y_dot_state, y_vars_state;
     assembler.reinit_solution_view(y_state);
     assembler.reinit_solution_view(y_dot_state);
-    reinit_variables_view(y_vars_state, n_vars, assembler.get_communicator());
+    internal::reinit_variables_view(y_vars_state, n_vars, assembler.get_communicator());
 
     // Tells SUNDIALS to do an internal reset after a mesh refinement; the spatial part of sol_dot is transferred as
     // well, as the starting guess of IDA's consistent-IC solve.
@@ -702,7 +702,7 @@ namespace DiFfRG
 
     // Scratch for the redundant variables computation; see compute_variables_into.
     VectorType vars_scratch;
-    reinit_local_variables_vector(vars_scratch, n_vars);
+    internal::reinit_local_variables_vector(vars_scratch, n_vars);
 
     // At output_dt intervals this function saves intermediate solutions
     double last_save = -1.;
@@ -769,7 +769,7 @@ namespace DiFfRG
             y_state.refresh(y.block(0));
             y_dot_state.refresh(y_dot.block(0));
             y_vars_state.refresh(y.block(1));
-            compute_variables_into(res.block(1), vars_scratch, [&](VectorType &out) {
+            internal::compute_variables_into(res.block(1), vars_scratch, [&](VectorType &out) {
               assembler.residual_variables(out, y_vars_state.get(), y_state.get());
             });
             assembler.residual(res.block(0), y_state.get(), 1., y_dot_state.get(), 1., y_vars_state.get());
@@ -933,7 +933,8 @@ namespace DiFfRG
             }
 
             const auto sol_iterations = linSolver.solve(src.block(0), dst.block(0), tol);
-            dense_vmult_variables(variable_jacobian_inverse, dst.block(1), src.block(1), assembler.get_communicator());
+            internal::dense_vmult_variables(variable_jacobian_inverse, dst.block(1), src.block(1),
+                                            assembler.get_communicator());
             if (!is_finite_vector(dst)) {
               callback_diagnostics.linear_solver_failures++;
               ++failure_counter;
@@ -1018,7 +1019,7 @@ namespace DiFfRG
 
     // Called whenever a vector needs to initalized
     time_stepper.reinit_vector = [&](VectorType &v) {
-      reinit_la_variables_vector(v, n_vars, assembler.get_communicator());
+      internal::reinit_la_variables_vector(v, n_vars, assembler.get_communicator());
     };
 
     // At output_dt intervals this function saves intermediate solutions
@@ -1206,7 +1207,7 @@ namespace DiFfRG
               return agreed_ida_result(assembler.get_communicator(), true);
             }
 
-            dense_vmult_variables(variable_jacobian_inverse, dst, src, assembler.get_communicator());
+            internal::dense_vmult_variables(variable_jacobian_inverse, dst, src, assembler.get_communicator());
             if (!is_finite_vector(dst)) {
               callback_diagnostics.linear_solver_failures++;
               ++failure_counter;

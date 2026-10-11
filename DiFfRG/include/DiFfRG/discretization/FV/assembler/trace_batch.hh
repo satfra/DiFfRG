@@ -67,7 +67,7 @@ namespace DiFfRG
           /// Extractors stay double: KT freezes them within a Newton step.
           template <typename NT2> using rebind = TraceBatch<dim, NT2, n, Extractors, Variables, kind>;
 
-          struct State : PointState<dim, NT, n> {
+          struct State : DiFfRG::internal::PointState<dim, NT, n> {
             def::ThirdDerivativeType<dim, NT, n> third_derivatives{};
           };
 

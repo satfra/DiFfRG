@@ -22,10 +22,13 @@ namespace DiFfRG
   {
     using namespace dealii;
 
-    template <typename... T> auto fe_tie(T &&...t)
+    namespace internal
     {
-      return named_tuple<std::tuple<T &...>, StringSet<"variables">>(std::tie(t...));
-    }
+      template <typename... T> auto fe_tie(T &&...t)
+      {
+        return named_tuple<std::tuple<T &...>, StringSet<"variables">>(std::tie(t...));
+      }
+    } // namespace internal
 
     /**
      * @brief The basic assembler that can be used for any standard CG scheme with flux and source.
@@ -115,7 +118,7 @@ namespace DiFfRG
       virtual void residual_variables(VectorType &residual, const VectorType &variables, const VectorType &) override
       {
         Timer timer;
-        model.dt_variables(residual, fe_tie(variables));
+        model.dt_variables(residual, internal::fe_tie(variables));
         // Fences AND lands any map() results still sitting in pinned staging -- see MapCompletion.
         flush_maps();
         timings_residual.push_back(timer.wall_time());
@@ -125,7 +128,7 @@ namespace DiFfRG
                                       const VectorType &) override
       {
         Timer timer;
-        model.template jacobian_variables<0>(jacobian, fe_tie(variables));
+        model.template jacobian_variables<0>(jacobian, internal::fe_tie(variables));
         flush_maps();
         timings_jacobian.push_back(timer.wall_time());
       };
@@ -137,7 +140,7 @@ namespace DiFfRG
             auto &&[id, EoMfun, outputter] = std::forward_as_tuple(std::forward<decltype(args)>(args)...);
             data_out.register_readout(id);
             (void)EoMfun;
-            outputter(data_out, Point<0>(), fe_tie(variables));
+            outputter(data_out, Point<0>(), internal::fe_tie(variables));
           } else {
             DiFfRG::internal::validate_readout_helper_arity<decltype(args)...>();
           }

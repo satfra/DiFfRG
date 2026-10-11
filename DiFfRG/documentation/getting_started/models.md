@@ -100,15 +100,6 @@ The `m_i` argument is the resulting mass function $m_i$, with $N_f$ components. 
 The standard implementation of this method simply sets $m_i = \partial_t u_i$.  
  
 .
-- If not using a DAE, the mass matrix $m_{ij}(x)$ is implemented in the method 
-```cpp
-  template <int dim, typename NumberType, size_t n_fe_functions>
-  void mass(std::array<std::array<NumberType, n_fe_functions>, M::Components::count_fe_functions()> &m_ij, const Point<dim> &x) const;
-```
-The `m_ij` argument is the resulting mass matrix $m_{ij}$, with $N_f$ components in each dimension. This method should fill the `mass` argument with the desired structure of the flow equation. `x` is a d-dimensional array of field coordinates.
-The standard implementation of this method simply sets $m_{ij} = \delta_{ij}$.
-
-.
 - The flux function $F_i(u_j, \partial_x u_j, \partial_x^2 u_j, e_b, v_a, x)$ is given by
 ```cpp
   template <int dim, typename NumberType, typename Solution, size_t n_fe_functions>

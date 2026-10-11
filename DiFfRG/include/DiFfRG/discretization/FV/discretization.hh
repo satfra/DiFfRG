@@ -204,13 +204,13 @@ namespace DiFfRG
         constraints.close();
 
         locally_owned_dofs = dof_handler.locally_owned_dofs();
-        locally_relevant_dofs = ParallelDoFs::make_ghost_set(dof_handler);
+        locally_relevant_dofs = internal::ParallelDoFs::make_ghost_set(dof_handler);
 
         // NOT DoFTools::map_dofs_to_support_points(..., std::vector<Point>&): that overload is
         // documented to *error out* on a DoFHandler built on a parallel::TriangulationBase,
         // because its precondition is an array sized to the global dof count. See
         // ParallelDoFs::build_support_points.
-        ParallelDoFs::build_support_points(mapping, dof_handler, support_points);
+        internal::ParallelDoFs::build_support_points(mapping, dof_handler, support_points);
       }
 
       Mesh &mesh;

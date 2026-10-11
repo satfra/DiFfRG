@@ -385,7 +385,7 @@ namespace DiFfRG
                     def::TVDReconstructor<Discretization_::dim, def::MinModLimiter, double>,
                 def::HasWaveSpeed WaveSpeedStrategy_ = MaxEigenvalueWaveSpeed,
                 def::HasReconstructor JacobianReconstructor_ = Reconstructor_>
-        requires MeshIsRectangular<typename Discretization_::Mesh>
+        requires DiFfRG::internal::MeshIsRectangular<typename Discretization_::Mesh>
       class Assembler
           : public DiFfRG::internal::AssemblerCore<
                 Assembler<Discretization_, Model_, Reconstructor_, WaveSpeedStrategy_, JacobianReconstructor_>,
@@ -418,6 +418,8 @@ namespace DiFfRG
         using Iterator = typename DoFHandler<Discretization::dim>::active_cell_iterator;
         using Point = dealii::Point<dim>;
         using Scratch = internal::ScratchData<dim, NumberType, n_components>;
+
+      private:
         struct FaceJacobianDependencyCacheEntry {
           std::vector<types::global_dof_index> to_dofs;
           std::vector<types::global_dof_index> from_dofs;
@@ -443,6 +445,8 @@ namespace DiFfRG
           /// @see DiFfRG::internal::cell_width, DiFfRG::FV::KurganovTadmor::internal::flux_tie.
           double cell_width = 0.;
         };
+
+      public:
         Assembler(Discretization &discretization, Model &model, const ConfigTree &config)
             : Base(discretization, model, config, "FV"), report_port(discretization.report_port()),
               triangulation(discretization.get_triangulation()),
@@ -622,13 +626,15 @@ namespace DiFfRG
           });
         }
 
-        using CellData = internal::CellData<dim, NumberType, n_components>;
-        using NeighborData = internal::NeighborData<dim, NumberType, n_components>;
         using CellStencilData = internal::CellStencilData<dim, NumberType, n_components>;
-        using CellGeometryDofs = internal::CellGeometryDofs<dim, n_components>;
-        using CellStencilTopologyData = internal::CellStencilTopologyData<dim, n_components>;
         using FaceReconstructionState = internal::FaceReconstructionState<dim, NumberType, n_components>;
         using SolutionReconstructionCache = internal::SolutionReconstructionCache<dim, NumberType, n_components>;
+
+      private:
+        using CellData = internal::CellData<dim, NumberType, n_components>;
+        using NeighborData = internal::NeighborData<dim, NumberType, n_components>;
+        using CellGeometryDofs = internal::CellGeometryDofs<dim, n_components>;
+        using CellStencilTopologyData = internal::CellStencilTopologyData<dim, n_components>;
         template <typename NT> using CellStencilDataT = internal::CellStencilData<dim, NT, n_components>;
 
         struct AssemblyFaceGeometryProvider {
@@ -643,6 +649,7 @@ namespace DiFfRG
           }
         };
 
+      public:
         auto make_assembly_context_view(const SolutionReconstructionCache &cache) const
         {
           using FaceRange =
@@ -655,38 +662,6 @@ namespace DiFfRG
 
         auto make_assembly_context_view(SolutionReconstructionCache &&cache) const = delete;
 
-        template <HasAssemblyContextView Context>
-        void run_fv_kt_pre_assembly_hook(const AssemblyStage stage, const Context &context)
-        {
-          dispatch_fv_kt_pre_assembly(model, stage, context);
-        }
-
-        static bool is_physical_boundary_face(const Iterator &cell, const unsigned int face_index)
-        {
-          return cell->at_boundary(face_index);
-        }
-
-        static Iterator face_neighbor(const Iterator &cell, const unsigned int face_index)
-        {
-          return cell->neighbor(face_index);
-        }
-
-        void fill_cell_data_from_topology(const CellGeometryDofs &topology, const VectorType &solution_global,
-                                          CellData &data) const
-        {
-          internal::fill_cell_data_from_topology<dim, NumberType, n_components>(topology, solution_global, data);
-        }
-
-        template <int boundary_dim, typename BoundaryNumberType>
-        internal::BoundaryStencilData<boundary_dim, BoundaryNumberType, n_components>
-        build_boundary_stencil_from_cache_impl(const Iterator &cell, const unsigned int boundary_face_no,
-                                               const VectorType &solution_global) const
-        {
-          const auto &topology = boundary_stencil_topology(cell->active_cell_index(), boundary_face_no).primary;
-          return internal::fill_boundary_stencil_from_topology<BoundaryNumberType, boundary_dim, n_components>(
-              topology, solution_global);
-        }
-
         template <typename BoundaryNumberType>
         internal::BoundaryStencilData<dim, BoundaryNumberType, n_components>
         build_boundary_stencil_from_cache(const Iterator &cell, const unsigned int boundary_face_no,
@@ -696,40 +671,10 @@ namespace DiFfRG
                                                                                  solution_global);
         }
 
-        template <typename BoundaryNumberType>
-        internal::BoundaryReconstructionStencilData<dim, BoundaryNumberType, n_components>
-        build_boundary_reconstruction_stencil_from_cache(const Iterator &cell, const unsigned int boundary_face_no,
-                                                         const VectorType &solution_global) const
-        {
-          const auto &topology = boundary_stencil_topology(cell->active_cell_index(), boundary_face_no);
-          return internal::fill_boundary_reconstruction_stencil_from_topology<BoundaryNumberType, dim, n_components>(
-              topology, solution_global);
-        }
-
         void fill_cell_stencil(const Iterator &cell, const VectorType &solution_global, CellStencilData &stencil) const
         {
           initialize_cell_stencil_topology(cell->active_cell_index(), stencil);
           refresh_cell_stencil_values(cell->active_cell_index(), solution_global, stencil);
-        }
-
-        CellStencilDataT<autodiff::Real<1, NumberType>>
-        tag_cell_stencil_dofs_from_cache(const Iterator &cell, const CellStencilData &cell_stencil,
-                                         const VectorType &solution_global, const types::global_dof_index dof_j) const
-        {
-          auto tagged_stencil = internal::tag_cell_stencil_dofs<dim, NumberType, n_components>(cell_stencil, dof_j);
-
-          for (const auto face_index : cell->face_indices()) {
-            if (!is_physical_boundary_face(cell, face_index)) continue;
-
-            const auto boundary_stencil =
-                build_boundary_stencil_from_cache<NumberType>(cell, face_index, solution_global);
-            auto tagged_boundary_stencil =
-                internal::tag_boundary_stencil_dofs<dim, NumberType, n_components>(boundary_stencil, dof_j);
-            internal::populate_boundary_neighbor_from_model_stencil(tagged_boundary_stencil, tagged_stencil, face_index,
-                                                                    cell_stencil.face_centers[face_index], model);
-          }
-
-          return tagged_stencil;
         }
 
         unsigned int find_neighbor_face(const Iterator &cell, const Iterator &neighbor) const
@@ -790,6 +735,81 @@ namespace DiFfRG
                   cache.face_reconstruction_valid[neighbor_index][neighbor_face_index] = true;
                 }
               });
+        }
+
+        const FaceReconstructionState &get_cached_face_reconstruction(const SolutionReconstructionCache &cache,
+                                                                      const Iterator &cell,
+                                                                      const unsigned int face_index) const
+        {
+          const auto cell_index = cell->active_cell_index();
+          AssertIndexRange(cell_index, cache.face_reconstructions.size());
+          AssertIndexRange(face_index, n_faces);
+          AssertThrow(cache.face_reconstruction_valid[cell_index][face_index],
+                      ExcMessage("KT face reconstruction cache entry was not initialized."));
+          return cache.face_reconstructions[cell_index][face_index];
+        }
+
+      private:
+        template <HasAssemblyContextView Context>
+        void run_fv_kt_pre_assembly_hook(const AssemblyStage stage, const Context &context)
+        {
+          dispatch_fv_kt_pre_assembly(model, stage, context);
+        }
+
+        static bool is_physical_boundary_face(const Iterator &cell, const unsigned int face_index)
+        {
+          return cell->at_boundary(face_index);
+        }
+
+        static Iterator face_neighbor(const Iterator &cell, const unsigned int face_index)
+        {
+          return cell->neighbor(face_index);
+        }
+
+        void fill_cell_data_from_topology(const CellGeometryDofs &topology, const VectorType &solution_global,
+                                          CellData &data) const
+        {
+          internal::fill_cell_data_from_topology<dim, NumberType, n_components>(topology, solution_global, data);
+        }
+
+        template <int boundary_dim, typename BoundaryNumberType>
+        internal::BoundaryStencilData<boundary_dim, BoundaryNumberType, n_components>
+        build_boundary_stencil_from_cache_impl(const Iterator &cell, const unsigned int boundary_face_no,
+                                               const VectorType &solution_global) const
+        {
+          const auto &topology = boundary_stencil_topology(cell->active_cell_index(), boundary_face_no).primary;
+          return internal::fill_boundary_stencil_from_topology<BoundaryNumberType, boundary_dim, n_components>(
+              topology, solution_global);
+        }
+
+        template <typename BoundaryNumberType>
+        internal::BoundaryReconstructionStencilData<dim, BoundaryNumberType, n_components>
+        build_boundary_reconstruction_stencil_from_cache(const Iterator &cell, const unsigned int boundary_face_no,
+                                                         const VectorType &solution_global) const
+        {
+          const auto &topology = boundary_stencil_topology(cell->active_cell_index(), boundary_face_no);
+          return internal::fill_boundary_reconstruction_stencil_from_topology<BoundaryNumberType, dim, n_components>(
+              topology, solution_global);
+        }
+
+        CellStencilDataT<autodiff::Real<1, NumberType>>
+        tag_cell_stencil_dofs_from_cache(const Iterator &cell, const CellStencilData &cell_stencil,
+                                         const VectorType &solution_global, const types::global_dof_index dof_j) const
+        {
+          auto tagged_stencil = internal::tag_cell_stencil_dofs<dim, NumberType, n_components>(cell_stencil, dof_j);
+
+          for (const auto face_index : cell->face_indices()) {
+            if (!is_physical_boundary_face(cell, face_index)) continue;
+
+            const auto boundary_stencil =
+                build_boundary_stencil_from_cache<NumberType>(cell, face_index, solution_global);
+            auto tagged_boundary_stencil =
+                internal::tag_boundary_stencil_dofs<dim, NumberType, n_components>(boundary_stencil, dof_j);
+            internal::populate_boundary_neighbor_from_model_stencil(tagged_boundary_stencil, tagged_stencil, face_index,
+                                                                    cell_stencil.face_centers[face_index], model);
+          }
+
+          return tagged_stencil;
         }
 
         void ensure_solution_reconstruction_cache_shape(SolutionReconstructionCache &cache) const
@@ -887,18 +907,6 @@ namespace DiFfRG
               face_reconstruction_descriptors.push_back(descriptor);
             }
           }
-        }
-
-        const FaceReconstructionState &get_cached_face_reconstruction(const SolutionReconstructionCache &cache,
-                                                                      const Iterator &cell,
-                                                                      const unsigned int face_index) const
-        {
-          const auto cell_index = cell->active_cell_index();
-          AssertIndexRange(cell_index, cache.face_reconstructions.size());
-          AssertIndexRange(face_index, n_faces);
-          AssertThrow(cache.face_reconstruction_valid[cell_index][face_index],
-                      ExcMessage("KT face reconstruction cache entry was not initialized."));
-          return cache.face_reconstructions[cell_index][face_index];
         }
 
         /**
@@ -1063,7 +1071,8 @@ namespace DiFfRG
         using TraceJacobian = std::array<internal::JacobianMatrix<NumberType, n_components>, dim>;
         using FluxDerivatives = internal::FluxDerivativeData<NumberType, dim, n_components>;
         using DiffusionSideJacobian = internal::DiffusionSideJacobian<dim, NumberType, n_components>;
-        using SourceJacobian = PointJacobian<dim, n_components, n_components, Components::count_extractors()>;
+        using SourceJacobian =
+            DiFfRG::internal::PointJacobian<dim, n_components, n_components, Components::count_extractors()>;
 
         using PhaseTimes = AssemblyPhaseTimes;
 
@@ -1672,6 +1681,7 @@ namespace DiFfRG
           }
         }
 
+      public:
         virtual void residual(VectorType &residual, const VectorType &solution_global, NumberType weight,
                               const VectorType &solution_global_dot, NumberType weight_mass,
                               const VectorType &variables = VectorType()) override
@@ -1787,6 +1797,7 @@ namespace DiFfRG
         {
         }
 
+      private:
         template <typename DoFContainer>
         static void append_dofs(std::vector<types::global_dof_index> &target, const DoFContainer &source)
         {
@@ -1907,9 +1918,9 @@ namespace DiFfRG
             // Subsumed by the face blocks in practice, but the source jacobian must not depend on that.
             add_block(topology.source_jacobian_dependencies);
           }
-          finalize_la_sparsity<SparseMatrixType>(dsp, sparsity_pattern, discretization.get_locally_owned_dofs(),
-                                                 discretization.get_locally_relevant_dofs(),
-                                                 discretization.get_communicator());
+          DiFfRG::internal::finalize_la_sparsity<SparseMatrixType>(
+              dsp, sparsity_pattern, discretization.get_locally_owned_dofs(),
+              discretization.get_locally_relevant_dofs(), discretization.get_communicator());
         }
 
         void fill_boundary_topology(internal::BoundaryStencilTopologyData<dim, n_components> &boundary_topology,
@@ -2120,7 +2131,7 @@ namespace DiFfRG
         std::vector<DiffusionSideJacobian> trace_diffusion_jacobians;
         BatchOutput<dim, NumberType, n_components> source_values;
         std::vector<SourceJacobian> source_jacobians;
-        SeedStackWorkspace<SourcePoints, n_components> source_workspace;
+        DiFfRG::internal::SeedStackWorkspace<SourcePoints, n_components> source_workspace;
         /// The AD workspaces of the trace evaluations (see internal::StackedWorkspace).
         internal::StackedWorkspace<autodiff::Real<1, NumberType>, FluxTraces, n_components> value_seed_workspace;
         internal::FluxDerivativeWorkspace<FluxTraces, n_components> flux_derivative_workspace;

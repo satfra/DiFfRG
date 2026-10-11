@@ -48,9 +48,6 @@ namespace DiFfRG
   };
 
   template <typename... _descriptors> struct SubDescriptor {
-    // tuple of all FixedString names
-    static constexpr auto names_tuple = std::tie(_descriptors::name...);
-
     static constexpr std::array<const char *, sizeof...(_descriptors)> names{{_descriptors::name...}};
     static constexpr std::array<size_t, sizeof...(_descriptors)> sizes{{_descriptors::size...}};
     using descriptor_tuple = std::tuple<_descriptors...>;
@@ -220,12 +217,6 @@ namespace DiFfRG
     static constexpr uint count_variables() { return n_variables; }
     static constexpr uint count_extractors() { return n_extractors; }
     static constexpr uint count_fe_subsystems() { return n_fe_subsystems; }
-
-    template <typename DoFH> static std::vector<uint> get_component_block_structure(const DoFH &dofh)
-    {
-      std::vector<uint> dofs_per_component = dealii::DoFTools::count_dofs_per_fe_component(dofh);
-      return dofs_per_component;
-    }
 
   private:
     static void check_adjacent_levels(uint dependent_subsystem, uint independent_subsystem, const char *caller)

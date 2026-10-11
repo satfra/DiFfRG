@@ -187,7 +187,7 @@ namespace DiFfRG
 
     {
       // Joining a retired worker here is backpressure: the producer is waiting for the disk.
-      ScopedTimer flush_timer(frame_timings.fe_flush);
+      internal::ScopedTimer flush_timer(frame_timings.fe_flush);
       update_buffers();
     }
 
@@ -208,7 +208,7 @@ namespace DiFfRG
     auto &m_data_out = data_outs[series_number % buffer_size];
 
     {
-      ScopedTimer patch_timer(frame_timings.build_patches);
+      internal::ScopedTimer patch_timer(frame_timings.build_patches);
       // DataOut defaults to "all locally owned and active cells", which on a partitioned mesh would
       // silently write rank 0's subdomain and call it the whole solution. prepare_output_vector()
       // hands DataOut a *serial* mirror DoFHandler precisely so that cannot happen, which makes this
@@ -228,7 +228,7 @@ namespace DiFfRG
       std::vector<double> node_data;
       std::vector<std::pair<std::string, std::vector<double>>> data_sets;
       {
-        ScopedTimer filter_timer(frame_timings.data_filter);
+        internal::ScopedTimer filter_timer(frame_timings.data_filter);
         m_data_out.write_filtered_data(data_filter);
         data_filter.fill_node_data(node_data);
 
@@ -302,7 +302,7 @@ namespace DiFfRG
       }
     };
 
-    ScopedTimer flush_timer(frame_timings.fe_flush);
+    internal::ScopedTimer flush_timer(frame_timings.fe_flush);
 
     // The worker exists only to write the .vtu and publish the .pvd entry. With VTK off there
     // is nothing for it to do, so spawning and later joining one per frame is pure overhead --
@@ -338,7 +338,7 @@ namespace DiFfRG
       target = solution;
       return dof_handler;
     } else {
-      const auto &mirror_triangulation = serial_mirror<safe_dim>(dof_handler.get_triangulation());
+      const auto &mirror_triangulation = internal::serial_mirror<safe_dim>(dof_handler.get_triangulation());
 
       if (!mirror_dofs.dof_handler || !mirror_dofs.connection.connected() || mirror_dofs.stale ||
           &mirror_dofs.dof_handler->get_triangulation() != &mirror_triangulation ||
@@ -388,7 +388,7 @@ namespace DiFfRG
                                          const std::string &name)
   {
     // Runs inside the user's contributor callback, so it is charged to fe_attach, not fe_flush.
-    ScopedTimer attach_timer(frame_timings.fe_attach);
+    internal::ScopedTimer attach_timer(frame_timings.fe_attach);
     update_buffers();
     reserve_bytes(solution.size() * sizeof(typename VectorType::value_type));
 
@@ -405,7 +405,7 @@ namespace DiFfRG
                                          const std::vector<std::string> &names)
   {
     // Runs inside the user's contributor callback, so it is charged to fe_attach, not fe_flush.
-    ScopedTimer attach_timer(frame_timings.fe_attach);
+    internal::ScopedTimer attach_timer(frame_timings.fe_attach);
     update_buffers();
     reserve_bytes(solution.size() * sizeof(typename VectorType::value_type));
 

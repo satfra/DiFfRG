@@ -29,7 +29,7 @@ namespace DiFfRG
       constexpr size_t upper_outer = 4;
     } // namespace BoundaryStencilIndex
 
-    namespace BoundaryStencilDetail
+    namespace internal
     {
       enum class BoundarySide { lower, upper };
 
@@ -99,7 +99,7 @@ namespace DiFfRG
               NumberType(3.0) * u_stencil[physical_cell][c] - NumberType(2.0) * u_stencil[lower_inner][c];
         }
       }
-    } // namespace BoundaryStencilDetail
+    } // namespace internal
 
     /**
      * @brief Default FV boundary strategy used by the Kurganov-Tadmor assembler.
@@ -117,9 +117,9 @@ namespace DiFfRG
         static_assert(dim == 1 || dim == 2,
                       "FV KT default boundary stencils currently support one- and two-dimensional FV domains.");
 
-        const unsigned int axis = BoundaryStencilDetail::BoundaryStencilGeometry<dim>::active_axis(x_stencil, x_face);
-        const auto side = BoundaryStencilDetail::boundary_side(axis, x_stencil, x_face);
-        BoundaryStencilDetail::apply_affine_two_ghost_extrapolation(axis, side, u_stencil, x_stencil);
+        const unsigned int axis = internal::BoundaryStencilGeometry<dim>::active_axis(x_stencil, x_face);
+        const auto side = internal::boundary_side(axis, x_stencil, x_face);
+        internal::apply_affine_two_ghost_extrapolation(axis, side, u_stencil, x_stencil);
         return true;
       }
     };
@@ -192,14 +192,14 @@ namespace DiFfRG
         }
 
         using namespace BoundaryStencilIndex;
-        const unsigned int axis = BoundaryStencilDetail::BoundaryStencilGeometry<dim>::active_axis(x_stencil, x_face);
-        const auto side = BoundaryStencilDetail::boundary_side(axis, x_stencil, x_face);
-        if (side == BoundaryStencilDetail::BoundarySide::upper) {
-          BoundaryStencilDetail::apply_affine_two_ghost_extrapolation(axis, side, u_stencil, x_stencil);
+        const unsigned int axis = internal::BoundaryStencilGeometry<dim>::active_axis(x_stencil, x_face);
+        const auto side = internal::boundary_side(axis, x_stencil, x_face);
+        if (side == internal::BoundarySide::upper) {
+          internal::apply_affine_two_ghost_extrapolation(axis, side, u_stencil, x_stencil);
           return true;
         }
 
-        const double delta = BoundaryStencilDetail::boundary_delta(axis, side, x_stencil);
+        const double delta = internal::boundary_delta(axis, side, x_stencil);
         x_stencil[lower_inner] = x_stencil[physical_cell];
         x_stencil[lower_outer] = x_stencil[physical_cell];
         x_stencil[lower_inner][axis] = x_stencil[physical_cell][axis] - delta;

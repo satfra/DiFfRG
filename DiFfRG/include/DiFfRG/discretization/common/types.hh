@@ -5,11 +5,11 @@
 
 namespace DiFfRG
 {
-  template <typename T>
-  concept MeshIsRectangular = requires(T x) { T::is_rectangular; } && T::is_rectangular;
-
   namespace internal
   {
+    template <typename T>
+    concept MeshIsRectangular = requires(T x) { T::is_rectangular; } && T::is_rectangular;
+
     /**
      * @brief Whether a type is a model, i.e. carries the component descriptor rather than being one.
      *

@@ -216,11 +216,11 @@ namespace DiFfRG
       if (last_frame_time && std::abs(time - *last_frame_time) <= 1e-12 * std::max(1., std::abs(time))) return;
 
       try {
-        current_frame = FrameTimings{};
-        ScopedTimer total_timer(current_frame.total);
+        current_frame = internal::FrameTimings{};
+        internal::ScopedTimer total_timer(current_frame.total);
         {
           const auto solves_before = internal::potential_solve_stats();
-          ScopedTimer contributor_timer(current_frame.contributor);
+          internal::ScopedTimer contributor_timer(current_frame.contributor);
           OutputFrame<dim, VectorType> frame(*this);
           std::forward<Contributor>(contributor)(frame);
           contributor_timer.stop();
@@ -289,7 +289,7 @@ namespace DiFfRG
     /** Declared before every sink that submits to it, so it is destroyed last. finish() joins
      * it explicitly before h5_files goes away, because ~HDF5Output closes the file and that
      * must not race the worker. */
-    HDF5FrameWriter hdf5_writer;
+    internal::HDF5FrameWriter hdf5_writer;
     FEOutput<dim, VectorType> fe_out;
     std::optional<ReconstructedRawPotential<dim, typename VectorType::value_type>> pending_raw_potential;
     FEOutput<dim, dealii::Vector<typename VectorType::value_type>> potential_fe_out;
@@ -307,8 +307,8 @@ namespace DiFfRG
     DiagnosticPort diagnostics_port;
 
     /** Cost split of the frame currently being written; folded into `timings` by flush_frame. */
-    FrameTimings current_frame;
-    OutputTimings timings;
+    internal::FrameTimings current_frame;
+    internal::OutputTimings timings;
 
     friend class OutputFrame<dim, VectorType>;
   };

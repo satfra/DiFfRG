@@ -432,9 +432,9 @@ namespace DiFfRG
           cell_result.reinit(cell_batch.size(), Term::flux | Term::source);
           model.evaluate_batch(cell_result, cell_batch);
           boundary_result.reinit(boundary_batch.size(), Term::flux);
-          evaluate_boundary_numflux(model, boundary_result, boundary_normals, boundary_batch);
+          internal::evaluate_boundary_numflux(model, boundary_result, boundary_normals, boundary_batch);
           face_result.reinit(face_batch[0].size(), Term::flux);
-          evaluate_numflux(model, face_result, face_normals, face_batch[0], face_batch[1]);
+          internal::evaluate_numflux(model, face_result, face_normals, face_batch[0], face_batch[1]);
         }
         phase.lap(&PhaseTimes::evaluate);
         scatter_residual(residual, [&](const size_t k, Scratch &s, Vector<NumberType> &r) {
@@ -501,11 +501,12 @@ namespace DiFfRG
         phase.lap(&PhaseTimes::gather);
         {
           const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
-          evaluate_flux_source_jacobian(model, cell_jacobians, cell_batch, max_stacked_points, cell_workspace);
-          evaluate_boundary_numflux_jacobian(model, boundary_jacobians, boundary_normals, boundary_batch,
-                                             max_stacked_points, boundary_workspace);
-          evaluate_numflux_jacobian(model, face_jacobians, face_normals, face_batch[0], face_batch[1],
-                                    max_stacked_points, face_workspace);
+          internal::evaluate_flux_source_jacobian(model, cell_jacobians, cell_batch, max_stacked_points,
+                                                  cell_workspace);
+          internal::evaluate_boundary_numflux_jacobian(model, boundary_jacobians, boundary_normals, boundary_batch,
+                                                       max_stacked_points, boundary_workspace);
+          internal::evaluate_numflux_jacobian(model, face_jacobians, face_normals, face_batch[0], face_batch[1],
+                                              max_stacked_points, face_workspace);
         }
         require_finite(cell_jacobians);
         require_finite(boundary_jacobians);
@@ -1132,11 +1133,11 @@ namespace DiFfRG
         const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
         BatchOutput<dim, NumberType, n_to> cell_out, boundary_out, face_out;
         cell_out.reinit(cells_b.size(), Term::flux | Term::source);
-        evaluate_ldg_level<to>(model, cell_out, cells_b);
+        internal::evaluate_ldg_level<to>(model, cell_out, cells_b);
         boundary_out.reinit(boundary_b.size(), Term::flux);
-        evaluate_ldg_boundary_numflux<to>(model, boundary_out, boundary_normals, boundary_b);
+        internal::evaluate_ldg_boundary_numflux<to>(model, boundary_out, boundary_normals, boundary_b);
         face_out.reinit(faces_b[0].size(), Term::flux);
-        evaluate_ldg_numflux<to>(model, face_out, face_normals, faces_b[0], faces_b[1]);
+        internal::evaluate_ldg_numflux<to>(model, face_out, face_normals, faces_b[0], faces_b[1]);
 
         const auto &constraints = discretization.get_constraints(to);
         ldg_vector_tmp = 0;
@@ -1186,16 +1187,16 @@ namespace DiFfRG
         std::array<LevelBatch<from>, 2> faces_b;
         self.template gather_level<from>(cells_b, boundary_b, faces_b, source);
 
-        std::vector<PointJacobian<dim, n_to, n_from, 0>> J_cells, J_boundary;
-        std::vector<FaceJacobian<dim, n_to, n_from, 0>> J_faces;
-        SeedStackWorkspace<LevelBatch<from>, n_to> workspace;
-        SeedStackWorkspace<LevelBatch<from>, n_to, 2> face_workspace;
+        std::vector<internal::PointJacobian<dim, n_to, n_from, 0>> J_cells, J_boundary;
+        std::vector<internal::FaceJacobian<dim, n_to, n_from, 0>> J_faces;
+        internal::SeedStackWorkspace<LevelBatch<from>, n_to> workspace;
+        internal::SeedStackWorkspace<LevelBatch<from>, n_to, 2> face_workspace;
         const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
-        evaluate_ldg_level_jacobian<to>(model, J_cells, cells_b, max_stacked_points, workspace);
-        evaluate_ldg_boundary_numflux_jacobian<to>(model, J_boundary, boundary_normals, boundary_b, max_stacked_points,
-                                                   workspace);
-        evaluate_ldg_numflux_jacobian<to>(model, J_faces, face_normals, faces_b[0], faces_b[1], max_stacked_points,
-                                          face_workspace);
+        internal::evaluate_ldg_level_jacobian<to>(model, J_cells, cells_b, max_stacked_points, workspace);
+        internal::evaluate_ldg_boundary_numflux_jacobian<to>(model, J_boundary, boundary_normals, boundary_b,
+                                                             max_stacked_points, workspace);
+        internal::evaluate_ldg_numflux_jacobian<to>(model, J_faces, face_normals, faces_b[0], faces_b[1],
+                                                    max_stacked_points, face_workspace);
         require_finite(J_cells);
         require_finite(J_boundary);
         require_finite(J_faces);
@@ -1412,10 +1413,10 @@ namespace DiFfRG
       std::array<MainBatch, 2> face_batch;
       std::vector<Tensor<1, dim>> boundary_normals, face_normals;
       BatchOutput<dim, NumberType, n_fe> cell_result, boundary_result, face_result;
-      std::vector<PointJacobian<dim, n_fe, n_all, n_extr>> cell_jacobians, boundary_jacobians;
-      std::vector<FaceJacobian<dim, n_fe, n_all, n_extr>> face_jacobians;
-      SeedStackWorkspace<MainBatch, n_fe> cell_workspace, boundary_workspace;
-      SeedStackWorkspace<MainBatch, n_fe, 2> face_workspace;
+      std::vector<internal::PointJacobian<dim, n_fe, n_all, n_extr>> cell_jacobians, boundary_jacobians;
+      std::vector<internal::FaceJacobian<dim, n_fe, n_all, n_extr>> face_jacobians;
+      internal::SeedStackWorkspace<MainBatch, n_fe> cell_workspace, boundary_workspace;
+      internal::SeedStackWorkspace<MainBatch, n_fe, 2> face_workspace;
 
       // The point evaluation of the extractors and readouts; see DiFfRG::internal::AssemblerCore.
       /// The extractors see the levels in the tuple slots of the derivatives.
