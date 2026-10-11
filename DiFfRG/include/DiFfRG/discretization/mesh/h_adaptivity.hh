@@ -92,7 +92,7 @@ namespace DiFfRG
    * - no cell is coarsened within `coarsen_buffer` layers of neighbours of a cell flagged for refinement, nor if it
    *   was created by one of the last `coarsen_age` adaptations that changed the mesh. Coarsening a region that is
    *   refined again soon after is expensive: in fRG flows, e.g., the flat region of a potential has \f$\eta_K
-   *   \approx 0\f$, while its edge moves through it. With `coarsen_age` = 5, only regions that no recent change
+   *   \approx 0\f$, while its edge moves through it. With `coarsen_age` = 10, only regions that no recent change
    *   needed are coarsened;
    * - if no cell remains flagged for refinement (`"fraction"`), or none for any change (`"tolerance"`), nothing is
    *   done.
@@ -116,7 +116,7 @@ namespace DiFfRG
    * | `/discretization/adaptivity/predict`          | bool   | true    | extrapolate the indicator to the next adaptation, see above |
    * | `/discretization/adaptivity/coarsen_tolerance`| double | tolerance / 8 | "tolerance": coarsen cells with a smaller indicator |
    * | `/discretization/adaptivity/coarsen_buffer`   | uint   | 2       | cell layers around refined cells that are not coarsened |
-   * | `/discretization/adaptivity/coarsen_age`      | uint   | 5       | cells created by the last that many mesh changes are not coarsened |
+   * | `/discretization/adaptivity/coarsen_age`      | uint   | 10      | cells created by the last that many mesh changes are not coarsened |
    *
    * Since `level` is absolute, a mesh created with `/discretization/grid/refine` \f$= r\f$ is only refined further if
    * `level` \f$> r\f$.
@@ -170,7 +170,7 @@ namespace DiFfRG
       coarsen_tolerance = config.get_double("/discretization/adaptivity/coarsen_tolerance", tolerance / 8.);
       predict = config.get_bool("/discretization/adaptivity/predict", true);
       coarsen_buffer = config.get_uint("/discretization/adaptivity/coarsen_buffer", 2);
-      coarsen_age = config.get_uint("/discretization/adaptivity/coarsen_age", 5);
+      coarsen_age = config.get_uint("/discretization/adaptivity/coarsen_age", 10);
       min_level = std::numeric_limits<uint>::max();
       for (const auto &cell : discretization.get_triangulation().active_cell_iterators())
         min_level = std::min(min_level, uint(cell->level()));
