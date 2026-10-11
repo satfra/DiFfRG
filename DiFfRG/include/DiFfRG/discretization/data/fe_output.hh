@@ -71,7 +71,6 @@ namespace DiFfRG
     {
     }
 
-    FEOutput();
     /// finish(), ignoring errors.
     ~FEOutput() noexcept;
 

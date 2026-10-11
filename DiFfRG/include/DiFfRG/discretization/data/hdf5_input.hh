@@ -7,6 +7,7 @@
 #include <DiFfRG/physics/interpolation.hh>
 
 #include <filesystem>
+#include <span>
 #include <list>
 
 namespace DiFfRG
@@ -26,38 +27,23 @@ namespace DiFfRG
      * @brief Copy the values of a map series into @p data, as doubles in the grid's linear index order.
      *
      * @param name The map name.
-     * @param data Buffer; must hold at least as many values as the map has (not checked).
+     * @param data Buffer, e.g. a std::vector<double>; its size must equal the number of values in the map.
      * @param series_number Series to read; -1 for the latest.
      */
-    void load_map(const std::string &name, double *data, int series_number = -1)
+    void load_map(const std::string &name, std::span<double> data, int series_number = -1)
     {
-      if (!maps.has_group(name))
-        throw std::runtime_error("HDF5Input::map: The map '" + name + "' has not been written to the file '" +
-                                 file_name + "'.");
+      const auto values = load_map(name, series_number);
+      if (values.size() != data.size())
+        throw std::runtime_error("HDF5Input::load_map: the map '" + name + "' has " + std::to_string(values.size()) +
+                                 " values, the buffer " + std::to_string(data.size()) + ".");
+      std::copy(values.begin(), values.end(), data.begin());
+    }
 
-      auto super_group = maps.open_group(name);
-      if (series_number < 0) {
-        size_t max_series = 0;
-        for (const auto &child : super_group.child_names()) {
-          if (!super_group.child_is_group(child)) continue;
-          size_t grp_num = std::stoul(child);
-          if (grp_num > max_series) {
-            max_series = grp_num;
-          }
-        }
-        series_number = static_cast<int>(max_series);
-      }
-      if (!super_group.has_group(std::to_string(series_number)))
-        throw std::runtime_error("HDF5Input::map: The map '" + name + "' does not have series number " +
-                                 std::to_string(series_number) + " in the file '" + file_name + "'.");
-
-      auto group = super_group.open_group(std::to_string(series_number));
-
-      auto dataset = group.open_dataset("data");
-      auto dataspace = dataset.dataspace();
-      std::vector<double> temp_data(dataspace.size());
-      dataset.read(temp_data);
-      std::copy(temp_data.begin(), temp_data.end(), data);
+    [[deprecated("Pass the buffer itself (e.g. a std::vector<double>), so that its size can be checked")]] void
+    load_map(const std::string &name, double *data, int series_number = -1)
+    {
+      const auto values = load_map(name, series_number);
+      std::copy(values.begin(), values.end(), data);
     }
 
     /// The values of a map series, as doubles in the grid's linear index order; @p series_number -1 for the latest.
@@ -146,10 +132,18 @@ namespace DiFfRG
      * The grid is looked up as `/coordinates/<coordinates.to_string()>` and must agree point by point (to 1e-12) with
      * @p coordinates; throws otherwise. Whether the map's own `coordinates` link points to this grid is not checked.
      */
-    template <typename Coordinates> void load_map(const std::string &name, double *data, const Coordinates &coordinates)
+    template <typename Coordinates>
+    void load_map(const std::string &name, std::span<double> data, const Coordinates &coordinates)
     {
       check_coordinates(coordinates.to_string(), coordinates);
       load_map(name, data);
+    }
+
+    template <typename Coordinates>
+    [[deprecated("Pass the buffer itself (e.g. a std::vector<double>), so that its size can be checked")]] void
+    load_map(const std::string &name, double *data, const Coordinates &coordinates)
+    {
+      load_map(name, std::span<double>(data, coordinates.size()), coordinates);
     }
 
     /// All values of `/scalars/<name>`, one per frame.

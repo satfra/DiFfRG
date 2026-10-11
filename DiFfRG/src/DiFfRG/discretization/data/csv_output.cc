@@ -24,10 +24,9 @@ namespace DiFfRG
   {
     if (!written_this_frame.insert(name).second)
       throw std::runtime_error("CsvOutput::value: The field '" + name + "' was written twice in one frame.");
-    if ((time_values.size() == 0) &&
-        std::find(insertion_order.begin(), insertion_order.end(), name) == insertion_order.end())
+    if (n_frames == 0 && std::find(insertion_order.begin(), insertion_order.end(), name) == insertion_order.end())
       insertion_order.push_back(name);
-    values[name].push_back(value);
+    values[name] = value;
   }
 
   void CsvOutput::validate_frame() const
@@ -46,7 +45,7 @@ namespace DiFfRG
   {
     validate_frame();
 
-    if (time_values.size() == 0) {
+    if (n_frames == 0) {
       // Create the header.
       header.clear();
       header.push_back("t");
@@ -62,18 +61,15 @@ namespace DiFfRG
       write_csv_header(output_stream, names);
     }
 
-    time_values.push_back(time);
-    k_values.push_back(std::exp(-time) * Lambda);
+    ++n_frames;
 
     // Collect this frame's values in header order and write them as one row.
     std::vector<double> row;
     row.reserve(header.size());
     row.push_back(time);
-    if (Lambda > 0) row.push_back(k_values.back());
-    for (const auto &entry : header) {
-      if (entry == "t" || entry == "k [GeV]") continue;
-      row.push_back(values[entry].back());
-    }
+    if (Lambda > 0) row.push_back(std::exp(-time) * Lambda);
+    for (const auto &entry : insertion_order)
+      row.push_back(values.at(entry));
     write_csv_row(output_stream, row);
     if (!output_stream) throw std::runtime_error("CsvOutput::flush: write failed for '" + output_name + "'.");
     written_this_frame.clear();
@@ -82,7 +78,7 @@ namespace DiFfRG
   void CsvOutput::set_Lambda(const double Lambda)
   {
     // This needs safety checks, so that Lambda can only be set once, before any call to flush().
-    if (time_values.size() > 0 && !is_close(this->Lambda, Lambda))
+    if (n_frames > 0 && !is_close(this->Lambda, Lambda))
       throw std::runtime_error("Lambda has either already been set or there has been an attempt to change it.");
     this->Lambda = Lambda;
   }

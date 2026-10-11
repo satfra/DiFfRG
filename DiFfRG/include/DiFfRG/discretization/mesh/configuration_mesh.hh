@@ -67,7 +67,7 @@ namespace DiFfRG
         validate();
       };
 
-      /// The axis string advertised by ConfigurationMesh::get_defaults().
+      /// The axis string used for a missing axis and written by ConfigurationMesh::get_defaults().
       static std::string get_default_range() { return "0:1e-4:7e-3,7e-3:5e-4:9e-3,9e-3:1e-3:1.1e-2"; }
 
       /// Lower end.
@@ -159,12 +159,13 @@ namespace DiFfRG
      *
      * | Key                                  | Type   | Default (if missing) | Meaning |
      * |--------------------------------------|--------|----------------------|---------|
-     * | `/discretization/grid/x_grid`        | string | "0:0.1:1" (warns)    | first axis |
-     * | `/discretization/grid/y_grid`        | string | "0:0.1:1" (warns)    | second axis (dim ≥ 2) |
-     * | `/discretization/grid/z_grid`        | string | "0:0.1:1" (warns)    | third axis (dim = 3) |
+     * | `/discretization/grid/x_grid`        | string | see below (warns)    | first axis |
+     * | `/discretization/grid/y_grid`        | string | see below (warns)    | second axis (dim ≥ 2) |
+     * | `/discretization/grid/z_grid`        | string | see below (warns)    | third axis (dim = 3) |
      * | `/discretization/grid/refine`        | uint   | 0                    | number of global refinements of the mesh (each halves all cells) |
      *
-     * get_defaults() writes a different axis string (GridAxis::get_default_range()).
+     * A missing axis is GridAxis::get_default_range(), "0:1e-4:7e-3,7e-3:5e-4:9e-3,9e-3:1e-3:1.1e-2", as written by
+     * get_defaults().
      *
      * @tparam dim Field-space dimension, 1 to 3.
      */
@@ -202,7 +203,7 @@ namespace DiFfRG
                                                        "/discretization/grid/z_grid"};
 
         for (int i = 0; i < dim; ++i) {
-          auto subranges = internal::string_to_substrings_array(config.get_string_or_warn(grid_names[i], "0:0.1:1"));
+          auto subranges = internal::string_to_substrings_array(config.get_string_or_warn(grid_names[i], GridAxis::get_default_range()));
           for (const auto &subrange_str : subranges)
             grids[i].emplace_back(subrange_str);
           internal::check_ranges_consistency(grids[i]);

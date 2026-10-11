@@ -53,12 +53,13 @@ namespace DiFfRG
     std::ofstream output_stream;
 
     std::vector<std::string> insertion_order;
-    std::unordered_map<std::string, std::vector<double>> values;
+    /// The values of the current frame.
+    std::unordered_map<std::string, double> values;
     std::unordered_set<std::string> written_this_frame;
 
     std::vector<std::string> header;
-    std::vector<double> time_values;
-    std::vector<double> k_values;
+    /// Number of rows written.
+    std::size_t n_frames = 0;
 
     double Lambda;
   };
