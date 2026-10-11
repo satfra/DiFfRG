@@ -67,16 +67,17 @@ namespace DiFfRG
    * - `"auto"` (default): `"model"` if the model defines cell_indicator or face_indicator, `"curvature"` otherwise.
    *
    * The cells are then marked by `marking`:
-   * - `"fraction"` (default): with \f$\eta = \sum_K \eta_K\f$, the cells with the largest \f$\eta_K\f$ whose sum
+   * - `"tolerance"` (default): cells with \f$\eta_K >\f$ `tolerance` are refined, cells with \f$\eta_K <\f$
+   *   `coarsen_tolerance` coarsened (the equidistribution strategy of time-dependent adaptive FEM). A smooth solution
+   *   keeps the initial mesh; refinement starts where a feature becomes unresolved, and a mesh that resolves the
+   *   solution is kept, with no IDA restart. The tolerance is absolute, so it needs an indicator with a known scale,
+   *   like `"curvature"`. `coarsen_tolerance` must lie below `tolerance` divided by the factor by which a refinement
+   *   lowers \f$\eta_K\f$ (4 for `"curvature"`), or a coarsened cell is refined again at once.
+   * - `"fraction"`: with \f$\eta = \sum_K \eta_K\f$, the cells with the largest \f$\eta_K\f$ whose sum
    *   reaches `refine_percent` \f$\cdot\,\eta\f$ are refined, and the cells with the smallest \f$\eta_K\f$ whose sum
    *   stays below `coarsen_percent` \f$\cdot\,\eta\f$ are coarsened (deal.II's
    *   GridRefinement::refine_and_coarsen_fixed_fraction). This changes the mesh at every adaptation, also where the
    *   solution is resolved.
-   * - `"tolerance"`: cells with \f$\eta_K >\f$ `tolerance` are refined, cells with \f$\eta_K <\f$ `coarsen_tolerance`
-   *   coarsened (the equidistribution strategy of time-dependent adaptive FEM). A smooth solution keeps the initial
-   *   mesh; refinement starts where a feature becomes unresolved, and a mesh that resolves the solution is kept, with
-   *   no IDA restart. `coarsen_tolerance` must lie below `tolerance` divided by the factor by which a refinement
-   *   lowers \f$\eta_K\f$ (4 for `"curvature"`), or a coarsened cell is refined again at once.
    *
    * Then
    * - no cell is refined beyond `level`, and no cell is coarsened below the level of the initial mesh;
@@ -97,7 +98,7 @@ namespace DiFfRG
    * | `/discretization/adaptivity/adapt_dt`         | double | 0.1     | minimum RG time between two adaptations |
    * | `/discretization/adaptivity/level`            | uint   | 0       | maximum refinement level of a cell (absolute, counted from the coarse grid); 0 disables adaptivity |
    * | `/discretization/adaptivity/indicator`        | string | "auto"  | "auto", "model" or "curvature", see above |
-   * | `/discretization/adaptivity/marking`          | string | "fraction" | "fraction" or "tolerance", see above |
+   * | `/discretization/adaptivity/marking`          | string | "tolerance" | "tolerance" or "fraction", see above |
    * | `/discretization/adaptivity/refine_percent`   | double | 0.1     | "fraction": fraction of the total indicator to refine |
    * | `/discretization/adaptivity/coarsen_percent`  | double | 0.05    | "fraction": fraction of the total indicator to coarsen |
    * | `/discretization/adaptivity/tolerance`        | double | 1e-3    | "tolerance": refine cells with a larger indicator |
@@ -152,7 +153,7 @@ namespace DiFfRG
       curvature_indicator =
           indicator == "curvature" ||
           (indicator == "auto" && !internal::defines_refinement_indicator<typename Discretization::Model>());
-      tolerance_marking = choice("marking", "fraction", {"fraction", "tolerance"}) == "tolerance";
+      tolerance_marking = choice("marking", "tolerance", {"tolerance", "fraction"}) == "tolerance";
       tolerance = config.get_double("/discretization/adaptivity/tolerance", 1e-3);
       coarsen_tolerance = config.get_double("/discretization/adaptivity/coarsen_tolerance", tolerance / 8.);
       coarsen_buffer = config.get_uint("/discretization/adaptivity/coarsen_buffer", 2);

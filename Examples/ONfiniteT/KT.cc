@@ -32,7 +32,8 @@ int main(int argc, char *argv[])
   const auto log = data_out.report_port();
   Discretization discretization(mesh, config, log);
   Assembler assembler(discretization, model, config);
-  // h-adaptivity (1D KT only), driven by Model::cell_indicator; /discretization/adaptivity/level = 0 switches it off.
+  // h-adaptivity (1D KT only), driven by the default curvature indicator; /discretization/adaptivity/level = 0 switches
+  // it off.
   HAdaptivity mesh_adaptor(assembler, config);
   TimeStepper time_stepper(config, assembler, data_out, mesh_adaptor);
 

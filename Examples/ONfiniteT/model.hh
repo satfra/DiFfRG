@@ -87,13 +87,6 @@ public:
     flow_equations.V.get(flux[idxf("m2")][0], k, prm.N, prm.T, m2Pi, m2Sigma);
   }
 
-  template <int dim, typename NumberType, typename Solution> void cell_indicator(NumberType &indicator, const Point<dim> & /*p*/, const Solution &sol) const
-  {
-    const auto &fe_hessians = get<"fe_hessians">(sol);
-
-    indicator = std::abs(fe_hessians[idxf("m2")][0][0]);
-  }
-
   template <int dim, typename DataOut, typename Solutions> void readouts(DataOut &output, const Point<dim> &x, const Solutions &sol) const
   {
     const auto &fe_functions = get<"fe_functions">(sol);

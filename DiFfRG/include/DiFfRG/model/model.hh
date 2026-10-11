@@ -511,8 +511,9 @@ namespace DiFfRG
        * @name Adaptivity indicators
        * Used by a mesh adaptor to decide which cells to refine. Each cell's indicator is the integral of
        * cell_indicator over the cell plus the integrals of face_indicator over its faces. A model that defines
-       * neither gets HAdaptivity's curvature indicator. The defaults here return DefaultIndicator, by which
-       * HAdaptivity recognizes them; a model's own hooks return void.
+       * neither gets HAdaptivity's curvature indicator. HAdaptivity compares indicators with an absolute tolerance by
+       * default, so an own indicator should have a known scale, e.g. a relative error estimate. The defaults here
+       * return DefaultIndicator, by which HAdaptivity recognizes them; a model's own hooks return void.
        */
       //@{
 

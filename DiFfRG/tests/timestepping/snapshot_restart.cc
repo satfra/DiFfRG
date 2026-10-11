@@ -401,6 +401,7 @@ TEST_CASE("Adaptive flow: the restart rebuilds the adapted mesh", "[snapshot][ti
   auto &adaptivity = config().as_object()["discretization"].as_object()["adaptivity"].as_object();
   adaptivity["level"] = 2;
   adaptivity["adapt_dt"] = 0.2;
+  adaptivity["marking"] = "fraction";
   adaptivity["refine_percent"] = 0.3;
 
   const auto seed =

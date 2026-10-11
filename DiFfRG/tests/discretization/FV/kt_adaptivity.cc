@@ -88,6 +88,7 @@ namespace
                            {{"start_adapt_at", 0.},
                             {"adapt_dt", 0.1},
                             {"level", 3},
+                            {"marking", "fraction"},
                             {"refine_percent", 0.3},
                             {"coarsen_percent", 0.},
                             {"coarsen_buffer", 0},

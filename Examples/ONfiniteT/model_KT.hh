@@ -60,11 +60,6 @@ public:
   }
 
   /// Mesh refinement where m^2 bends, as in the CG model: |d^2 m^2 / drho^2| (KT: from the cell averages).
-  template <int dim, typename NumberType, typename Solution> void cell_indicator(NumberType &indicator, const Point<dim> & /*p*/, const Solution &sol) const
-  {
-    indicator = std::abs(get<"fe_hessians">(sol)[idxf("m2")][0][0]);
-  }
-
   template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
   {
     const auto &rho = pos[0];
