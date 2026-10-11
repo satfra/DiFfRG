@@ -12,6 +12,12 @@
 #endif
 #include <idas/idas.h>
 #include <idas/idas_ls.h>
+#ifdef DIFFRG_IDA_WARM_RESTART
+// IDA's internal state, for the warm restart; installed by the dependency bundle (dependencies/sundials).
+#include <idas_impl.h>
+// Exported by libsundials_idas, but declared in no header.
+extern "C" int IDAInitialSetup(IDAMem IDA_mem);
+#endif
 #include <sunnonlinsol/sunnonlinsol_newton.h>
 
 // standard library
@@ -31,6 +37,12 @@ namespace DiFfRG
   using dealii::SUNDIALS::internal::unwrap_nvector;
   using dealii::SUNDIALS::internal::unwrap_nvector_const;
   using dealii::SUNDIALS::Utilities::call_and_possibly_capture_exception;
+
+#ifdef DIFFRG_IDA_WARM_RESTART
+  template <typename VectorType> const bool IDADriver<VectorType>::warm_restart_available = true;
+#else
+  template <typename VectorType> const bool IDADriver<VectorType>::warm_restart_available = false;
+#endif
 
   namespace
   {
@@ -96,7 +108,8 @@ namespace DiFfRG
   }
 
   template <typename VectorType>
-  void IDADriver<VectorType>::reset(const double t, const double h, VectorType &solution, VectorType &solution_dot)
+  void IDADriver<VectorType>::reset(const double t, const double h, VectorType &solution, VectorType &solution_dot,
+                                    const bool restart)
   {
     free_ida();
     ida_mem = IDACreate(ctx);
@@ -178,6 +191,10 @@ namespace DiFfRG
                       }),
           "IDASetJacFn");
 
+    if (restart && warm) {
+      restore_history(t);
+      return;
+    }
     // Consistent initial conditions: algebraic components of y and the derivative of the differential ones.
     check(IDASetMaxNumItersIC(ida_mem, 5), "IDASetMaxNumItersIC");
     const int status = IDACalcIC(ida_mem, IDA_YA_YDP_INIT, t + h);
@@ -186,12 +203,60 @@ namespace DiFfRG
     check(IDAGetConsistentIC(ida_mem, yy, yp), "IDAGetConsistentIC");
   }
 
+  template <typename VectorType> void IDADriver<VectorType>::capture_history()
+  {
+#ifdef DIFFRG_IDA_WARM_RESTART
+    auto *m = static_cast<IDAMem>(ida_mem);
+    auto &s = history_scalars;
+    s.kk = m->ida_kk, s.kused = m->ida_kused, s.knew = m->ida_knew, s.phase = m->ida_phase, s.ns = m->ida_ns;
+    s.nst = m->ida_nst;
+    s.hh = m->ida_hh, s.hused = m->ida_hused, s.tn = m->ida_tn, s.cjlast = m->ida_cjlast, s.cjold = m->ida_cjold;
+    s.cjratio = m->ida_cjratio, s.ss = m->ida_ss, s.eta = m->ida_eta, s.cj = m->ida_cj, s.oldnrm = m->ida_oldnrm;
+    s.h0u = m->ida_h0u, s.epsNewt = m->ida_epsNewt, s.toldel = m->ida_toldel;
+    for (int j = 0; j < MXORDP1; ++j) {
+      s.psi[j] = m->ida_psi[j], s.alpha[j] = m->ida_alpha[j], s.beta[j] = m->ida_beta[j];
+      s.sigma[j] = m->ida_sigma[j], s.gamma[j] = m->ida_gamma[j];
+    }
+    // phi[0..kk+1]: the prediction uses up to kk, order increases read kk + 1.
+    const int n = std::min(s.kk + 2, m->ida_maxord + 1);
+    history_vectors.resize(n);
+    history_pointers.clear();
+    for (int j = 0; j < n; ++j) {
+      history_vectors[j] = *unwrap_nvector_const<VectorType>(m->ida_phi[j]);
+      history_pointers.push_back(&history_vectors[j]);
+    }
+#endif
+  }
+
+  template <typename VectorType> void IDADriver<VectorType>::restore_history([[maybe_unused]] const double t)
+  {
+#ifdef DIFFRG_IDA_WARM_RESTART
+    auto *m = static_cast<IDAMem>(ida_mem);
+    check(IDAInitialSetup(m), "IDAInitialSetup");
+    m->ida_SetupDone = SUNTRUE;
+    for (size_t j = 0; j < history_vectors.size(); ++j)
+      *unwrap_nvector<VectorType>(m->ida_phi[j]) = history_vectors[j];
+    const auto &s = history_scalars;
+    m->ida_kk = s.kk, m->ida_kused = s.kused, m->ida_knew = s.knew, m->ida_phase = s.phase, m->ida_ns = s.ns;
+    m->ida_nst = s.nst;
+    m->ida_hh = s.hh, m->ida_hused = s.hused, m->ida_tn = s.tn, m->ida_cjlast = s.cjlast, m->ida_cjold = s.cjold;
+    m->ida_cjratio = s.cjratio, m->ida_ss = s.ss, m->ida_eta = s.eta, m->ida_cj = s.cj, m->ida_oldnrm = s.oldnrm;
+    m->ida_h0u = s.h0u, m->ida_epsNewt = s.epsNewt, m->ida_toldel = s.toldel;
+    for (int j = 0; j < MXORDP1; ++j) {
+      m->ida_psi[j] = s.psi[j], m->ida_alpha[j] = s.alpha[j], m->ida_beta[j] = s.beta[j];
+      m->ida_sigma[j] = s.sigma[j], m->ida_gamma[j] = s.gamma[j];
+    }
+    m->ida_tretlast = t;
+    m->ida_forceSetup = SUNTRUE; // the jacobian of the old mesh is gone
+#endif
+  }
+
   template <typename VectorType>
   unsigned int IDADriver<VectorType>::solve_dae(VectorType &solution, VectorType &solution_dot)
   {
     double t = prm.initial_time;
     double h = prm.initial_step_size;
-    reset(t, h, solution, solution_dot);
+    reset(t, h, solution, solution_dot, false);
     if (output_step) output_step(t, solution, solution_dot, 0);
 
     unsigned int output_number = 0;
@@ -209,8 +274,11 @@ namespace DiFfRG
       }
       check(IDAGetLastStep(ida_mem, &h), "IDAGetLastStep");
 
+      warm = warm_restart_available && prm.warm_restart;
+      if (warm) capture_history();
       while (solver_should_restart && solver_should_restart(t, solution, solution_dot))
-        reset(t, h, solution, solution_dot);
+        reset(t, h, solution, solution_dot, true);
+      warm = false;
 
       if (output_step) output_step(t, solution, solution_dot, ++output_number);
     }

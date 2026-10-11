@@ -315,9 +315,12 @@ namespace DiFfRG
     assembler.reinit_solution_view(y_dot_state);
 
     // Tells SUNDIALS to do an internal reset, e.g. if we do local refinement, or if the per-dof tolerances drifted.
-    // On a refinement sol_dot is transferred as well: it is the starting guess of IDA's consistent-IC solve.
+    // On a refinement sol_dot and IDA's step history are transferred as well, see IDADriver::history.
     time_stepper.solver_should_restart = [&](const double t, VectorType &sol, VectorType &sol_dot) -> bool {
-      if (adaptor.adapt_at(t, sol, {&sol_dot})) {
+      std::vector<VectorType *> also_transfer{&sol_dot};
+      for (auto *v : time_stepper.history())
+        also_transfer.push_back(v);
+      if (adaptor.adapt_at(t, sol, also_transfer)) {
         assembler.reinit_vector(residual_placeholder);
         residual = &residual_placeholder;
         assembler.reinit_matrix(jacobian);
@@ -653,12 +656,17 @@ namespace DiFfRG
     assembler.reinit_solution_view(y_dot_state);
     internal::reinit_variables_view(y_vars_state, n_vars, assembler.get_communicator());
 
-    // Tells SUNDIALS to do an internal reset after a mesh refinement; the spatial part of sol_dot is transferred as
-    // well, as the starting guess of IDA's consistent-IC solve.
+    // Tells SUNDIALS to do an internal reset after a mesh refinement; the spatial parts of sol_dot and of IDA's step
+    // history (IDADriver::history) are transferred as well.
     time_stepper.solver_should_restart = [&](const double t, BlockVectorType &sol, BlockVectorType &sol_dot) -> bool {
-      if (adaptor.adapt_at(t, sol.block(0), {&sol_dot.block(0)})) {
+      std::vector<VectorType *> also_transfer{&sol_dot.block(0)};
+      for (auto *v : time_stepper.history())
+        also_transfer.push_back(&v->block(0));
+      if (adaptor.adapt_at(t, sol.block(0), also_transfer)) {
         sol.collect_sizes();
         sol_dot.collect_sizes();
+        for (auto *v : time_stepper.history())
+          v->collect_sizes();
         n_FE_dofs = sol.block(0).size();
         assembler.reinit_vector(residual_placeholder.block(0));
         residual_placeholder.collect_sizes();

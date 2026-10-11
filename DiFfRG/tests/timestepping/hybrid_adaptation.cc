@@ -55,8 +55,10 @@ namespace
            {"output_dt", 0.05},
            {"explicit",
             {{"dt", 1e-3}, {"minimal_dt", 1e-8}, {"maximal_dt", 1e-2}, {"abs_tol", 1e-10}, {"rel_tol", 1e-8}}},
+           // IDA continues at its step size across adaptations, so this alone bounds the coupling error of the
+           // hybrids (IDA + RK54 misses 1e-5 in v at 5e-2, with or without adaptation).
            {"implicit",
-            {{"dt", 1e-3}, {"minimal_dt", 1e-8}, {"maximal_dt", 5e-2}, {"abs_tol", 1e-10}, {"rel_tol", 1e-8}}}}},
+            {{"dt", 1e-3}, {"minimal_dt", 1e-8}, {"maximal_dt", 5e-3}, {"abs_tol", 1e-10}, {"rel_tol", 1e-8}}}}},
          {"output", {{"verbosity", 0}, {"vtk", false}}}});
   }
 
@@ -93,6 +95,7 @@ namespace
 
 TEST_CASE("IDA hybrids survive mesh adaptation", "[timestepping][sundials_ida_boost][adaptivity]")
 {
+  SECTION("IDA, variables implicit") { require_adapted_run_is_accurate<TimeStepperSUNDIALS_IDA>("hybrid_adapt_ida"); }
   SECTION("IDA + ABM") { require_adapted_run_is_accurate<IDA_ABM>("hybrid_adapt_abm"); }
   SECTION("IDA + RK54") { require_adapted_run_is_accurate<IDA_RK>("hybrid_adapt_rk"); }
 }

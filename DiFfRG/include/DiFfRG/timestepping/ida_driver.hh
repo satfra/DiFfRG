@@ -10,6 +10,7 @@
 // standard library
 #include <exception>
 #include <functional>
+#include <vector>
 
 namespace DiFfRG
 {
@@ -27,6 +28,8 @@ namespace DiFfRG
     unsigned int maximum_newton_iterations = 3;
     double absolute_tolerance = 1e-13;
     double relative_tolerance = 1e-7;
+    /// Continue IDA at its order and step size after a restart, if IDADriver::warm_restart_available.
+    bool warm_restart = true;
   };
 
   /**
@@ -46,8 +49,11 @@ namespace DiFfRG
    *   negligible.
    * - Statistics and the error test vectors are accessible.
    *
-   * At the start and after every restart the algebraic components of the solution and the derivative of the
-   * differential ones are made consistent (IDACalcIC with IDA_YA_YDP_INIT).
+   * At the start the algebraic components of the solution and the derivative of the differential ones are made
+   * consistent (IDACalcIC with IDA_YA_YDP_INIT). A restart (solver_should_restart, e.g. after a mesh adaptation) by
+   * default continues warm: IDA keeps its order and step size, with its step history (history()) transferred to the
+   * new mesh by the caller. Without warm restarts (Parameters::warm_restart, warm_restart_available) IDA starts
+   * over at order 1 with a fresh consistent initial condition, which costs tens of jacobians per restart.
    */
   template <typename VectorType> class IDADriver
   {
@@ -110,8 +116,17 @@ namespace DiFfRG
     /// Optional per-component absolute tolerances.
     std::function<VectorType &()> get_local_tolerances;
 
+    /**
+     * @brief During solver_should_restart: IDA's step history (its divided-difference vectors), which a mesh
+     * adaptation has to transfer together with the solution for IDA to continue warm, at its order and step size.
+     */
+    std::vector<VectorType *> history() { return warm ? history_pointers : std::vector<VectorType *>{}; }
+
+    /// Whether this build can restart IDA warm: it needs IDA's internal headers from the dependency bundle.
+    static const bool warm_restart_available;
+
   private:
-    void reset(const double t, const double h, VectorType &solution, VectorType &solution_dot);
+    void reset(const double t, const double h, VectorType &solution, VectorType &solution_dot, const bool restart);
     void free_ida();
     /// Rethrow an exception a callback left behind, unless it is a recoverable one: IDA has either recovered from
     /// that, or reports its failure through its return status.
@@ -123,6 +138,20 @@ namespace DiFfRG
     };
     static int newton_convergence_test(SUNNonlinearSolver NLS, N_Vector ycor, N_Vector delta, double tolerance,
                                        N_Vector weights, void *test);
+
+    /// IDA's state at a restart, see history(); restored by reset() so that IDA continues where it was: the
+    /// divided-difference vectors (transferred to a new mesh by the caller) and the scalars of IDA's step control.
+    void capture_history();
+    void restore_history(const double t);
+    struct HistoryScalars {
+      int kk, kused, knew, phase, ns;
+      long int nst;
+      double hh, hused, tn, cjlast, cjold, cjratio, ss, eta, cj, oldnrm, h0u, epsNewt, toldel;
+      double psi[6], alpha[6], beta[6], sigma[6], gamma[6];
+    } history_scalars;
+    std::vector<VectorType> history_vectors;
+    std::vector<VectorType *> history_pointers;
+    bool warm = false;
 
     const Parameters prm;
     SUNContext ctx = nullptr;
@@ -148,7 +177,8 @@ namespace DiFfRG
                            .maximal_step_size = impl.maximal_dt,
                            .maximum_newton_iterations = impl.max_non_linear_iterations,
                            .absolute_tolerance = impl.abs_tol,
-                           .relative_tolerance = impl.rel_tol};
+                           .relative_tolerance = impl.rel_tol,
+                           .warm_restart = impl.warm_restart};
     }
   } // namespace internal
 } // namespace DiFfRG

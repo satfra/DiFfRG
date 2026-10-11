@@ -82,6 +82,7 @@
  * | `/timestepping/implicit/max_non_linear_iterations` | uint | 3       | IDA steppers: Newton iterations per step attempt; see IDADriver |
  * | `/timestepping/implicit/local_tolerance_refresh` | double | 4       | IDA without variables and the IDA hybrids, for models with per-dof tolerances; see LocalAbsTolerances |
  * | `/timestepping/implicit/iterative_refinement`    | bool   | true    | UMFPack: refine every direct solve |
+ * | `/timestepping/implicit/warm_restart`            | bool   | true    | IDA steppers: after a mesh adaptation continue at the same order and step size, the step history transferred to the new mesh (needs the dependency bundle's IDA internal headers; else, and with false, IDA restarts cold) |
  * | `/timestepping/implicit/jacobian_diagnostics`    | bool   | false   | implicit steppers: write `<run>_jacobian_diagnostics.csv` |
  * | `/timestepping/implicit/ida_callback_trace`      | bool   | false   | TimeStepperSUNDIALS_IDA: print every failed callback, at `/output/verbosity` >= 5 |
  * | `/timestepping/implicit/ida_callback_trace_min_t` | double | 0      | only trace from this \f$t\f$ on |
@@ -288,6 +289,7 @@ namespace DiFfRG
         impl.rel_tol = config.get_double_or_warn("/timestepping/implicit/rel_tol", 1e-7);
         impl.local_tolerance_refresh = config.get_double("/timestepping/implicit/local_tolerance_refresh", 4.);
         impl.iterative_refinement = config.get_bool("/timestepping/implicit/iterative_refinement", true);
+        impl.warm_restart = config.get_bool("/timestepping/implicit/warm_restart", true);
 
         // Stuff you can set, but defaults are reasonable
         impl.dt = config.get_double("/timestepping/implicit/dt", 1e-4);
@@ -647,6 +649,8 @@ namespace DiFfRG
        * inside IDA the Newton iteration corrects the solve's error anyway (2D O(2) KT flow, 80^2: 16.3 -> 12.8 s),
        * but a badly scaled system then only gets ~1e-7 relative accuracy per solve. */
       bool iterative_refinement;
+      /// IDA steppers: continue IDA at its order and step size after a mesh adaptation (see IDADriver).
+      bool warm_restart;
       uint max_non_linear_iterations;
       /** Enables the `<run>_jacobian_diagnostics.csv` tables. Off by default because the records
        * are not free: each one costs a full sweep over the assembled Jacobian and, for factorizing

@@ -687,9 +687,11 @@ namespace DiFfRG
 
     // Tells SUNDIALS to do an internal reset, e.g. if we do local refinement, or if the per-dof tolerances drifted
     time_stepper.solver_should_restart = [&](const double t, VectorType &sol, VectorType &sol_dot) -> bool {
-      // sol_dot (the starting guess of IDA's consistent-IC solve) and the explicit side's spatial states move to
-      // the new mesh along with sol.
+      // sol_dot, IDA's step history (IDADriver::history) and the explicit side's spatial states move to the new
+      // mesh along with sol.
       std::vector<VectorType *> spatial_states{&sol_dot, &spatial_lo, &spatial_hi, &spatial_pending};
+      for (auto *v : time_stepper.history())
+        spatial_states.push_back(v);
       for (auto &ckpt : spatial_ckpts)
         spatial_states.push_back(&ckpt);
       if (adaptor.adapt_at(t, sol, spatial_states)) {

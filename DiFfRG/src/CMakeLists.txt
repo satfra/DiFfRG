@@ -92,3 +92,15 @@ install(
   TARGETS DiFfRG DiFfRG_boost_json DiFfRG_toml
   EXPORT DiFfRGTargets
   ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
+# The IDA driver continues IDA warm across mesh adaptations if the dependency bundle provides IDA's internal headers
+# (dependencies/sundials installs them to include/sundials_internal); otherwise it restarts IDA cold.
+find_path(DIFFRG_SUNDIALS_INTERNAL_DIR idas_impl.h PATHS ${BUNDLED_DIR}/include/sundials_internal NO_DEFAULT_PATH)
+if(DIFFRG_SUNDIALS_INTERNAL_DIR)
+  message(STATUS "IDA warm restarts enabled (${DIFFRG_SUNDIALS_INTERNAL_DIR})")
+  set_source_files_properties(
+    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/timestepping/ida_driver.cc
+    PROPERTIES INCLUDE_DIRECTORIES ${DIFFRG_SUNDIALS_INTERNAL_DIR} COMPILE_DEFINITIONS DIFFRG_IDA_WARM_RESTART)
+else()
+  message(STATUS "IDA warm restarts disabled: the dependency bundle lacks include/sundials_internal")
+endif()
