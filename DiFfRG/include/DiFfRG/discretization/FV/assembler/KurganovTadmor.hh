@@ -137,8 +137,7 @@ namespace DiFfRG
          * @brief Run @p compute once per distinct block and hand each component its block's result.
          *
          * Components carrying `no_wave_speed` are skipped and keep the value-initialised entry.
-         * `compute(block)` is called at most once per distinct id, so a model that declares one
-         * block pays exactly what it paid before blocks existed.
+         * `compute(block)` is called at most once per distinct id.
          */
         template <size_t n_components, typename Result, typename ComputeFUN>
         std::array<Result, n_components> per_block(const std::array<int, n_components> &blocks,
@@ -183,11 +182,10 @@ namespace DiFfRG
           result.F_plus = F_plus;
           result.F_minus = F_minus;
 
-          // One speed per block, from the flux jacobian restricted to that block, and a component
-          // marked no_wave_speed gets none at all -- its numerical flux is then identically zero, so
-          // the reconstruction, and its slope limiter, never reaches its row. See
-          // AbstractModel::wave_speed_blocks for why a shared speed is wrong for a system that
-          // mixes a conservation law with constraints.
+          // One speed per block, from the flux jacobian restricted to that block. A component marked
+          // no_wave_speed gets none; with its (required) zero flux, its numerical flux vanishes and the
+          // reconstruction never reaches its row. See AbstractModel::wave_speed_blocks for why a shared
+          // speed is wrong for a system that mixes a conservation law with constraints.
           std::array<int, n_components> blocks;
           model.wave_speed_blocks(blocks);
 
@@ -374,11 +372,88 @@ namespace DiFfRG
 
       } // namespace internal
 
-      // Model_ keeps its second place and merely gains a default, rather than moving to the end.
-      // Moving it would let an application that names a Reconstructor drop it, but it would also
-      // force every *model-generic* discretization -- one Discretization built from a bare
-      // ComponentDescriptor and shared across several models, which is how most of the regression
-      // tests are written -- to spell out all four preceding arguments to reach the model.
+      // clang-format off
+      /**
+       * @brief The Kurganov-Tadmor central-upwind finite-volume scheme on FV::Discretization, for
+       * \f$m(u, \partial_t u) + \nabla\cdot(F + D) + s = 0\f$ on rectangular meshes in \f$d = 1, 2\f$.
+       *
+       * \f$F\f$ = Model::flux is the advective flux, \f$D\f$ = Model::diffusion_flux the diffusive one (added to
+       * \f$F\f$, so forward diffusion is \f$D = -\nu \nabla u\f$), \f$s\f$ = Model::source.
+       *
+       * ### Residual
+       * The unknowns are the cell averages \f$\bar u_K\f$. The residual of cell \f$K\f$ is
+       * \f[
+       *   R_K = \sum_q \omega_q \Big[ w_m\, m(\bar u_K, \partial_t \bar u_K) + w\, s(\bar u_K, g_{K,q}) \Big]
+       *       + w \sum_{f \subset \partial K} |f|\, (H_f + D_f) \cdot n_{K,f}\,,
+       * \f]
+       * with \f$q\f$ the Gauss points of \f$K\f$ (weights \f$\omega_q\f$ summing to the volume \f$|K|\f$; by default
+       * one point, the centre), \f$|f|\f$ the face area (1 in 1D), \f$n_{K,f}\f$ the outward unit normal and
+       * \f$w, w_m\f$ the residual and mass weights of the timestepper.
+       *
+       * **Reconstruction.** In each cell \f$u\f$ is taken linear, \f$u_K(x) = \bar u_K + g_K \cdot (x - x_K)\f$, with
+       * \f$x_K\f$ the centre. The slope \f$g_K\f$ comes from the Reconstructor: def::TVDReconstructor combines, per
+       * direction, the two one-sided slopes to the neighbouring cell averages with its slope limiter;
+       * def::FirstOrderReconstructor sets \f$g_K = 0\f$. At a face, \f$u^- = u_K(x_f)\f$ is the trace from the cell
+       * whose outward normal is \f$n\f$, \f$u^+\f$ that from the neighbour, or from the model's ghost cells at the
+       * domain boundary.
+       *
+       * **Advective flux.** Per component and direction \f$d\f$,
+       * \f[
+       *   H_{f,d} = \tfrac12 \big[ F_d(u^+) + F_d(u^-) \big] - \tfrac12\, a_d\, n_d\, (u^+ - u^-)\,,
+       * \f]
+       * so \f$H_f \cdot n\f$ carries the dissipation \f$\tfrac12 a_n (u^+ - u^-)\f$, with \f$a_n\f$ the speed along the
+       * (axis-aligned) normal. The local wave speed \f$a_d\f$ comes from the WaveSpeedStrategy; MaxEigenvalueWaveSpeed
+       * takes the larger over both traces of the spectral radius of \f$\partial F_d / \partial u\f$. With
+       * Model::wave_speed_blocks, each block of components gets the speed of its own diagonal block of
+       * \f$\partial F_d / \partial u\f$; a component marked `no_wave_speed` gets \f$a = 0\f$ and must have zero flux
+       * (asserted in debug builds).
+       *
+       * **Diffusive flux.** \f$D_f = \tfrac12 \big[ D(\bar u_K, \hat g_K) + D(\bar u_N, \hat g_N) \big]\f$ with
+       * \f$N\f$ the neighbour across \f$f\f$ and \f$\hat g\f$ a cell's least-squares gradient over its \f$2d\f$ face
+       * neighbours (weights \f$1/|x_M - x_K|^2\f$), corrected so that \f$\hat g \cdot (x_N - x_K) = \bar u_N - \bar u_K\f$.
+       * In 1D, \f$D\f$ may also read third derivatives, from the divided difference of the four cell averages around
+       * the face (zero with FirstOrderReconstructor).
+       *
+       * **Gradients the model sees.** At a face, \f$F\f$ sees the gradient of \f$u_K\f$ there: in the normal direction
+       * the unlimited one-sided slope towards the face, in the other directions the limited slope. The source sees
+       * \f$\bar u_K\f$ and, per direction, the limited slope at the cell centre (up to rounding) and the unlimited
+       * one-sided slope towards a quadrature point off the centre. A model with
+       * `static constexpr bool source_uses_hessians = true` also gets "fe_hessians" in the source: the diagonal second
+       * derivatives from three cell averages per direction, unlimited, no mixed derivatives.
+       *
+       * **Boundary conditions** are imposed only through ghost cells: the model's apply_boundary_stencil (e.g.
+       * def::FVDefaultBoundaries, linear extrapolation; see model/fv_boundaries.hh) fills the values beyond each
+       * boundary face, which enter the reconstruction like interior neighbours. boundary_numflux and numflux are not
+       * used.
+       *
+       * ### Jacobian
+       * The derivative of the residual by the cell averages, with JacobianReconstructor in place of Reconstructor (any
+       * other choice than the default makes the Newton iteration inexact). The extractors and variables are held fixed
+       * within a Newton step: they get no jacobian entries, and jacobian_variables does nothing.
+       *
+       * ### Model hooks
+       * mass, flux, diffusion_flux and source (or evaluate_batch), apply_boundary_stencil, wave_speed_blocks, the
+       * extractor and readout hooks; optionally `source_uses_hessians` and fv_kt_pre_assembly(stage, context), called
+       * before every residual and jacobian assembly with a view of the reconstruction (see AssemblyStage,
+       * AssemblyContextView). There is no mesh adaptation (refinement_indicator does nothing): use NoAdaptivity.
+       *
+       * ### Parameters
+       * | Key                                          | Type | Default             | Meaning |
+       * |----------------------------------------------|------|---------------------|---------|
+       * | `/discretization/overintegration`            | uint | 0                   | QGauss(1 + overintegration) points per direction for mass and source. Each point sees the cell average and the one-sided gradient towards it, so this changes the scheme rather than refining it. |
+       * | `/discretization/batched/max_stacked_points` | uint | 16 MiB / point size | points per automatic-differentiation evaluation of the jacobian |
+       * | `/discretization/diagnose_flux_conditioning` | bool | false               | on the first residual, warn if a diffusion flux is dominated by a gradient-independent constant, which loses digits in the face differences |
+       *
+       * Distributed linear algebra is supported; local_abs_tolerances only works with serial vectors.
+       *
+       * @tparam Discretization_ An FV::Discretization on a rectangular mesh.
+       * @tparam Model_ The model; by default that of the discretization.
+       * @tparam Reconstructor_ The slope reconstruction (def::HasReconstructor), by default
+       *         def::TVDReconstructor<dim, def::MinModLimiter, double>.
+       * @tparam WaveSpeedStrategy_ The local wave speed (def::HasWaveSpeed), by default MaxEigenvalueWaveSpeed.
+       * @tparam JacobianReconstructor_ The reconstruction the jacobian differentiates, by default Reconstructor_.
+       */
+      // clang-format on
       template <typename Discretization_,
                 typename Model_ = typename DiFfRG::internal::assembler_model_of<Discretization_>::type,
                 def::HasReconstructor Reconstructor_ =
@@ -447,6 +522,8 @@ namespace DiFfRG
         };
 
       public:
+        /// Set up the stencils, the mass matrix and the jacobian sparsity; @p discretization and @p model must
+        /// outlive the assembler.
         Assembler(Discretization &discretization, Model &model, const ConfigTree &config)
             : Base(discretization, model, config, "FV"), report_port(discretization.report_port()),
               triangulation(discretization.get_triangulation()),
@@ -504,6 +581,7 @@ namespace DiFfRG
           }
         }
 
+        /// Rebuild constraints, mass matrix, stencils and sparsity for the current mesh.
         virtual void reinit() override
         {
           Timer timer;
@@ -514,8 +592,7 @@ namespace DiFfRG
           // on a partitioned triangulation, and that function is entered conditionally
           // (diagnose_flux_conditioning, and only on the first residual assembly). A collective
           // behind a condition is a hang waiting for the condition to stop agreeing across ranks.
-          // Here every rank arrives unconditionally, and the value cannot go stale because KT
-          // refuses to run under mesh adaptivity.
+          // Here every rank arrives unconditionally; reinit() recomputes it if the mesh changes.
           domain_diameter = GridTools::diameter(triangulation);
 
           rebuild_cell_topology_cache();
@@ -528,11 +605,13 @@ namespace DiFfRG
           timings_reinit.push_back(timer.wall_time());
         }
 
+        /// Does nothing: KT keeps the variables fixed within a Newton step.
         virtual void jacobian_variables([[maybe_unused]] FullMatrix<NumberType> &jacobian,
                                         [[maybe_unused]] const VectorType &variables, const VectorType &) override {
           // Not assembled: KT treats the variables as frozen within a Newton step.
         };
 
+        /// The solution at one point for extractors, readouts and tolerances; see reconstruct_readout_solution.
         struct ReadoutSolution {
           std::array<NumberType, n_components> values{};
           GradientType gradients{};
@@ -562,11 +641,12 @@ namespace DiFfRG
           return solution;
         }
 
-        // The point evaluation of the extractors and readouts; see DiFfRG::internal::AssemblerCore.
+        /// The point evaluation of the extractors and readouts; see DiFfRG::internal::AssemblerCore.
         template <typename PotentialEvaluation> struct PointEvaluation : ReadoutSolution {
           PotentialEvaluation potential;
         };
 
+        /// The solution and the raw potential at @p x, which lies in @p cell (internal::AssemblerCore interface).
         template <typename RawPotential>
         auto evaluate_at(const Point &x, const typename Base::CellIterator &cell, const VectorType &solution,
                          const RawPotential &raw_potential) const
@@ -577,6 +657,7 @@ namespace DiFfRG
           return evaluation;
         }
 
+        /// The named tuple the model's extract() and readouts see (internal::AssemblerCore interface).
         template <typename Evaluation, typename Extractors_>
         static auto solution_tie(const Evaluation &e, const Extractors_ &extractors, const VectorType &variables)
         {
@@ -587,11 +668,10 @@ namespace DiFfRG
         /**
          * @brief The solution sample a model's extractor_point sees.
          *
-         * Values are read straight off the dofs -- with one dof per cell they are the cell averages already -- and
-         * gradients are recovered by central differences afterwards. Deliberately not the Reconstructor's limited
-         * slopes: reconstructing per cell means a stencil fill over the whole mesh on every residual evaluation,
-         * which is serial work that dominates the assembly (it cost a factor of four here). The FE path of
-         * make_solution_sample() is no use either, since DG0 shape functions have zero gradient.
+         * Values are the cell averages, gradients central differences of them. Not the Reconstructor's limited
+         * slopes: those would need a stencil fill over the whole mesh on every residual evaluation, serial work that
+         * dominates the assembly. The FE path of make_solution_sample() does not apply, since DG0 shape functions
+         * have zero gradient.
          */
         auto extractor_sample(const VectorType &solution_global) const
         {
@@ -608,9 +688,12 @@ namespace DiFfRG
           return sample;
         }
 
-        virtual void mass(VectorType &mass, const VectorType &solution_global, const VectorType &solution_global_dot,
+        /// \f$w_m\, |K|\, m(\bar u_K, \partial_t \bar u_K)\f$ per cell, see AbstractAssembler::mass.
+        virtual void mass(VectorType &mass, const VectorType &solution, const VectorType &solution_dot,
                           NumberType weight) override
         {
+          const VectorType solution_global = this->constrained(solution);
+          const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
           scatter_rows(mass, [&](const size_t k, Scratch &scratch, CellRows &local) {
             const auto &cell = cells[k];
             const auto &geometry = cell_topology_cache[cell->active_cell_index()];
@@ -650,6 +733,7 @@ namespace DiFfRG
         };
 
       public:
+        /// The view handed to the model's fv_kt_pre_assembly hook, over @p cache (see AssemblyContextView).
         auto make_assembly_context_view(const SolutionReconstructionCache &cache) const
         {
           using FaceRange =
@@ -662,6 +746,7 @@ namespace DiFfRG
 
         auto make_assembly_context_view(SolutionReconstructionCache &&cache) const = delete;
 
+        /// The boundary stencil (physical cells and model ghosts) of face @p boundary_face_no of @p cell.
         template <typename BoundaryNumberType>
         internal::BoundaryStencilData<dim, BoundaryNumberType, n_components>
         build_boundary_stencil_from_cache(const Iterator &cell, const unsigned int boundary_face_no,
@@ -671,12 +756,14 @@ namespace DiFfRG
                                                                                  solution_global);
         }
 
+        /// The cell average of @p cell and those of its \f$2d\f$ face neighbours (model ghosts across the boundary).
         void fill_cell_stencil(const Iterator &cell, const VectorType &solution_global, CellStencilData &stencil) const
         {
           initialize_cell_stencil_topology(cell->active_cell_index(), stencil);
           refresh_cell_stencil_values(cell->active_cell_index(), solution_global, stencil);
         }
 
+        /// The face number, seen from @p neighbor, of the face it shares with @p cell.
         unsigned int find_neighbor_face(const Iterator &cell, const Iterator &neighbor) const
         {
           for (const auto neighbor_face_index : neighbor->face_indices()) {
@@ -687,6 +774,7 @@ namespace DiFfRG
           return 0;
         }
 
+        /// Fill @p cache with the cell stencils and the face reconstructions of every face, using ActiveReconstructor.
         template <def::HasReconstructor ActiveReconstructor>
         void rebuild_solution_reconstruction_cache(const VectorType &solution_global,
                                                    SolutionReconstructionCache &cache) const
@@ -737,6 +825,7 @@ namespace DiFfRG
               });
         }
 
+        /// The reconstruction of face @p face_index of @p cell in @p cache, seen from @p cell (its side is u^-).
         const FaceReconstructionState &get_cached_face_reconstruction(const SolutionReconstructionCache &cache,
                                                                       const Iterator &cell,
                                                                       const unsigned int face_index) const
@@ -1682,10 +1771,13 @@ namespace DiFfRG
         }
 
       public:
-        virtual void residual(VectorType &residual, const VectorType &solution_global, NumberType weight,
-                              const VectorType &solution_global_dot, NumberType weight_mass,
+        /// The residual \f$R_K\f$ of the class documentation, added to @p residual; see AbstractAssembler::residual.
+        virtual void residual(VectorType &residual, const VectorType &solution, NumberType weight,
+                              const VectorType &solution_dot, NumberType weight_mass,
                               const VectorType &variables = VectorType()) override
         {
+          const VectorType solution_global = this->constrained(solution);
+          const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
           // Find the EoM and extract whatever data is needed for the model, as the FEM assemblers do. Beyond
           // filling `extracted_data` this is what gives a model the chance to refresh whatever internal state its
           // flux depends on (interpolators, self-consistently solved anomalous dimensions, ...) before the fluxes
@@ -1727,10 +1819,14 @@ namespace DiFfRG
           timings_residual.push_back(phase.finish());
         }
 
-        virtual void jacobian_mass(SparseMatrixType &jacobian, const VectorType &solution_global,
-                                   const VectorType &solution_global_dot, NumberType alpha = 1.,
+        /// \f$|K| \big[\alpha\, \partial m/\partial(\partial_t u) + \beta\, \partial m/\partial u\big]\f$ per cell; see
+        /// AbstractAssembler::jacobian_mass.
+        virtual void jacobian_mass(SparseMatrixType &jacobian, const VectorType &solution,
+                                   const VectorType &solution_dot, NumberType alpha = 1.,
                                    NumberType beta = 1.) override
         {
+          const VectorType solution_global = this->constrained(solution);
+          const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
           Timer timer;
           scatter_rows(jacobian, [&](const size_t k, Scratch &scratch, CellRows &local) {
             const auto &cell = cells[k];
@@ -1754,14 +1850,20 @@ namespace DiFfRG
           timings_jacobian.push_back(timer.wall_time());
         }
 
-        virtual void jacobian(SparseMatrixType &jacobian, const VectorType &solution_global, NumberType weight,
-                              const VectorType &solution_global_dot, NumberType alpha, NumberType beta,
+        /**
+         * @brief \f$\partial R_K / \partial \bar u\f$ through the reconstruction of JacobianReconstructor, with
+         * extractors and variables held fixed, plus the mass terms as in jacobian_mass. See
+         * AbstractAssembler::jacobian.
+         */
+        virtual void jacobian(SparseMatrixType &jacobian, const VectorType &solution, NumberType weight,
+                              const VectorType &solution_dot, NumberType alpha, NumberType beta,
                               const VectorType &variables = VectorType()) override
         {
+          const VectorType solution_global = this->constrained(solution);
+          const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
           // See residual(): keep the model's extractor-driven state consistent with the point the jacobian is
-          // linearised about. The extractor jacobian contribution itself is not assembled here, so extractors are
-          // treated as frozen w.r.t. the FE solution within a Newton step -- fine for the IDA/explicit split where
-          // Variables are stepped explicitly, but it is why jacobian_variables is still a no-op.
+          // linearised about. The extractor jacobian contribution itself is not assembled, so extractors are
+          // frozen w.r.t. the FE solution within a Newton step; likewise the variables (jacobian_variables is a no-op).
           DiFfRG::internal::PhaseTimer phase(jacobian_times);
           Extractors extracted{};
           if constexpr (Components::count_extractors() > 0)
@@ -1792,6 +1894,7 @@ namespace DiFfRG
           timings_jacobian.push_back(phase.finish());
         }
 
+        /// Does nothing: KT does not support mesh adaptation.
         void refinement_indicator([[maybe_unused]] Vector<double> &indicator,
                                   [[maybe_unused]] const VectorType &solution_global)
         {

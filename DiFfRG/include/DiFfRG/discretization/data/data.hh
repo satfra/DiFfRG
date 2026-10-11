@@ -27,6 +27,7 @@ namespace DiFfRG
 
   namespace internal
   {
+    /// A deal.II Function whose vector_value calls a lambda.
     template <uint dim, typename NumberType> class FunctionFromLambda : public dealii::Function<dim, NumberType>
     {
       using FUN = std::function<void(const Point<dim> &, Vector<NumberType> &)>;
@@ -41,27 +42,22 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief A class to set up initial data for whatever discretization we have chosen.
-   *        Also used to switch/manage memory, vectors, matrices over interfaces between spatial discretization and
-   * separate variables.
+   * @brief State of a flow without field-space discretization: only variables (block 1; block 0 is empty).
    *
-   * @tparam Discretization Spatial Discretization used in the system
+   * Usage: construct, then interpolate(model) to set the initial condition.
+   *
+   * @tparam NT Scalar type.
    */
   template <typename NT = double> class FlowingVariables : public AbstractFlowingVariables<NT>
   {
   public:
     using NumberType = NT;
 
-    /**
-     * @brief Construct a new Flowing Variables object
-     */
+    /// An empty state; call interpolate().
     FlowingVariables() {}
 
     /**
-     * @brief Interpolates the initial condition from a numerical model.
-     *
-     * @param model The model to interpolate from. Must provide a method initial_condition(const Point<dim> &,
-     * Vector<NumberType> &)
+     * @brief Size the state for @p model and fill the variables with Model::initial_condition_variables.
      */
     template <typename Model> void interpolate(const Model &model)
     {
@@ -71,27 +67,15 @@ namespace DiFfRG
       if (m_data.n_blocks() > 1) model.initial_condition_variables(m_data.block(1));
     }
 
-    /**
-     * @brief Obtain the data vector holding both spatial (block 0) and variable (block 1) data.
-     *
-     * @return BlockVector<NumberType>& The data vector.
-     */
+    /// The full state: spatial dofs (block 0) and variables (block 1).
     virtual BlockVector<NumberType> &data() override { return m_data; }
     virtual const BlockVector<NumberType> &data() const override { return m_data; }
 
-    /**
-     * @brief Obtain the spatial data vector.
-     *
-     * @return Vector<NumberType>& The spatial data vector.
-     */
+    /// The spatial dofs (block 0).
     virtual Vector<NumberType> &spatial_data() override { return m_data.block(0); }
     virtual const Vector<NumberType> &spatial_data() const override { return m_data.block(0); }
 
-    /**
-     * @brief Obtain the variable data vector.
-     *
-     * @return Vector<NumberType>& The variable data vector.
-     */
+    /// The variables (block 1).
     virtual Vector<NumberType> &variable_data() override { return m_data.block(1); }
     virtual const Vector<NumberType> &variable_data() const override { return m_data.block(1); }
 
@@ -102,11 +86,12 @@ namespace DiFfRG
   namespace FE
   {
     /**
-     * @brief A class to set up initial data for whatever discretization we have chosen.
-     *        Also used to switch/manage memory, vectors, matrices over interfaces between spatial discretization and
-     * separate variables.
+     * @brief State of a flow on a finite-element discretization (CG, DG, LDG): FE dofs (block 0) and variables
+     * (block 1, present only if the model has variables).
      *
-     * @tparam Discretization Spatial Discretization used in the system
+     * Usage: `FE::FlowingVariables initial_condition(discretization); initial_condition.interpolate(model);`.
+     *
+     * @tparam Discretization The discretization, e.g. CG::Discretization<Model, Mesh>.
      */
     template <typename Discretization>
     class FlowingVariables
@@ -119,21 +104,17 @@ namespace DiFfRG
       using Components = typename Discretization::Components;
       static constexpr uint dim = Discretization::dim;
 
-      /**
-       * @brief Construct a new Flowing Variables object
-       *
-       * @param discretization The spatial discretization to use
-       */
+      /// Bind to @p discretization (kept by reference); call interpolate() to fill.
       FlowingVariables(const Discretization &discretization)
           : discretization(discretization), dof_handler(discretization.get_dof_handler())
       {
       }
 
       /**
-       * @brief Interpolates the initial condition from a numerical model.
+       * @brief Size the state for the current mesh and set the initial condition.
        *
-       * @param model The model to interpolate from. Must provide a method initial_condition(const Point<dim> &,
-       * Vector<NumberType> &)
+       * The FE functions are interpolated from `model.initial_condition(x, values)` at the support points; the
+       * variables are set by `model.initial_condition_variables(v)`.
        */
       template <typename Model> void interpolate(const Model &model)
       {
@@ -148,9 +129,7 @@ namespace DiFfRG
           VectorTools::interpolate(dof_handler, initial_condition_function, m_data.block(0));
         }
         if (m_data.n_blocks() > 1) {
-          // Under distribution rank 0 owns the variables block outright; the model writes every entry on every rank,
-          // which elsewhere would stage off-process inserts that the next compress() of the block flushes over the
-          // owner's values. compute_variables_into lands only what each rank owns.
+          // The variables block is owned by rank 0; compute on every rank and keep the owned entries.
           VectorType scratch;
           internal::reinit_local_variables_vector(scratch, block_structure[1]);
           internal::compute_variables_into(m_data.block(1), scratch,
@@ -158,32 +137,20 @@ namespace DiFfRG
         }
       }
 
-      /**
-       * @brief Obtain the data vector holding both spatial (block 0) and variable (block 1) data.
-       *
-       * @return BlockVectorType& The data vector.
-       */
+      /// The full state: spatial dofs (block 0) and variables (block 1).
       virtual BlockVectorType &data() override { return m_data; }
       virtual const BlockVectorType &data() const override { return m_data; }
 
-      /**
-       * @brief Obtain the spatial data vector.
-       *
-       * @return VectorType& The spatial data vector.
-       */
+      /// The spatial dofs (block 0).
       virtual VectorType &spatial_data() override { return m_data.block(0); }
       virtual const VectorType &spatial_data() const override { return m_data.block(0); }
 
-      /**
-       * @brief Obtain the variable data vector.
-       *
-       * @return VectorType& The variable data vector.
-       */
+      /// The variables (block 1); throws std::logic_error if the model has no variables.
       virtual VectorType &variable_data() override { return m_data.block(variables_block()); }
       virtual const VectorType &variable_data() const override { return m_data.block(variables_block()); }
 
     private:
-      /// Block 1, which exists only if the model has variables.
+      /// Index of the variables block; throws if the model has no variables.
       unsigned int variables_block() const
       {
         if (m_data.n_blocks() < 2)
@@ -200,10 +167,12 @@ namespace DiFfRG
   namespace FV
   {
     /**
-     * @brief A class to set up cell-averaged initial data for finite-volume systems.
+     * @brief State of a flow on a finite-volume discretization: cell averages (block 0) and variables (block 1, present
+     * only if the model has variables).
      *
-     * FV unknowns represent cell averages. Unlike FE::FlowingVariables, this class
-     * integrates the model's pointwise initial condition over each active cell.
+     * Unlike FE::FlowingVariables, the initial condition is averaged over each cell, not interpolated.
+     *
+     * @tparam Discretization The FV discretization.
      */
     template <typename Discretization>
     class FlowingVariables
@@ -216,21 +185,16 @@ namespace DiFfRG
       using Components = typename Discretization::Components;
       static constexpr uint dim = Discretization::dim;
 
-      /**
-       * @brief Construct a new Flowing Variables object
-       *
-       * @param discretization The spatial discretization to use
-       */
+      /// Bind to @p discretization (kept by reference); call interpolate() to fill.
       FlowingVariables(const Discretization &discretization)
           : discretization(discretization), dof_handler(discretization.get_dof_handler())
       {
       }
 
       /**
-       * @brief Initializes FV data with cell averages of the model initial condition.
-       *
-       * @param model The model to initialize from. Must provide
-       * initial_condition(const Point<dim> &, Vector<NumberType> &).
+       * @brief Size the state for the current mesh and set the initial condition: each cell value is the average of
+       * `model.initial_condition(x, values)` over the cell (2-point Gauss rule per direction); the variables are set by
+       * `model.initial_condition_variables(v)`.
        */
       template <typename Model> void interpolate(const Model &model)
       {
@@ -251,10 +215,7 @@ namespace DiFfRG
           std::vector<NumberType> averaged_values(n_components);
 
           for (const auto &cell : dof_handler.active_cell_iterators()) {
-            // Always true on a serial mesh, so this costs the serial path nothing. On a
-            // partitioned one it stops every rank writing every cell average: those writes go
-            // through a single-valued insert, so without the filter the result is only correct by
-            // accident, and the compress() below would have nothing well-defined to do.
+            // Each rank writes the cells it owns.
             if (!cell->is_locally_owned()) continue;
             fe_values.reinit(cell);
             cell->get_dof_indices(dof_indices);
@@ -281,14 +242,11 @@ namespace DiFfRG
               m_data.block(0)[dof_indices[local_dof]] = averaged_values[component];
             }
           }
-          // insert, not add: each owned cell's average is written exactly once by its owner. A
-          // no-op for the serial vector types.
+          // Each owned cell is written once by its owner.
           m_data.block(0).compress(dealii::VectorOperation::insert);
         }
         if (m_data.n_blocks() > 1) {
-          // Under distribution rank 0 owns the variables block outright; the model writes every entry on every rank,
-          // which elsewhere would stage off-process inserts that the next compress() of the block flushes over the
-          // owner's values. compute_variables_into lands only what each rank owns.
+          // The variables block is owned by rank 0; compute on every rank and keep the owned entries.
           VectorType scratch;
           internal::reinit_local_variables_vector(scratch, block_structure[1]);
           internal::compute_variables_into(m_data.block(1), scratch,
@@ -296,32 +254,20 @@ namespace DiFfRG
         }
       }
 
-      /**
-       * @brief Obtain the data vector holding both spatial (block 0) and variable (block 1) data.
-       *
-       * @return BlockVectorType& The data vector.
-       */
+      /// The full state: spatial dofs (block 0) and variables (block 1).
       virtual BlockVectorType &data() override { return m_data; }
       virtual const BlockVectorType &data() const override { return m_data; }
 
-      /**
-       * @brief Obtain the spatial data vector.
-       *
-       * @return VectorType& The spatial data vector.
-       */
+      /// The spatial dofs (block 0).
       virtual VectorType &spatial_data() override { return m_data.block(0); }
       virtual const VectorType &spatial_data() const override { return m_data.block(0); }
 
-      /**
-       * @brief Obtain the variable data vector.
-       *
-       * @return VectorType& The variable data vector.
-       */
+      /// The variables (block 1); throws std::logic_error if the model has no variables.
       virtual VectorType &variable_data() override { return m_data.block(variables_block()); }
       virtual const VectorType &variable_data() const override { return m_data.block(variables_block()); }
 
     private:
-      /// Block 1, which exists only if the model has variables.
+      /// Index of the variables block; throws if the model has no variables.
       unsigned int variables_block() const
       {
         if (m_data.n_blocks() < 2)

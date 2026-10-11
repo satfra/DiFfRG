@@ -50,18 +50,7 @@ namespace DiFfRG
 {
   namespace internal
   {
-    /**
-     * @brief How much of an output frame went into reconstructing potentials.
-     *
-     * `solve_potential` is the single most expensive thing an output frame does on larger
-     * meshes -- it distributes a fresh DoFHandler, assembles a flux system and runs a direct
-     * sparse factorisation, once for the raw potential plus once per readout id. The counter
-     * lets `OutputSession` attribute that cost without threading a timing object through the
-     * whole EoM call chain.
-     *
-     * `thread_local` rather than atomic: readouts() is called from the single thread that runs
-     * the contributor callback, so this stays lock-free and correct.
-     */
+    /// Number and wall time of potential reconstructions on this thread, for OutputSession's timing report.
     struct PotentialSolveStats {
       std::size_t solves = 0;
       double seconds = 0.;
@@ -75,28 +64,24 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief An owning scalar potential reconstructed from a model EoM vector field.
+   * @brief The potential \f$V_{\rm EoM}\f$ reconstructed from the model's EoM field during the EoM search (written to
+   * `<run>_eom_potential.pvd` and `/eom_potential` of the HDF5 output).
    *
-   * The finite element and DoFHandler are retained alongside the potential vector so the
-   * reconstruction can be attached to delayed finite-element output safely.
+   * It is a continuous, piecewise quadratic (FE_Q(2)) function on a copy of the solution mesh, normalized to zero at
+   * the mesh vertex closest to the origin. Element and DoFHandler are shared, so the object stays valid on its own.
    */
   template <int dim, typename NumberType> struct ReconstructedEoMPotential {
+    /// Location of the minimum of the potential (before the 1D refinement onto the EoM zero).
     dealii::Point<dim> minimum;
+    /// The finite element of the potential.
     std::shared_ptr<dealii::FiniteElement<dim>> finite_element;
+    /// Its dofs.
     std::shared_ptr<dealii::DoFHandler<dim>> dof_handler;
+    /// The coefficients.
     dealii::Vector<NumberType> values;
   };
 
-  /**
-   * @brief A scalar potential reconstructed from a model-provided raw gradient.
-   *
-   * The element and DoF handler are shared with DiFfRG::internal::PotentialSystemCache, which retains them
-   * across calls; only the coefficient vector belongs to this result alone.
-   *
-   * Its additive gauge is fixed at the mesh origin. Consequently, value differences and all derivatives are
-   * gauge-independent, while the absolute value uses the convention U(origin) = 0.
-   */
-  /** @brief Optional auxiliary field used only for mass extraction from FV data. */
+  /// Continuous Hessian field recovered from FV / DG0 data for the masses; see raw_potential_recover_mass_hessian.
   template <int dim, typename NumberType> struct RecoveredMassHessian {
     std::unique_ptr<dealii::FiniteElement<dim>> finite_element;
     std::unique_ptr<dealii::DoFHandler<dim>> dof_handler;
@@ -112,30 +97,49 @@ namespace DiFfRG
     std::vector<double> kink_face_strengths;
   };
 
+  /**
+   * @brief The raw potential \f$V\f$: a scalar whose gradient fits the model's raw_potential_gradient (by default the
+   * EoM field without explicit-breaking terms). Reconstructed by reconstruct_raw_potential.
+   *
+   * \f$V\f$ is continuous and piecewise polynomial of order `/discretization/raw_potential_order` (FE_Q), with
+   * \f$V = 0\f$ at the mesh vertex closest to the origin. Differences of \f$V\f$ and all its derivatives do not
+   * depend on this normalization. Evaluate it with evaluate_raw_potential.
+   */
   template <int dim, typename NumberType> struct ReconstructedRawPotential {
+    /// The finite element of the potential.
     std::shared_ptr<dealii::FiniteElement<dim>> finite_element;
+    /// Its dofs.
     std::shared_ptr<dealii::DoFHandler<dim>> dof_handler;
+    /// The coefficients.
     dealii::Vector<NumberType> values;
+    /// The recovered Hessian field, if `/discretization/raw_potential_recover_mass_hessian` is set; else null.
     std::unique_ptr<RecoveredMassHessian<dim, NumberType>> recovered_mass_hessian;
   };
 
+  /// Zero-dimensional field space: no potential.
   template <typename NumberType> struct ReconstructedRawPotential<0, NumberType> {
     dealii::Vector<NumberType> values;
   };
 
-  /** @brief Reconstructed potential data and the explicitly separate Hessian used for mass extraction. */
+  /**
+   * @brief The raw potential at one point. Models receive `value`, `gradient` and `mass_hessian` in the solution
+   * slots "potential", "potential_gradient" and "potential_hessian" of extract() and the readouts.
+   */
   template <int dim, typename NumberType> struct RawPotentialEvaluation {
+    /// \f$V(x)\f$.
     NumberType value{};
+    /// \f$\nabla V(x)\f$.
     dealii::Tensor<1, dim, NumberType> gradient;
+    /// \f$\partial_i \partial_j V(x)\f$, the exact second derivative of the reconstruction.
     dealii::Tensor<2, dim, NumberType> potential_hessian;
+    /// The Hessian used for masses: potential_hessian, or the recovered field if mass-Hessian recovery is enabled.
     dealii::Tensor<2, dim, NumberType> mass_hessian;
   };
 
   /**
-   * @brief Stand-in for a raw potential that a model has declared it does not read.
+   * @brief Placeholder passed in the potential slots of extract() when the model sets `extract_uses_potential = false`.
    *
-   * Deliberately without operations, so a model that sets extract_uses_potential to false and then reads one
-   * of the potential slots fails to compile instead of quietly receiving a zero potential.
+   * It has no operations, so reading a potential slot in such a model fails to compile.
    */
   struct UnusedPotential {
   };
@@ -145,6 +149,7 @@ namespace DiFfRG
     UnusedPotential value, gradient, mass_hessian;
   };
 
+  /// Evaluating an UnusedPotential gives an UnusedPotentialEvaluation.
   template <int dim>
   UnusedPotentialEvaluation evaluate_raw_potential(const UnusedPotential &, const dealii::Mapping<dim> &,
                                                    const dealii::Point<dim> &)
@@ -152,16 +157,17 @@ namespace DiFfRG
     return {};
   }
 
+  /// Zero-dimensional field space: no potential, only the trivial minimum.
   template <typename NumberType> struct ReconstructedEoMPotential<0, NumberType> {
     dealii::Point<0> minimum;
     dealii::Vector<NumberType> values;
   };
 
-  /**
-   * @brief Result of finding an EoM point, optionally including its reconstructed potential.
-   */
+  /// Result of get_EoM_point_with_potential.
   template <int dim, typename NumberType> struct EoMResult {
+    /// The EoM point.
     dealii::Point<dim> point;
+    /// The reconstructed EoM potential; empty if `EoM_max_iter` is 0.
     std::optional<ReconstructedEoMPotential<dim, NumberType>> potential;
   };
 
@@ -206,14 +212,7 @@ namespace DiFfRG
       return origin;
     }
 
-    /**
-     * @brief The cell at the same position in another DoFHandler.
-     *
-     * Addressed by (level, index) rather than by copying the source accessor.
-     * TriaAccessorBase::copy_from also copies the *triangulation pointer*, which is silently wrong
-     * as soon as the two DoFHandlers sit on different -- though structurally identical --
-     * triangulations, which is exactly what the distributed policy does in solve_potential.
-     */
+    /// The cell with the same (level, index) in another DoFHandler on a structurally identical mesh.
     template <int dim>
     typename dealii::DoFHandler<dim>::active_cell_iterator
     matching_dof_cell(const dealii::DoFHandler<dim> &target_dof_handler,
@@ -296,23 +295,14 @@ namespace DiFfRG
       return kind == PotentialKind::eom ? make_eom_potential_fe<dim>() : make_raw_potential_fe<dim>(raw_order);
     }
 
-    /**
-     * @brief The mesh-dependent half of solve_potential, retained across calls.
-     *
-     * The potential system is a least-squares projection of a gradient field onto a continuous element, and
-     * its matrix depends only on the mesh, that element and the smoothing length -- the solution enters
-     * through the right-hand side alone. Rebuilt per call, as it was, every reconstruction distributes a
-     * fresh DoF handler, builds a flux sparsity pattern, constructs quadratures and runs a direct sparse
-     * factorisation. Every residual and jacobian evaluation of a model carrying extractors pays that twice.
-     * Cached, all of it happens once per mesh and a reconstruction costs one right-hand side assembly plus a
-     * back-substitution.
-     *
-     * A cache is owned by the assembler that reconstructs, so it cannot outlive the mesh it describes, and
-     * is used from whichever thread drives assembly or readouts. It is not internally synchronised and must
-     * not be shared between threads that run concurrently.
-     */
     template <int dim, typename NumberType> struct PotentialAssemblyData;
 
+    /**
+     * @brief The mesh-dependent part of solve_potential (dofs, matrix and its factorization), kept across calls.
+     *
+     * The matrix depends only on the mesh, the element and the smoothing length, so a reconstruction on an unchanged
+     * mesh costs one right-hand side assembly and a back-substitution. Owned by an assembler; not thread-safe.
+     */
     template <int dim, typename NumberType> class PotentialSystemCache
     {
       static constexpr int face_dim = dim > 0 ? dim - 1 : 0;
@@ -1333,7 +1323,7 @@ namespace DiFfRG
       auto &system = (cache != nullptr ? *cache : uncached).entry(kind);
 
       // The eom potential is always quadratic; the raw potential's order is a config choice, so a
-      // change of /discretization/EoM/raw_potential_order must invalidate the cached system.
+      // change of /discretization/raw_potential_order must invalidate the cached system.
       const uint potential_order = kind == PotentialKind::eom ? 2 : config.raw_potential_order;
       const bool rebuild =
           !system.describes(potential_triangulation, solution_dof_handler, smoothing_length, potential_order);
@@ -1513,17 +1503,12 @@ namespace DiFfRG
     };
 
     /**
-     * @brief In one field dimension, move the minimum of the reconstructed potential onto the zero of the EoM field.
+     * @brief In one field dimension, move @p guess onto the zero of the EoM field F with the lowest potential.
      *
-     * The reconstructed potential is piecewise quadratic and smoothed over EoM_smoothing_length, so its minimum misses
-     * the zero wherever the field is far from affine over that length -- e.g. an explicit-breaking term c / sqrt(2 rho),
-     * whose zero sits deep inside the first cell once the condensate is small. Here the field F(x) = get_EoM(x, u(x))
-     * is evaluated directly, with u from LocalSolution, on the cell holding @p guess and its two neighbours.
-     *
-     * Candidates are the minima of the potential V with V' = F there: the upward zeros of F (inside a cell by
-     * bisection, or a face across which F changes sign), and a domain boundary that F points away from. Of these, the
-     * one with the lowest V, measured as \f$\int_{\rm guess}^x F\f$, is returned, so a nearby metastable minimum never
-     * replaces a lower one; @p guess if there is no candidate.
+     * F is evaluated directly on the cell holding @p guess and its neighbours. Candidates are the upward zeros of F
+     * (by bisection inside a cell, or at a face where F changes sign) and domain boundaries F points away from. The
+     * candidate with the lowest \f$\int_{\rm guess}^x F\f$ is returned; @p guess if there is none. Identity for
+     * dim > 1.
      */
     template <int dim, typename VectorType, typename EoMFUN>
     dealii::Point<dim> polish_EoM_root(const dealii::Point<dim> &guess, const VectorType &sol,
@@ -1598,10 +1583,20 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief Reconstruct a scalar raw potential without locating its minimum.
+   * @brief Reconstruct the raw potential \f$V\f$ with \f$\nabla V \approx\f$ @p get_gradient.
    *
-   * The supplied callback must return the unmodified gradient of the desired scalar potential. Unlike an EoM callback,
-   * it must not include explicit-breaking or other terms which should be absent from readouts and extractors.
+   * \f$V\f$ is the least-squares fit of \f$\nabla V\f$ to the given field on a continuous FE_Q space of order
+   * `config.raw_potential_order`, with jumps of the normal derivative across faces penalized with a weight
+   * \f$\propto \ell^2\f$, \f$\ell\f$ = `EoM_smoothing_length`. For a DG0/FV solution and
+   * `config.raw_potential_recover_mass_hessian`, a continuous Hessian field for masses is recovered as well.
+   *
+   * @param sol The solution, with every global dof readable.
+   * @param dof_handler, mapping Its dofs and mapping.
+   * @param get_gradient Callable `(Point<dim> x, Vector u(x)) -> array<double, dim>`: the gradient of the potential
+   * (the model's raw_potential_gradient). It should not contain terms that must not appear in the potential, such as
+   * explicit symmetry breaking.
+   * @param config The EoM/potential parameters, see Config::EoMConfig.
+   * @param cache Optional cache of the mesh-dependent system; nullptr builds it for this call only.
    */
   template <int dim, typename VectorType, typename GradientFUN>
   ReconstructedRawPotential<dim, typename VectorType::value_type>
@@ -1625,10 +1620,7 @@ namespace DiFfRG
   }
 
   /**
-   * @brief Evaluate a reconstructed raw potential and its mass-extraction Hessian at a real-space point.
-   *
-   * `potential_hessian` is exactly the second derivative of `value`. `mass_hessian` equals it unless FV mass-Hessian
-   * recovery was requested, in which case it contains the independently recovered tensor intended for observables.
+   * @brief Value, gradient and Hessians of a raw potential at the point @p point; see RawPotentialEvaluation.
    */
   template <int dim, typename NumberType>
   RawPotentialEvaluation<dim, NumberType>
@@ -1675,8 +1667,35 @@ namespace DiFfRG
   }
 
   /**
-   * @brief Reconstruct a potential whose gradient approximates the model EoM vector field and return a sampled and
-   * locally refined minimum of that potential.
+   * @brief Find the EoM point: the minimum of the potential whose gradient is the model's EoM field.
+   *
+   * Let \f$F(x) = \f$ `get_EoM(x, u(x))` be the EoM field (Model::EoM), a vector in field space. Then:
+   * 1. If `config.max_iter` (`EoM_max_iter`) is 0, return the mesh vertex with the smallest \f$\ell^1\f$ norm
+   *    \f$\sum_d |x_d|\f$, without search, potential or postprocessing.
+   * 2. Reconstruct \f$V_{\rm EoM}\f$ with \f$\nabla V_{\rm EoM} \approx F\f$: least-squares fit on a continuous
+   *    piecewise quadratic (FE_Q(2)) space, with jumps of the normal derivative across faces penalized with a weight
+   *    \f$\propto \ell^2\f$, \f$\ell\f$ = `EoM_smoothing_length`, and \f$V_{\rm EoM} = 0\f$ at the vertex of step 1.
+   * 3. Find its minimum: sample \f$V_{\rm EoM}\f$ at all support and quadrature points, then refine by a projected
+   *    Newton iteration with Armijo backtracking (at most `EoM_max_iter` steps, `EoM_max_backtracks` halvings,
+   *    sufficient-decrease coefficient `EoM_armijo_coefficient`) in the cell of the best sample and its neighbours,
+   *    and in the cell of @p initial_guess and its neighbours. A step stops when the gradient falls below
+   *    `EoM_abs_tol` (at least \f$100\,\epsilon_{\rm machine}\f$); a coordinate within `EoM_bound_tolerance` of a
+   *    cell face (in unit-cell coordinates) whose gradient points outward is held fixed.
+   * 4. In one dimension, move the minimum onto a zero of \f$F\f$: the candidates are the upward zeros of \f$F\f$ in
+   *    the minimum's cell and its neighbours, and domain boundaries \f$F\f$ points away from; the one with the lowest
+   *    \f$V\f$ (computed by integrating \f$F\f$) wins. This corrects the smoothing error of step 2 near steep fields.
+   * 5. Return `EoM_postprocess(x, u(x))` of the result.
+   *
+   * The parameters are described in Config::EoMConfig.
+   *
+   * @param EoM_cell Output: the cell containing the returned point.
+   * @param sol The solution, with every global dof readable.
+   * @param dof_handler, mapping Its dofs and mapping.
+   * @param get_EoM Callable `(Point<dim> x, Vector u(x)) -> array<double, dim>`, the EoM field.
+   * @param EoM_postprocess Callable `(Point<dim> x, Vector u(x)) -> Point<dim>` applied to the result.
+   * @param config The parameters.
+   * @param initial_guess Optional extra seed of the minimum search (typically the previous EoM point).
+   * @param cache Optional cache of the mesh-dependent system; nullptr builds it for this call only.
    */
   template <int dim, typename VectorType, typename EoMFUN, typename EoMPFUN>
   EoMResult<dim, typename VectorType::value_type>
@@ -1705,7 +1724,7 @@ namespace DiFfRG
     return {.point = EoM, .potential = std::move(potential)};
   }
 
-  /** Compatibility overload accepting the historical scalar EoM settings. */
+  /// As above, with the three most common parameters given directly and the others at their defaults.
   template <int dim, typename VectorType, typename EoMFUN, typename EoMPFUN>
   EoMResult<dim, typename VectorType::value_type> get_EoM_point_with_potential(
       typename dealii::DoFHandler<dim>::cell_iterator &EoM_cell, const VectorType &sol,
@@ -1722,10 +1741,7 @@ namespace DiFfRG
                                         cache);
   }
 
-  /**
-   * @brief Reconstruct a potential whose gradient approximates the model EoM vector field and return a sampled and
-   * locally refined minimum of that potential.
-   */
+  /// get_EoM_point_with_potential without the potential: only the EoM point.
   template <int dim, typename VectorType, typename EoMFUN, typename EoMPFUN>
   dealii::Point<dim>
   get_EoM_point(typename dealii::DoFHandler<dim>::cell_iterator &EoM_cell, const VectorType &sol,
@@ -1739,7 +1755,7 @@ namespace DiFfRG
         .point;
   }
 
-  /** Compatibility overload accepting the historical scalar EoM settings. */
+  /// As above, with the three most common parameters given directly and the others at their defaults.
   template <int dim, typename VectorType, typename EoMFUN, typename EoMPFUN>
   dealii::Point<dim> get_EoM_point(
       typename dealii::DoFHandler<dim>::cell_iterator &EoM_cell, const VectorType &sol,

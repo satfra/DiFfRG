@@ -19,35 +19,28 @@ namespace DiFfRG
 {
   using namespace dealii;
 
+  /// Options of RectangularMesh.
   struct RectangularMeshOptions {
+    /**
+     * @brief Shift the grid so that, after all refinements, the first cell along every axis is centered on 0.
+     *
+     * The domain then starts at \f$-h/2\f$ along every axis, \f$h\f$ the width of the finest first cell; all axes
+     * must start at 0 in the configuration. Useful when field-space quantities are evaluated at cell centers (FV) and
+     * the origin must be one of them.
+     */
     bool origin_cell_centered = false;
   };
 
   namespace internal
   {
-    /**
-     * @brief Holds the triangulation, constructing it the way its type requires.
-     *
-     * A serial dealii::Triangulation is default-constructible; a parallel one is not -- it needs
-     * a communicator at construction. Neither is movable, so this cannot be a factory function
-     * returning by value; a holder with a default member initializer is the way to give each
-     * type its own construction without duplicating RectangularMesh.
-     */
+    /// Holds the triangulation, constructed as its type requires.
     template <typename Tria> struct TriangulationHolder {
       Tria triangulation;
     };
 
 #ifdef DEAL_II_WITH_MPI
     template <int dim> struct TriangulationHolder<dealii::parallel::shared::Triangulation<dim>> {
-      /**
-       * `allow_artificial_cells = false` is load-bearing, not a default worth changing.
-       *
-       * With artificial cells, active_cell_iterators() still enumerates them but
-       * cell->get_dof_indices() throws on one. That breaks the Kurganov-Tadmor topology and
-       * reconstruction caches outright, since they are dense arrays over every active cell.
-       * Keeping every cell real is also what makes active_cell_index() a global, deterministic
-       * index that every rank agrees on -- the property those caches are built on.
-       */
+      /// Without artificial cells: every rank has every cell, with the same active_cell_index().
       dealii::parallel::shared::Triangulation<dim> triangulation{MPI_COMM_WORLD, dealii::Triangulation<dim>::none,
                                                                  /*allow_artificial_cells=*/false};
     };
@@ -55,64 +48,56 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief Class to manage the discretization mesh, also called grid and triangluation, on which we simulate.
-   * This class only builds cartesian, regular grids, however cell density in all directions can be chosen
-   * independently.
+   * @brief A rectangular field-space mesh of rectangular cells, built from a Config::ConfigurationMesh.
    *
-   * @tparam dim_ dimensionality of the spatial discretization.
-   * @tparam TriangulationType_ the triangulation to build on. Defaults to
-   * DefaultTriangulation<dim_>, i.e. `parallel::shared::Triangulation` in an MPI+PETSc build and
-   * `dealii::Triangulation` otherwise, so that a plain `RectangularMesh<dim>` follows the build
-   * configuration. A partitioned triangulation splits cell ownership across ranks while keeping
-   * the mesh itself replicated, which is what lets the assemblers restrict themselves to
-   * locally-owned cells without any of the caches or the EoM search having to change.
+   * The coarse grid has the cell widths of the ConfigurationMesh along each axis (cells of different width per
+   * subrange), and is then refined globally `/discretization/grid/refine` times.
    *
-   * Use RectangularMeshSerial<dim> / RectangularMeshParallel<dim> below to pin one explicitly.
+   * ```cpp
+   * RectangularMesh<1> mesh(Config::ConfigurationMesh<1>(config));
+   * ```
+   *
+   * @tparam dim_ Field-space dimension, 1 to 3.
+   * @tparam TriangulationType_ The deal.II triangulation. Default: `parallel::shared::Triangulation` in an MPI+PETSc
+   * build (every rank holds the whole mesh, cell ownership is split between ranks), `dealii::Triangulation` otherwise.
+   * RectangularMeshSerial and RectangularMeshParallel fix one choice.
    */
   template <uint dim_, typename TriangulationType_ = DefaultTriangulation<dim_>>
   class RectangularMesh : protected internal::TriangulationHolder<TriangulationType_>
   {
   public:
+    /// Field-space dimension.
     static constexpr uint dim = dim_;
+    /// The deal.II triangulation type.
     using TriangulationType = TriangulationType_;
+    /// Marks the mesh as rectangular.
     static constexpr bool is_rectangular = true;
 
     /// Whether cells carry subdomain ids, i.e. whether `cell->is_locally_owned()` is selective.
     static constexpr bool is_parallel = !std::is_same_v<TriangulationType, dealii::Triangulation<dim_>>;
 
-    /**
-     * @brief Construct a new RectangularMesh object.
-     * @param config ConfigTree object containing the parameters for the mesh.
-     */
+    /// Build from the `/discretization/grid` keys (see Config::ConfigurationMesh).
     [[deprecated("Please use RectangularMesh(const Config::ConfigurationMesh<dim> &mesh_config) instead")]]
     RectangularMesh(const ConfigTree &config);
 
-    /**
-     * @brief Construct a new RectangularMesh object from ConfigTree configuration.
-     * @param config ConfigTree object containing the parameters for the mesh.
-     * @param options Options controlling rectangular mesh construction.
-     *
-     * All configured axes must start at zero when origin centering is enabled.
-     */
+    /// Build from the `/discretization/grid` keys with @p options.
     [[deprecated("Please use RectangularMesh(const Config::ConfigurationMesh<dim> &mesh_config, "
                  "RectangularMeshOptions options) instead")]]
     RectangularMesh(const ConfigTree &config, RectangularMeshOptions options);
 
+    /// Build the mesh described by @p mesh_config.
     RectangularMesh(const Config::ConfigurationMesh<dim> &mesh_config);
 
-    /**
-     * @brief Construct a new RectangularMesh object.
-     * @param mesh_config Configuration of the rectangular mesh.
-     * @param options Options controlling rectangular mesh construction.
-     *
-     * All configured axes must start at zero when origin centering is enabled.
-     */
+    /// Build the mesh described by @p mesh_config, with @p options.
     RectangularMesh(const Config::ConfigurationMesh<dim> &mesh_config, RectangularMeshOptions options);
 
+    /// The triangulation.
     TriangulationType &get_triangulation() { return this->triangulation; }
+    /// The triangulation.
     const TriangulationType &get_triangulation() const { return this->triangulation; }
 
   protected:
+    /// Create the coarse grid and refine it.
     virtual void make_grid();
 
     const Config::ConfigurationMesh<dim> mesh_config;
@@ -120,23 +105,16 @@ namespace DiFfRG
   };
 
   /**
-   * @brief A rectangular mesh pinned to a serial triangulation, whatever the build configuration.
+   * @brief A rectangular mesh on a serial triangulation, also in an MPI build. Required for LDG.
    *
-   * Name this when a run must stay serial in an MPI build: LDG, which cannot be distributed at
-   * all, and any test compared against a stored reference, which must produce the same numbers in
-   * a serial and an MPI build tree.
-   *
-   * Naming it is sufficient on its own: a Discretization defaults its vector and matrix from the
-   * mesh (see LAVectorFor in common/linear_algebra.hh), so this pins the linear algebra serial
-   * too rather than leaving it on the build-configuration default.
+   * A Discretization on this mesh also uses serial vectors and matrices.
    */
   template <uint dim> using RectangularMeshSerial = RectangularMesh<dim, dealii::Triangulation<dim>>;
 
 #ifdef DEAL_II_WITH_MPI
   /**
-   * @brief A rectangular mesh pinned to a partitioned triangulation.
-   *
-   * Only cell ownership is distributed; the mesh itself stays replicated on every rank.
+   * @brief A rectangular mesh on a parallel::shared::Triangulation: every rank holds the whole mesh, cell ownership
+   * is split between ranks.
    */
   template <uint dim>
   using RectangularMeshParallel = RectangularMesh<dim, dealii::parallel::shared::Triangulation<dim>>;

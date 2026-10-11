@@ -15,10 +15,13 @@ namespace DiFfRG
   {
     namespace KurganovTadmor
     {
-      // The pre-assembly hook is called separately for residual and jacobian assembly.
-      // A model must not assume one hook call per solver step or timestep.
+      /**
+       * @brief Which assembly a model's fv_kt_pre_assembly hook precedes. The hook runs before every residual and
+       * every jacobian assembly, i.e. several times per time step; see AssemblyContextView.
+       */
       enum class AssemblyStage { residual, jacobian };
 
+      /// One face of the mesh in an AssemblyContextView, seen from the cell cell_index().
       template <int dim_, typename NumberType_, std::size_t n_components_> class FaceAssemblyView
       {
       public:
@@ -36,13 +39,25 @@ namespace DiFfRG
         {
         }
 
+        /// The face centre.
         const dealii::Point<dim> &point() const { return point_; }
+        /// The unit normal pointing out of cell_index().
         const dealii::Tensor<1, dim> &normal() const { return normal_; }
+        /// The face area (1 in 1D).
         double jxw() const { return jxw_; }
+        /// Whether the face lies on the domain boundary.
         bool at_boundary() const { return boundary_; }
+        /// The active cell index of the cell the face is seen from.
         unsigned int cell_index() const { return cell_index_; }
+        /// The face number within that cell.
         unsigned int face_index() const { return face_index_; }
+        /// The active cell index of the neighbour; the largest unsigned int at the boundary.
         unsigned int neighbor_cell_index() const { return neighbor_cell_index_; }
+        /**
+         * @brief The reconstruction at the face, seen from cell_index(): u_minus is its trace, u_plus that of the
+         * neighbour (or of the model's ghost cells), face_grad_minus/plus the gradients the flux sees,
+         * diffusion_u_minus/plus and diffusion_grad_minus/plus the inputs of the diffusion flux.
+         */
         const ReconstructionState &reconstruction() const { return reconstruction_; }
 
       private:
@@ -56,6 +71,7 @@ namespace DiFfRG
         const ReconstructionState &reconstruction_;
       };
 
+      /// One active cell in an AssemblyContextView.
       template <int dim_, typename NumberType_, std::size_t n_components_> class CellAssemblyView
       {
       public:
@@ -70,8 +86,15 @@ namespace DiFfRG
         {
         }
 
+        /// The cell centre.
         const dealii::Point<dim> &point() const { return point_; }
+        /// The active cell index.
         unsigned int cell_index() const { return cell_index_; }
+        /**
+         * @brief The reconstruction stencil: the cell average (`stencil().cell.u`) and centre (`.cell.x`), and those of
+         * the \f$2d\f$ face neighbours (`.neighbors.u`, `.neighbors.x`, ordered lower/upper per direction), with the
+         * model's ghost values across the domain boundary.
+         */
         const CellStencilData &stencil() const { return stencil_; }
 
       private:
@@ -80,6 +103,7 @@ namespace DiFfRG
         const CellStencilData &stencil_;
       };
 
+      /// A random-access range of face or cell views (begin, end, size, operator[]).
       template <typename Range>
       concept HasAssemblyViewRange =
           requires {
@@ -108,16 +132,19 @@ namespace DiFfRG
             } -> std::same_as<typename Range::Context>;
           };
 
+      /// A range of FaceAssemblyView.
       template <typename Range>
       concept HasFaceAssemblyViewRange =
           HasAssemblyViewRange<Range> && requires { typename Range::FaceAssemblyView; } &&
           std::same_as<typename Range::Context, typename Range::FaceAssemblyView>;
 
+      /// A range of CellAssemblyView.
       template <typename Range>
       concept HasCellAssemblyViewRange =
           HasAssemblyViewRange<Range> && requires { typename Range::CellAssemblyView; } &&
           std::same_as<typename Range::Context, typename Range::CellAssemblyView>;
 
+      /// Every face of the mesh once; an interior face is seen from the cell with the smaller active cell index.
       template <int dim_, typename NumberType_, std::size_t n_components_, typename Iterator, typename GeometryProvider>
       class FaceAssemblyViewRange
       {
@@ -264,6 +291,7 @@ namespace DiFfRG
         GeometryProvider geometry_provider_;
       };
 
+      /// Every active cell of the mesh.
       template <int dim_, typename NumberType_, std::size_t n_components_, typename Iterator>
       class CellAssemblyViewRange
       {
@@ -391,6 +419,27 @@ namespace DiFfRG
         const SolutionReconstructionCache &cache_;
       };
 
+      /**
+       * @brief What the optional model hook `void fv_kt_pre_assembly(AssemblyStage stage, const Context &context)`
+       * sees.
+       *
+       * The KT assembler calls the hook, if the model has one, before every residual and every jacobian assembly:
+       * after reconstructing the solution, before evaluating any flux or source. A model can use it to update
+       * state its fluxes or sources read, from the reconstructed solution. The context does not own its data and is
+       * valid only during the call.
+       * - `context.faces()`: every face of the mesh once, as FaceAssemblyView;
+       * - `context.cells()`: every active cell, as CellAssemblyView.
+       *
+       * Both are random-access ranges. Since the context type is an implementation detail, the hook is a template:
+       * @code
+       * template <typename Context>
+       * void fv_kt_pre_assembly(FV::KurganovTadmor::AssemblyStage stage, const Context &context)
+       * {
+       *   for (const auto face : context.faces())
+       *     record(face.point(), face.reconstruction().u_minus[0]);
+       * }
+       * @endcode
+       */
       template <typename FaceRange, typename CellRange> class AssemblyContextView
       {
       public:
@@ -405,7 +454,9 @@ namespace DiFfRG
 
         AssemblyContextView(FaceRange faces, CellRange cells) : faces_(std::move(faces)), cells_(std::move(cells)) {}
 
+        /// Every face of the mesh once.
         const FaceRange &faces() const { return faces_; }
+        /// Every active cell.
         const CellRange &cells() const { return cells_; }
 
       private:
@@ -413,6 +464,7 @@ namespace DiFfRG
         CellRange cells_;
       };
 
+      /// The interface of AssemblyContextView.
       template <typename Context>
       concept HasAssemblyContextView =
           requires(const Context &context) {
@@ -434,8 +486,7 @@ namespace DiFfRG
           } && HasFaceAssemblyViewRange<typename Context::FaceAssemblyViewRange> &&
           HasCellAssemblyViewRange<typename Context::CellAssemblyViewRange>;
 
-      // Assembly context views are non-owning views over the per-solution reconstruction cache and
-      // active-cell iterators. They are valid only for the synchronous fv_kt_pre_assembly call.
+      /// Whether @p Model has the hook `void fv_kt_pre_assembly(AssemblyStage, const Context &)`.
       template <typename Model, typename Context>
       concept HasFVKTAssemblyHook =
           HasAssemblyContextView<Context> && requires(Model &model, const AssemblyStage stage, const Context &context) {
@@ -444,6 +495,7 @@ namespace DiFfRG
             } -> std::same_as<void>;
           };
 
+      /// Call the model's fv_kt_pre_assembly hook if it has one.
       template <typename Model, HasAssemblyContextView Context>
       void dispatch_fv_kt_pre_assembly(Model &model, const AssemblyStage stage, const Context &context)
       {

@@ -14,9 +14,10 @@ The session is keyed on the assembler so that its spatial dimension and vector t
 timestepper is built on. Anything exposing `dim` and `VectorType` works — pass the `Discretization` instead wherever
 there is no single assembler type, e.g. a test that runs one discretization against several models.
 
-If `/output/folder` is present, the run log, configuration record, HDF5 file, CSV tables, and field directory all use
-that configured root. Without `/output/folder`, the session creates a unique system-temporary root and removes it at
-destruction. A completely default session therefore needs no output configuration:
+The run log, configuration record, HDF5 file, CSV tables, and field directory all live under `/output/folder`
+(default `./`), with file names prefixed by `/output/name` (default `output`); the VTU frames go to the subfolder
+`/output/field_directory` (default: the run name). A default-constructed session instead creates a unique
+system-temporary root and removes it at destruction, so it needs no output configuration:
 
 ```cpp
 OutputSession<Assembler> output;
@@ -126,16 +127,27 @@ at most five estimator iterations after numeric factorization. Dense variable Ja
 success but leave the condition estimate as `NaN`. Iterative GMRES paths leave all three factorization fields as `NaN`;
 no eigenvalue computation is performed.
 
-JSON is only an adapter for the typed `Config::OutputSettings`. The corresponding JSON settings are:
+JSON is only an adapter for the typed `Config::OutputSettings`. The corresponding JSON settings, with their defaults,
+are:
 
 ```json
 {
   "output": {
+    "folder": "./",
+    "name": "output",
+    "vtk": true,
+    "hdf5": true,
+    "json": false,
     "max_pending_frames": 2,
-    "log_queue_size": 8192
+    "verbosity": 0,
+    "log_queue_size": 8192,
+    "log_level": 2
   }
 }
 ```
+
+`field_directory` defaults to the value of `name`. `asynchronous`, `hdf5_queue_depth` and `max_pending_bytes` are not
+read from the configuration.
 
 `OutputSession::report_port()` returns a cheap, copyable `ReportPort`. Assemblers, timesteppers, solvers, and models use
 that port for `info`, `warn`, `error`, and structured `progress` records; they neither construct loggers nor inspect
@@ -240,10 +252,10 @@ frames while still hiding the whole write behind the next output interval. Setti
 `Config::OutputSettings::asynchronous` to `false` removes the thread entirely and restores commit-on-return, at the
 cost of putting the write back on the critical path.
 
-Each run reports where its output time went, at `info` level, when the session finishes: the contributor callback and
+Each run reports where its output time went, at `debug` level, when the session finishes: the contributor callback and
 the potential reconstructions inside it, `build_patches`, the data filter, the HDF5 write and open/close, queue
 waiting, and the writer thread's own total, which is listed separately because it is off the critical path. Set
-`/output/verbosity` to 3 or more to additionally get one line and one `output_timings.csv` row per frame.
+`/output/verbosity` to 3 or more to additionally get one line and one `<run>_output_timings.csv` row per frame.
 
 `/output/verbosity` also decides how much of the run log reaches the console: at 0 only warnings and errors, at 1 the
 ordinary `info` messages, from 2 upwards also `debug` records such as the per-frame timing line. The `.log` file is

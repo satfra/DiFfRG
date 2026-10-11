@@ -21,28 +21,25 @@
 namespace DiFfRG
 {
   /**
-   * @brief Named, history-dependent model state carried by a flow snapshot.
+   * @brief Named model state stored in a flow snapshot, for models whose behaviour depends on their history.
    *
-   * Most models are a pure function of the solution and the RG time, and a snapshot of the
-   * discrete state is then enough to continue a flow. Some models are not: they latch a value the
-   * first time something happens (an EoM lock, say) and keep acting on it. A restart that does not
-   * know about such a latch silently continues a *different* flow. Models with that kind of state
-   * implement
+   * A snapshot stores the solution and the RG time. A model that keeps additional state (e.g. a flag set once some
+   * condition was met) must store it too, or a restarted flow differs from the uninterrupted one. Such a model
+   * implements
    *
    * @code
-   * void save_state(DiFfRG::ModelState &state) const;
-   * void load_state(const DiFfRG::ModelState &state);
+   * void save_state(DiFfRG::ModelState &state) const { state.set("locked", locked); }
+   * void load_state(const DiFfRG::ModelState &state) { locked = state.get<bool>("locked"); }
    * @endcode
    *
-   * and the assemblers call them when a snapshot is written or restored. Both are optional and
-   * detected at compile time (HasSaveState, HasLoadState); there is deliberately no default in
-   * def::AbstractModel, because the absence of the method is exactly what is detected.
+   * Both are optional and detected at compile time (HasSaveState, HasLoadState); def::AbstractModel has no default.
    *
-   * Values are stored as doubles. Integers are exact up to 2^53 and booleans map to 0/1.
+   * Values are stored as doubles: integers are exact up to \f$2^{53}\f$, booleans are 0/1.
    */
   class ModelState
   {
   public:
+    /// Store a single number under @p name (non-empty, without '/'); overwrites an existing entry.
     template <typename T>
       requires std::is_arithmetic_v<T>
     void set(const std::string &name, const T value)
@@ -50,6 +47,7 @@ namespace DiFfRG
       set(name, std::vector<double>{static_cast<double>(value)});
     }
 
+    /// Store a list of numbers under @p name (non-empty, without '/'); overwrites an existing entry.
     void set(const std::string &name, std::vector<double> values)
     {
       if (name.empty() || name.find('/') != std::string::npos)
@@ -58,6 +56,7 @@ namespace DiFfRG
       entries[name] = std::move(values);
     }
 
+    /// The single number stored under @p name; throws if it is missing or holds a list of another length.
     template <typename T>
       requires std::is_arithmetic_v<T>
     T get(const std::string &name) const
@@ -72,6 +71,7 @@ namespace DiFfRG
         return static_cast<T>(values[0]);
     }
 
+    /// The list stored under @p name; throws if it is missing.
     const std::vector<double> &get_vector(const std::string &name) const
     {
       const auto it = entries.find(name);
@@ -79,29 +79,28 @@ namespace DiFfRG
       return it->second;
     }
 
+    /// Whether an entry @p name exists.
     bool contains(const std::string &name) const { return entries.contains(name); }
+    /// Whether nothing is stored.
     bool empty() const { return entries.empty(); }
+    /// All entries.
     const std::map<std::string, std::vector<double>> &data() const { return entries; }
 
   private:
     std::map<std::string, std::vector<double>> entries;
   };
 
+  /// The model implements `save_state(ModelState &) const`.
   template <typename Model>
   concept HasSaveState = requires(const Model &model, ModelState &state) { model.save_state(state); };
 
+  /// The model implements `load_state(const ModelState &)`.
   template <typename Model>
   concept HasLoadState = requires(Model &model, const ModelState &state) { model.load_state(state); };
 
   /**
-   * @brief The spatial part of a flow snapshot, in a layout that does not depend on dof numbering.
-   *
-   * Every active cell is recorded by its CellId together with its local dof values, in the order
-   * of the element's local dofs. That is independent of how the dofs happen to be numbered, which
-   * matters in three places: a parallel::shared::Triangulation renumbers dofs by subdomain, so the
-   * global numbering depends on the rank count; LDG renumbers component-wise; and an adapted mesh
-   * has to be rebuilt before any numbering exists at all. Dofs shared between cells (CG) are stored
-   * once per cell with identical values.
+   * @brief Spatial part of a flow snapshot: every active cell (by CellId) with its local dof values, independent of
+   * the global dof numbering and the number of MPI ranks.
    */
   struct SnapshotSpatialState {
     std::string fe_name;
@@ -118,6 +117,7 @@ namespace DiFfRG
 
   namespace internal
   {
+    /// Call model.save_state if it exists.
     template <typename Model> void save_model_state(const Model &model, ModelState &state)
     {
       if constexpr (HasSaveState<Model>) model.save_state(state);
@@ -133,12 +133,7 @@ namespace DiFfRG
         return false;
     }
 
-    /**
-     * @brief Record the active cells and their local dof values.
-     *
-     * @param replica A vector from which every global dof index can be read, i.e. a serial vector
-     * or a refreshed SolutionView. Reads only, so this is safe inside a rank-0-only region.
-     */
+    /// Record the active cells and their local dof values from a vector in which every global dof is readable.
     template <int dim, typename VectorType>
     SnapshotSpatialState capture_cellwise_state(const dealii::DoFHandler<dim> &dof_handler, const VectorType &replica)
     {
@@ -162,20 +157,7 @@ namespace DiFfRG
       return state;
     }
 
-    /**
-     * @brief Refine and coarsen @p triangulation until its active cells are exactly @p active_cells.
-     *
-     * Every active cell of the current mesh is either one of the targets, a proper ancestor of one
-     * (so it is refined), or a descendant of one (so it is coarsened). Refinement and coarsening
-     * proceed one level per pass, which keeps every intermediate mesh at least as balanced as the
-     * target, so the triangulation's own smoothing never has to add or drop flags.
-     *
-     * Deterministic in its input, so on a replicated (parallel::shared) mesh every rank performs the
-     * identical sequence of collective refinements.
-     *
-     * @return whether the mesh was changed.
-     * @throws std::runtime_error if the coarse mesh differs or the target mesh cannot be reached.
-     */
+    /// Refine and coarsen @p triangulation until its active cells are @p active_cells. @return whether it changed.
     template <int dim>
     bool restore_active_cells(dealii::Triangulation<dim> &triangulation, const unsigned int n_coarse_cells,
                               const std::vector<std::string> &active_cells)
@@ -236,10 +218,7 @@ namespace DiFfRG
                                std::to_string(triangulation.n_active_cells()) + " active cells).");
     }
 
-    /**
-     * @brief Write the snapshot's cell-wise values into @p vector, which must already have the
-     * layout of @p dof_handler. Each rank writes only the dofs it owns.
-     */
+    /// Write the snapshot's values into @p vector (already laid out for @p dof_handler); each rank writes its own dofs.
     template <int dim, typename VectorType>
     void restore_cellwise_values(const SnapshotSpatialState &state, const dealii::DoFHandler<dim> &dof_handler,
                                  const dealii::IndexSet &locally_owned_dofs, VectorType &vector)
@@ -269,13 +248,7 @@ namespace DiFfRG
       vector.compress(dealii::VectorOperation::insert);
     }
 
-    /**
-     * @brief The restore sequence shared by all mesh-based assemblers.
-     *
-     * Mirrors HAdaptivity::adapt: change the mesh, then discretization.reinit() and
-     * assembler.reinit(), then size the vector. No constraints are distributed: every dof,
-     * constrained or not, is restored from the snapshot, which already satisfied them.
-     */
+    /// Rebuild the mesh, reinitialize discretization and assembler, and fill @p spatial from the snapshot.
     template <typename Discretization, typename Assembler, typename VectorType>
     void restore_spatial_state(const SnapshotSpatialState &state, Discretization &discretization, Assembler &assembler,
                                VectorType &spatial)

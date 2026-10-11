@@ -26,21 +26,32 @@ namespace DiFfRG
     using namespace dealii;
 
     /**
-     * @brief Class to manage the system on which we solve, i.e. fe spaces, grids, etc.
-     * This class is a System for LDG systems, i.e. DG with additional projections (e.g. derivatives).
+     * @brief The local discontinuous Galerkin spaces: one DG space (FE_DGQ of degree \f$p\f$ =
+     * `/discretization/fe_order`) per FE subsystem.
      *
-     * @tparam Model_ The Model class used for the Simulation
+     * Subsystem 0 holds the FE functions \f$u\f$, the unknowns of the flow. Subsystems \f$k = 1, \dots, n-1\f$
+     * (\f$2 \le n \le 4\f$, declared in the ComponentDescriptor) hold the auxiliary LDG levels \f$L_k\f$, which
+     * LDG::Assembler computes from \f$u\f$ and which are not time-evolved. Each subsystem has its own DoFHandler,
+     * numbered component by component. Serial only: the mesh must be RectangularMeshSerial<dim> (checked at compile
+     * time). Keys: `/discretization/fe_order` (uint, default 3, warns if missing).
+     *
+     * @tparam ModelOrComponents_ The Model, or a bare ComponentDescriptor. With a descriptor, Model is void and the
+     *         assembler has to be given the model explicitly.
+     * @tparam Mesh_ The mesh; must not be partitioned.
+     * @tparam NumberType_ The scalar type of the (serial) vectors and block matrices.
      */
     template <typename ModelOrComponents_, typename Mesh_, typename NumberType_ = double> class Discretization
     {
     public:
       /// The model this discretization belongs to, or void if it was built from a bare descriptor.
       using Model = typename DiFfRG::internal::model_of_descriptor<ModelOrComponents_>::type;
+      /// The ComponentDescriptor: names and counts of FE functions, extractors and variables.
       using Components = typename DiFfRG::internal::components_of<ModelOrComponents_>::type;
       using NumberType = NumberType_;
       using VectorType = Vector<NumberType>;
       using SparseMatrixType = BlockSparseMatrix<NumberType>;
       using Mesh = Mesh_;
+      /// Dimension of the field-space domain.
       static constexpr uint dim = Mesh::dim;
 
       // LDG is deliberately excluded from the distributed policy, so it fixes serial linear
@@ -60,6 +71,7 @@ namespace DiFfRG
                     "CG/DG/KT for a distributed run. Note that a plain RectangularMesh<dim> is "
                     "partitioned in an MPI build, so LDG has to name the serial mesh explicitly.");
 
+      /// Distribute the dofs of every subsystem on @p mesh, which must outlive this object.
       Discretization(Mesh &mesh, const ConfigTree &config, ReportPort report_port = {})
           : mesh(mesh), config(config), log(std::move(report_port))
       {
@@ -74,14 +86,17 @@ namespace DiFfRG
         setup_dofs();
       };
 
+      /// The constraints of subsystem @p i: hanging nodes, plus (for i = 0) the model's affine constraints.
       const auto &get_constraints(const uint i = 0) const { return constraints[i]; }
       auto &get_constraints(const uint i = 0)
       {
         (void)i;
         return constraints[i];
       }
+      /// The DoFHandler of subsystem @p i.
       const auto &get_dof_handler(const uint i = 0) const { return *(dof_handler[i]); }
       auto &get_dof_handler(const uint i = 0) { return *(dof_handler[i]); }
+      /// Pointers to the DoFHandlers of all subsystems.
       auto get_dof_handler_list() const
       {
         std::vector<const DoFHandler<dim> *> ret;
@@ -89,40 +104,34 @@ namespace DiFfRG
           ret.push_back(&(get_dof_handler(i)));
         return ret;
       }
+      /// The finite element of subsystem @p i.
       const auto &get_fe(uint i = 0) const { return *(fe[i]); }
+      /// The (bi)linear mapping from the reference cell.
       const auto &get_mapping() const { return mapping; }
+      /// The triangulation of the mesh.
       const auto &get_triangulation() const { return mesh.get_triangulation(); }
       auto &get_triangulation() { return mesh.get_triangulation(); }
 
-      /**
-       * @brief Get the support point for a given dof.
-       *
-       * @param dof The dof index.
-       * @return const dealii::Point<dim>& The support point for the given dof.
-       */
+      /// The support point of dof @p dof of subsystem 0.
       const Point<dim> &get_support_point(const uint dof) const { return support_points[dof]; }
-      /**
-       * @brief Get the support points for all dofs.
-       *
-       * @return const std::vector<Point<dim>>& The support points for all dofs.
-       */
+      /// The support points of all dofs of subsystem 0, indexed by dof.
       const auto &get_support_points() const { return support_points; }
 
+      /// The parameters this discretization was built with.
       const auto &get_config() const { return config; }
+      /// Where this discretization reports to (log messages).
       ReportPort report_port() const { return log; }
 
-      // LDG is deliberately excluded from the distributed policy: DoFRenumbering::component_wise
-      // assumes globally contiguous per-component blocks, which a parallel DoFHandler destroys, and
-      // the assembler does sparse matrix-matrix products and a UMFPACK factorisation with no PETSc
-      // analogue. These three accessors exist only because LDG shares FE::FlowingVariables with
-      // CG/DG, which now asks every discretization for its layout. On the serial triangulation LDG
-      // is restricted to, they are exactly the trivial answers.
+      // The parallel layout, which FE::FlowingVariables asks every discretization for. LDG is serial, so these are
+      // the trivial answers: all dofs, MPI_COMM_SELF.
       const dealii::IndexSet &get_locally_owned_dofs() const { return locally_owned_dofs; }
       const dealii::IndexSet &get_locally_relevant_dofs() const { return locally_relevant_dofs; }
       MPI_Comm get_communicator() const { return dof_handler[0]->get_mpi_communicator(); }
 
+      /// Redistribute the dofs on the current mesh, e.g. after refinement.
       void reinit() { setup_dofs(); }
 
+      /// The dof whose support point is closest to @p p (linear search).
       uint get_closest_dof(const Point<dim> &p) const
       {
         uint dof = 0;
@@ -137,6 +146,7 @@ namespace DiFfRG
         return dof;
       }
 
+      /// Block sizes of the full state: the dofs of subsystem 0, then the number of variables if there are any.
       std::vector<uint> get_block_structure() const
       {
         std::vector<uint> block_structure{dof_handler[0]->n_dofs()};

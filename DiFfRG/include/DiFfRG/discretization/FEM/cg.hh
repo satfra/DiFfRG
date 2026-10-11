@@ -31,10 +31,20 @@ namespace DiFfRG
     using namespace dealii;
 
     /**
-     * @brief Class to manage the system on which we solve, i.e. fe spaces, grids, etc.
-     * This class is a System for CG systems.
+     * @brief The continuous Galerkin space: every FE function is continuous across cells and piecewise polynomial of
+     * degree \f$p\f$ = `/discretization/fe_order` (FE_Q, nodal at Gauss-Lobatto points) in each direction.
      *
-     * @tparam Model_ The Model class used for the Simulation
+     * The unknowns are the nodal values of all FE functions. Holds the dof numbering, the constraints and the support
+     * points; the equation itself is assembled by CG::Assembler. Keys: `/discretization/fe_order` (uint, default 3,
+     * warns if missing). See discretization.hh for how to choose a scheme.
+     *
+     * @tparam ModelOrComponents_ The Model, or a bare ComponentDescriptor. With a descriptor, Model is void and the
+     *         assembler has to be given the model explicitly.
+     * @tparam Mesh_ The mesh, e.g. RectangularMesh<dim>. A partitioned mesh requires distributed linear algebra and
+     *         vice versa (checked at compile time).
+     * @tparam NumberType_ The scalar type; must be that of VectorType_.
+     * @tparam VectorType_ The vector type; by default serial or distributed, following Mesh_ (LAVectorFor).
+     * @tparam SparseMatrixType_ The matrix type, matching VectorType_ (LASparseMatrixFor).
      */
     template <typename ModelOrComponents_, typename Mesh_, typename NumberType_ = double,
               typename VectorType_ = LAVectorFor<Mesh_, NumberType_>,
@@ -44,16 +54,16 @@ namespace DiFfRG
     public:
       /// The model this discretization belongs to, or void if it was built from a bare descriptor.
       using Model = typename DiFfRG::internal::model_of_descriptor<ModelOrComponents_>::type;
+      /// The ComponentDescriptor: names and counts of FE functions, extractors and variables.
       using Components = typename DiFfRG::internal::components_of<ModelOrComponents_>::type;
       using NumberType = NumberType_;
       using VectorType = VectorType_;
       using SparseMatrixType = SparseMatrixType_;
       using Mesh = Mesh_;
+      /// Dimension of the field-space domain.
       static constexpr uint dim = Mesh::dim;
 
-      /**
-       * @brief Whether the linear algebra is distributed over MPI ranks.
-       */
+      /// Whether the linear algebra is distributed over MPI ranks.
       static constexpr bool is_distributed = is_distributed_la<VectorType>;
 
       static_assert(SupportedVectorType<VectorType>,
@@ -80,6 +90,7 @@ namespace DiFfRG
                     "A partitioned mesh requires a distributed VectorType. Either let both follow "
                     "the build configuration, or pin the mesh serial with RectangularMeshSerial<dim>.");
 
+      /// Distribute the dofs on @p mesh, which must outlive this object.
       Discretization(Mesh &mesh, const ConfigTree &config, ReportPort report_port = {})
           : mesh(mesh), config(config), log(std::move(report_port)),
             fe(std::make_shared<FESystem<dim>>(FE_Q<dim>(config.get_uint_or_warn("/discretization/fe_order", 3)),
@@ -89,6 +100,10 @@ namespace DiFfRG
         setup_dofs();
       };
 
+      /**
+       * @brief The dof constraints: hanging nodes, plus the model's affine constraints once an assembler has been
+       * built (its reinit adds them). @p i is ignored.
+       */
       const auto &get_constraints(const uint i = 0) const
       {
         (void)i;
@@ -99,6 +114,7 @@ namespace DiFfRG
         (void)i;
         return constraints;
       }
+      /// The DoFHandler; @p i is ignored.
       const auto &get_dof_handler(const uint i = 0) const
       {
         (void)i;
@@ -109,48 +125,39 @@ namespace DiFfRG
         (void)i;
         return dof_handler;
       }
+      /// The finite element (one FE_Q per FE function); @p i must be 0.
       const auto &get_fe(const uint i = 0) const
       {
         if (i != 0) throw std::runtime_error("Wrong FE index");
         return *fe;
       }
+      /// The (bi)linear mapping from the reference cell.
       const auto &get_mapping() const { return mapping; }
+      /// The triangulation of the mesh.
       const auto &get_triangulation() const { return mesh.get_triangulation(); }
       auto &get_triangulation() { return mesh.get_triangulation(); }
+      /// The parameters this discretization was built with.
       const auto &get_config() const { return config; }
+      /// Where this discretization reports to (log messages).
       ReportPort report_port() const { return log; }
 
-      /**
-       * @brief Get the support point for a given dof.
-       *
-       * @param dof The dof index.
-       * @return const dealii::Point<dim>& The support point for the given dof.
-       */
+      /// The support point of @p dof, i.e. where its shape function is nodal.
       const Point<dim> &get_support_point(const uint dof) const { return support_points[dof]; }
-      /**
-       * @brief Get the support points for all dofs.
-       *
-       * @return const std::vector<Point<dim>>& The support points for all dofs.
-       */
+      /// The support points of all dofs, indexed by dof.
       const auto &get_support_points() const { return support_points; }
 
-      /**
-       * @brief The dof rows this rank owns. Complete on a serial mesh.
-       */
+      /// The dofs this rank owns; all of them on a serial mesh.
       const dealii::IndexSet &get_locally_owned_dofs() const { return locally_owned_dofs; }
-      /**
-       * @brief The dof rows this rank can read. See ParallelDoFs::make_ghost_set for why this is
-       * everything at the replicated-mesh rung rather than the one-ring relevant set.
-       */
+      /// The dofs this rank can read (owned plus ghosts), see ParallelDoFs::make_ghost_set.
       const dealii::IndexSet &get_locally_relevant_dofs() const { return locally_relevant_dofs; }
 
-      /**
-       * @brief MPI_COMM_SELF on a serial mesh, so callers never have to branch on the build type.
-       */
+      /// The communicator of the dofs; MPI_COMM_SELF on a serial mesh.
       MPI_Comm get_communicator() const { return dof_handler.get_mpi_communicator(); }
 
+      /// Redistribute the dofs on the current mesh, e.g. after refinement.
       void reinit() { setup_dofs(); }
 
+      /// Block sizes of the full state: the number of dofs, then the number of variables if there are any.
       std::vector<uint> get_block_structure() const
       {
         std::vector<uint> block_structure{dof_handler.n_dofs()};

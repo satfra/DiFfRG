@@ -16,7 +16,22 @@ namespace DiFfRG
   namespace def
   {
     /**
-     * @brief Concept that any gradient-reconstruction strategy must satisfy.
+     * @brief Concept of a slope reconstruction, the Reconstructor_ / JacobianReconstructor_ of
+     * FV::KurganovTadmor::Assembler. Implementations: TVDReconstructor, FirstOrderReconstructor.
+     *
+     * All functions are static and read a cell's centre and average and those of its \f$2d\f$ face neighbours,
+     * ordered lower/upper per direction:
+     * - `compute_gradient<n>(x_K, u_K, x_n, u_n)`: the slope \f$g_K\f$ of the reconstruction
+     *   \f$u_K(x) = \bar u_K + g_K \cdot (x - x_K)\f$, which gives the face values;
+     * - `compute_gradient_at_point<n>(x_K, x, u_K, x_n, u_n)`: the gradient the model sees at a point \f$x\f$ of the
+     *   cell (face centre or quadrature point);
+     * - `compute_gradient_derivative`, `compute_gradient_at_point_derivative`: their derivative by the one stencil
+     *   value seeded in the autodiff inputs;
+     * - `compute_third_derivatives_at_face<n>(x, u)` and its `_derivative`: third derivatives at a face from four
+     *   cell averages (used in 1D only).
+     *
+     * Constants: `dim`, and `jacobian_stencil_radius`, how far a face's reconstruction reaches: 1 = the two cells of
+     * the face, 2 = also their face neighbours.
      */
 	    template <typename T>
 	    concept HasReconstructor =

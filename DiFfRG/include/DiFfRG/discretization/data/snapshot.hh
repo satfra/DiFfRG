@@ -23,16 +23,22 @@ namespace DiFfRG
    * meaningful.
    */
   struct SnapshotData {
+    /// Version of the file layout.
     static constexpr int format_version = 1;
 
     /// RG time of the state.
     double t = 0.;
     /// Λ·exp(-t), or NaN when /physical/Lambda was not configured.
     double k = std::numeric_limits<double>::quiet_NaN();
+    /// /physical/Lambda of the run (-1 if not set).
     double Lambda = -1.;
+    /// Spatial dimension of the discretization.
     int dim = 0;
+    /// Mesh and FE/FV values.
     SnapshotSpatialState spatial;
+    /// The variables.
     std::vector<double> variables;
+    /// The model's own state, see ModelState.
     ModelState model;
     /// Time of the last mesh adaptation, NaN if the adaptor does not track one.
     double last_adaptation_time = std::numeric_limits<double>::quiet_NaN();
@@ -41,11 +47,7 @@ namespace DiFfRG
   };
 
   /**
-   * @brief Write @p data to @p path.
-   *
-   * The file is first written as `<path>.tmp` and then renamed, so a reader never sees a partially
-   * written snapshot -- which matters when many restarted runs pick up the snapshot of a seed run
-   * that is still going.
+   * @brief Write @p data to @p path (via a temporary file, so a reader never sees a partial snapshot).
    *
    * @throws std::runtime_error if @p path already exists: snapshots are never overwritten.
    */
@@ -63,8 +65,7 @@ namespace DiFfRG
   /**
    * @brief The index of @p file among the snapshots of the run at @p path, if it is one of them.
    *
-   * A restart from one of its own run's snapshots is a continuation of that run: it keeps the
-   * snapshot schedule and numbers its snapshots on from there.
+   * A restart from one of its own run's snapshots continues that run's snapshot numbering.
    */
   std::optional<unsigned int> own_snapshot_index(const OutputPath &path, const std::filesystem::path &file);
 
@@ -91,7 +92,9 @@ namespace DiFfRG
   class SnapshotSchedule
   {
   public:
+    /// No snapshots.
     SnapshotSchedule() = default;
+    /// Read the keys above; @p Lambda converts k to t, @p output_dt is the output grid spacing.
     SnapshotSchedule(const ConfigTree &config, double Lambda, double output_dt);
 
     /**
@@ -101,7 +104,9 @@ namespace DiFfRG
      */
     std::vector<double> times_in(double t_start, double t_stop) const;
 
+    /// Whether no snapshots are requested.
     bool empty() const { return requested.empty(); }
+    /// Value of /timestepping/snapshots/stop_after_last.
     bool stop_after_last() const { return stop_after_last_snapshot; }
 
   private:

@@ -7,16 +7,11 @@ namespace DiFfRG
 {
   namespace internal
   {
+    /// The mesh type declares `is_rectangular = true`.
     template <typename T>
     concept MeshIsRectangular = requires(T x) { T::is_rectangular; } && T::is_rectangular;
 
-    /**
-     * @brief Whether a type is a model, i.e. carries the component descriptor rather than being one.
-     *
-     * Models expose `using Components = ...`; a bare ComponentDescriptor does not (it exposes
-     * FEFunction_Descriptor / Variable_Descriptor / Extractor_Descriptor instead). That asymmetry is
-     * what lets a Discretization take either one as its first argument.
-     */
+    /// T is a model (has `using Components = ...`) rather than a bare ComponentDescriptor.
     template <typename T>
     concept IsModel = requires { typename T::Components; };
 
@@ -36,22 +31,11 @@ namespace DiFfRG
       using type = T;
     };
 
-    /**
-     * @brief Whether a Discretization knows which model it belongs to.
-     *
-     * False exactly for the discretizations built from a bare ComponentDescriptor, which exist in
-     * tests that exercise constraints and vector layout without ever building an assembler.
-     */
+    /// The Discretization was built from a model (not from a bare ComponentDescriptor).
     template <typename D>
     concept CarriesModel = requires { typename D::Model; } && !std::is_void_v<typename D::Model>;
 
-    /**
-     * @brief The model an assembler should use when the application did not name one.
-     *
-     * The static_assert is what turns "Discretization::Model is void" into one readable line. It
-     * fires only when the default argument is actually used, so naming the model explicitly --
-     * `CG::Assembler<Discretization, MyModel>` -- bypasses it entirely.
-     */
+    /// The model of a Discretization, used as the assembler's default Model; a clear error if it has none.
     template <typename D> struct assembler_model_of {
       static_assert(CarriesModel<D>,
                     "This Discretization was built from a bare ComponentDescriptor and so does not know "

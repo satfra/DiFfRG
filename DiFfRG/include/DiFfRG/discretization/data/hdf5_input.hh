@@ -12,21 +12,22 @@
 namespace DiFfRG
 {
   /**
-   * @brief A class to output data to a CSV file.
+   * @brief Read scalars and maps from an HDF5 file written by HDF5Output, e.g. to initialize a run from a previous one.
    *
-   * In every time step, the user can add values to the output, which will be written to the file when flush is called.
-   * Every timestep has to contain the same values, but the order in which they are added can change.
+   * A map series is `/maps/<name>/<series>`; @p series_number = -1 selects the latest (highest) series.
    */
   class HDF5Input
   {
   public:
+    /// Open @p file_name (".h5" appended if missing) read-only; throws if it does not exist or lacks the groups.
     HDF5Input(const std::string file_name);
 
     /**
-     * @brief Load a map from the HDF5 file.
+     * @brief Copy the values of a map series into @p data, as doubles in the grid's linear index order.
      *
-     * @param name The name of the map.
-     * @param data The data buffer to load the map into.
+     * @param name The map name.
+     * @param data Buffer; must hold at least as many values as the map has (not checked).
+     * @param series_number Series to read; -1 for the latest.
      */
     void load_map(const std::string &name, double *data, int series_number = -1)
     {
@@ -59,12 +60,7 @@ namespace DiFfRG
       std::copy(temp_data.begin(), temp_data.end(), data);
     }
 
-    /**
-     * @brief Load a map from the HDF5 file.
-     *
-     * @param name The name of the map.
-     * @param data The data buffer to load the map into.
-     */
+    /// The values of a map series, as doubles in the grid's linear index order; @p series_number -1 for the latest.
     std::vector<double> load_map(const std::string &name, int series_number = -1)
     {
       if (!maps.has_group(name))
@@ -97,12 +93,12 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Load a map's coordinates from the HDF5 file.
+     * @brief The grid points of a map series (through its `coordinates` link).
      *
-     * @tparam dim The spatial dimension of the coordinate entries.
-     * @param name The name of the map.
-     * @param series_number The series number to load (-1 for latest).
-     * @return A flattened vector of doubles with size = num_points * dim.
+     * @tparam dim Number of coordinates per grid point.
+     * @param name The map name.
+     * @param series_number Series to read; -1 for the latest.
+     * @return All points one after another: \f$(x^0_0, \dots, x^0_{dim-1}, x^1_0, \dots)\f$.
      */
     template <size_t dim>
     std::vector<double> load_map_coord(const std::string &name, int series_number = -1)
@@ -145,12 +141,10 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Load a map from the HDF5 file, while checking that the coordinates in the file match the provided
-     * coordinates.
+     * @brief Copy the latest series of a map into @p data, after checking @p coordinates against the file.
      *
-     * @param name The name of the map.
-     * @param data The data buffer to load the map into.
-     * @param coordinates The coordinates of the map.
+     * The grid is looked up as `/coordinates/<coordinates.to_string()>` and must agree point by point (to 1e-12) with
+     * @p coordinates; throws otherwise. Whether the map's own `coordinates` link points to this grid is not checked.
      */
     template <typename Coordinates> void load_map(const std::string &name, double *data, const Coordinates &coordinates)
     {
@@ -158,6 +152,7 @@ namespace DiFfRG
       load_map(name, data);
     }
 
+    /// All values of `/scalars/<name>`, one per frame.
     template <typename T> std::vector<T> load_scalar(const std::string &name)
     {
       if (!scalars.has_dataset(name))
@@ -171,6 +166,7 @@ namespace DiFfRG
       return value;
     }
 
+    /// The open file, for direct access.
     DiFfRG::hdf5::File &get_file();
 
   private:

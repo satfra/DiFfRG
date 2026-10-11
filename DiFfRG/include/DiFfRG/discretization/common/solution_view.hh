@@ -18,31 +18,17 @@
 namespace DiFfRG
 {
   /**
-   * @brief A read-only, fully-replicated view of the solution.
+   * @brief Read-only copy of the solution in which every global dof is readable on every MPI rank.
    *
-   * A large amount of code under discretization/ reads the solution at *arbitrary global dof
-   * indices*: the EoM search (common/eom.hh), the KT reconstruction caches
-   * (FV/assembler/reconstruction_cache.hh), the output path (data/fe_output.cc) and the support
-   * point lookups. None of that is expressible against a vector that only holds this rank's rows.
+   * Output, the EoM search and the FV reconstruction read the solution at arbitrary global dof indices, which a
+   * distributed vector cannot answer. Usage: reinit() once per mesh (AbstractAssembler::reinit_solution_view does
+   * this), refresh() with the current solution, then read through get() or operator[].
    *
-   * Rather than rewrite all of it, this class maintains one replica holding *every* index,
-   * refreshed once per residual/Jacobian evaluation. Those call sites then read the replica and
-   * need no logic change at all. At replicated-mesh sizes the replica is exactly today's memory
-   * footprint.
+   * For serial vectors the view only stores a pointer to the source, so it sees later changes of it; for distributed
+   * vectors (the PETSc specialization) it is a copy taken at refresh(). Refresh right before reading to get the same
+   * behaviour from both.
    *
-   * The serial specialization is a pure passthrough -- it stores a pointer, copies nothing, and
-   * compiles to the same code as passing the vector directly -- so a serial build pays nothing for
-   * the abstraction.
-   *
-   * @warning The two policies differ in one respect that matters if you hold a view across a
-   * write: the serial view aliases the source vector, so it observes later mutations, while the
-   * distributed view is a snapshot taken at refresh(). Always refresh() immediately before reading
-   * and never hold a view across an assembly step, and the two behave identically.
-   *
-   * Narrowing the replica from "everything" to the locally relevant dofs is the defining step of
-   * the fully-distributed rung. It is deliberately confined to this one class so that step has a
-   * single place to happen, and so the call sites that will need real work are exactly the ones
-   * that name this type.
+   * @tparam VectorType Vector type of the solution.
    */
   template <typename VectorType> class SolutionView
   {
@@ -50,27 +36,28 @@ namespace DiFfRG
     using NumberType = get_type::NumberType<VectorType>;
     using size_type = dealii::types::global_dof_index;
 
+    /// An empty view; get() throws until refresh().
     SolutionView() = default;
 
-    /**
-     * @brief Establish the layout. No-op for the serial policy.
-     */
+    /// Set up the layout. Nothing to do for serial vectors.
     void reinit(const dealii::IndexSet &, const dealii::IndexSet &, MPI_Comm) {}
 
-    /**
-     * @brief Make the view reflect @p owned.
-     */
+    /// Point the view at @p owned.
     void refresh(const VectorType &owned) { source = &owned; }
 
+    /// The full solution vector; throws before the first refresh().
     const VectorType &get() const
     {
       if (source == nullptr)
         throw std::runtime_error("SolutionView::get() before refresh(): the view holds no solution.");
       return *source;
     }
+    /// Same as get().
     operator const VectorType &() const { return get(); }
 
+    /// The value of global dof @p i.
     NumberType operator[](const size_type i) const { return get()[i]; }
+    /// The number of global dofs.
     size_type size() const { return get().size(); }
 
   private:
@@ -79,28 +66,11 @@ namespace DiFfRG
 
 #ifdef DEAL_II_WITH_PETSC
   /**
-   * @brief Distributed policy: a process-local replica holding every index.
+   * @brief Distributed vectors: every rank holds a local copy (on MPI_COMM_SELF) of all entries, gathered from the
+   * owning ranks at refresh().
    *
-   * The replica lives on MPI_COMM_SELF and owns all n_dofs entries, refreshed by one MPI_Allgatherv
-   * of the owning ranks' contiguous blocks.
-   *
-   * @warning It is tempting -- and it was the first implementation -- to build the replica as a
-   * PETSc *ghosted* vector on the global communicator with complete_index_set() as its ghost set,
-   * and let deal.II's step-40 assignment idiom do the communication. That is correct in a single
-   * thread and crashes under assembly. deal.II's read path for a ghosted PETSc vector
-   * (VectorBase::extract_subvector_to) calls VecGhostGetLocalForm / VecGhostRestoreLocalForm around
-   * every read, and those two do PetscObjectReference / PetscObjectDereference on the local form
-   * plus a PetscObjectStateSet on both vectors -- a non-atomic refcount and a shared write. Every
-   * assembler reads the solution from inside its parallel cell loops, i.e. from N TBB
-   * worker threads at once, so the refcount races; a lost increment takes it to zero, PETSc frees
-   * the local form, and the next thread segfaults in VecGetSize_Seq on freed memory (the
-   * accompanying "free(): invalid pointer" is the double free). PETSc is not thread safe unless
-   * built --with-threadsafety.
-   *
-   * The non-ghosted read path does none of that -- VecGetOwnershipRange plus VecGetArrayRead and
-   * pointer arithmetic, no refcount, no state write -- so a replica that owns everything locally is
-   * both the simplest expression of "every rank holds every entry" and the only one that survives
-   * threaded assembly.
+   * The copy is a non-ghosted vector, because reading a ghosted PETSc vector is not thread-safe and the assemblers read
+   * the solution from parallel cell loops.
    */
   template <> class SolutionView<dealii::PETScWrappers::MPI::Vector>
   {
@@ -113,14 +83,18 @@ namespace DiFfRG
     using NumberType = VectorType::value_type;
     using size_type = dealii::types::global_dof_index;
 
+    /// An empty view; get() throws until reinit().
     SolutionView() = default;
 
     /**
-     * @brief Establish the layout and capture the gather plan.
+     * @brief Set up the gather from the ownership partition. Collective.
      *
-     * @p ghost is accepted for interface symmetry with the serial policy and with the
-     * fully-distributed rung; at this rung the replica always covers everything, so only the
-     * partition described by @p locally_owned is used.
+     * Throws if the numbers of owned dofs of all ranks do not add up to the total. The owned sets are assumed to be
+     * contiguous and ordered by rank (as PETSc requires); this is not checked.
+     *
+     * @param locally_owned The dofs owned by this rank.
+     * @param ghost Unused; the copy always holds all dofs.
+     * @param comm The communicator of the distributed vector.
      */
     void reinit(const dealii::IndexSet &locally_owned, const dealii::IndexSet &ghost, MPI_Comm comm)
     {
@@ -141,10 +115,8 @@ namespace DiFfRG
         displacements[r] = static_cast<int>(total);
         total += static_cast<std::size_t>(counts[r]);
       }
-      // A PETSc MPI vector requires an ascending, one-to-one partition anyway (deal.II asserts it,
-      // and the assert is compiled out in Release), so the owned blocks are contiguous and in rank
-      // order -- which is exactly the Allgatherv layout. If that ever stops holding, the gather
-      // would silently permute the solution, so check it rather than trust it.
+      // A PETSc MPI vector has contiguous owned blocks in rank order, which is the Allgatherv layout. Only the
+      // total count is checked here.
       if (total != n_global)
         throw std::runtime_error("SolutionView::reinit(): the locally owned sets do not partition "
                                  "the index range exactly once; a gathered replica would be wrong.");
@@ -155,10 +127,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Communicate @p owned into the replica.
+     * @brief Copy @p owned into the local copy on every rank (exact, no arithmetic). Collective.
      *
-     * Exact: the gather moves each rank's owned block verbatim, with no arithmetic anywhere, so the
-     * replica is bit-identical to the distributed vector on every rank.
+     * An empty @p owned gives an empty view. Throws if @p owned does not match the layout given to reinit().
      */
     void refresh(const VectorType &owned)
     {
@@ -191,14 +162,18 @@ namespace DiFfRG
       if (ierr != MPI_SUCCESS) throw std::runtime_error("SolutionView::refresh(): MPI_Allgatherv failed.");
     }
 
+    /// The full solution vector; throws before reinit().
     const VectorType &get() const
     {
       if (!initialized) throw std::runtime_error("SolutionView::get() before reinit(): the view holds no solution.");
       return is_empty ? empty : replica;
     }
+    /// Same as get().
     operator const VectorType &() const { return get(); }
 
+    /// The value of global dof @p i.
     NumberType operator[](const size_type i) const { return get()(i); }
+    /// The number of global dofs (0 if the view is empty).
     size_type size() const { return get().size(); }
 
   private:

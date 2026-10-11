@@ -12,14 +12,17 @@ namespace DiFfRG
   namespace def
   {
     /**
-     * @brief Concept that any wave-speed strategy must satisfy.
+     * @brief Concept of a wave-speed strategy, the WaveSpeedStrategy_ of FV::KurganovTadmor::Assembler.
      *
-     * A wave-speed class must provide:
-     * - `compute_speeds`:  given plus/minus Jacobians, return per-dimension wave speeds.
-     * - `compute_selected_speed_derivatives`: return the differentiated speed for the
-     *   side selected by the maximum spectral radius.
+     * The local wave speed \f$a_d\f$ of a face sets the dissipation \f$\tfrac12 a_d n_d (u^+ - u^-)\f$ of the KT flux.
+     * A strategy provides, from the flux jacobians \f$J^\pm_d = \partial F_d/\partial u\f$ on both traces (restricted
+     * to one block of Model::wave_speed_blocks):
+     * - `compute_speeds`: \f$a_d\f$ per direction \f$d\f$;
+     * - `compute_selected_speed_derivatives`: \f$\partial a_d/\partial u^+\f$ and \f$\partial a_d/\partial u^-\f$,
+     *   from the flux hessians \f$H^\pm\f$, for the jacobian. They must be the derivatives of what compute_speeds
+     *   returns, else the Newton iteration is inexact.
      *
-     * New wave-speed strategies only need to satisfy this concept:
+     * Implementation: MaxEigenvalueWaveSpeed. A new strategy only has to satisfy this concept:
      * @code
      * struct MyWaveSpeed
      * {

@@ -9,33 +9,23 @@ namespace DiFfRG
   namespace def
   {
     /**
-     * @brief Superbee slope limiter (Roe, 1986).
+     * @brief Superbee limiter (Roe): for backward and forward slopes \f$a, b\f$ of the same sign,
+     * \f$\mathrm{sgn}\,a\, \max\big(\min(2|a|, |b|), \min(|a|, 2|b|)\big)\f$, else 0.
      *
-     * The widest of the second-order TVD slope limiters:
-     *   slope_limit(a, b) = maxmod( minmod(2a, b), minmod(a, 2b) )
-     * where
-     *   minmod(x, y) = sgn(x)+sgn(y) all-same-sign ? sign·min(|x|,|y|) : 0
-     *   maxmod(x, y) = sgn(x)+sgn(y) all-same-sign ? sign·max(|x|,|y|) : 0
-     *
-     * Equivalent compact form (Sweby 1984): for r = du_1 / du_2,
-     *   phi(r) = max(0, min(2r, 1), min(r, 2))
-     * and the limited slope is phi(r)·du_2.
-     *
-     * Superbee returns the steepest slope still consistent with the TVD
-     * region. Sharpens discontinuities much more aggressively than MinMod;
-     * uses identity uniform-sign-of-the-two-arguments check the same way.
+     * Equivalently \f$\varphi(r)\, b\f$ with \f$r = a/b\f$ and \f$\varphi(r) = \max(0, \min(2r, 1), \min(r, 2))\f$.
+     * The steepest slope that keeps the reconstruction TVD: it sharpens fronts the most of the TVD limiters, and can
+     * steepen smooth profiles into steps.
      */
     class SuperbeeLimiter
     {
     public:
+      /// The Superbee slope; 0 unless @p du_1 and @p du_2 have the same strict sign.
       template <typename NumberType> static NumberType slope_limit(const NumberType &du_1, const NumberType &du_2)
       {
         using std::abs;
         using std::max;
         using std::min;
 
-        // Branch-free same-sign indicator: 1 when du_1 and du_2 share strict sign, else 0.
-        // Identity: |sgn(a)+sgn(b)| / 2.
         const int s1 = limiter_utils::sgn(du_1);
         const int s2 = limiter_utils::sgn(du_2);
         if (s1 == 0 || s2 == 0 || s1 != s2) return NumberType(0);

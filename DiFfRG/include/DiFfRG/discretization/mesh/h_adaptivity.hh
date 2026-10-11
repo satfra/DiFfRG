@@ -27,11 +27,41 @@
 namespace DiFfRG
 {
   using namespace dealii;
+  // clang-format off
   /**
-   * @brief Implement a simple interface to do all adaptivity tasks, i.e. solution transfer, reinit of dofHandlers, etc.
+   * @brief Adaptive mesh refinement and coarsening (h-adaptivity) driven by the assembler's refinement indicator.
    *
-   * @tparam Assembler The used assembler should implement the methods refinement_indicator and reinit
+   * At each adaptation, the assembler computes one non-negative indicator \f$\eta_K\f$ per cell \f$K\f$
+   * (Assembler::refinement_indicator, from the model's cell_indicator and face_indicator).
+   * With \f$\eta = \sum_K \eta_K\f$, the cells with the largest \f$\eta_K\f$ whose sum reaches `refine_percent` \f$\cdot\,\eta\f$ are refined,
+   * and the cells with the smallest \f$\eta_K\f$ whose sum stays below `coarsen_percent` \f$\cdot\,\eta\f$ are
+   * coarsened (deal.II's GridRefinement::refine_and_coarsen_fixed_fraction). Then
+   * - no cell is refined beyond `level`, and no cell is coarsened below the level of the initial mesh;
+   * - no cell is coarsened within `coarsen_buffer` layers of neighbours of a cell flagged for refinement, nor if it
+   *   was created by one of the last `coarsen_age` adaptations (protects the region right behind a moving front);
+   * - if no cell remains flagged for refinement, nothing is done (an adaptation never only coarsens).
+   *
+   * The hanging-node constraints are applied to the solution before it is interpolated onto the new mesh, and again
+   * afterwards. Discretization and assembler are reinitialized.
+   *
+   * ### Parameters
+   * | Key                                           | Type   | Default | Meaning |
+   * |-----------------------------------------------|--------|---------|---------|
+   * | `/discretization/adaptivity/start_adapt_at`   | double | 0       | RG time of the first adaptation |
+   * | `/discretization/adaptivity/adapt_dt`         | double | 0.1     | minimum RG time between two adaptations |
+   * | `/discretization/adaptivity/level`            | uint   | 0       | maximum refinement level of a cell (absolute, counted from the coarse grid); 0 disables adaptivity |
+   * | `/discretization/adaptivity/refine_percent`   | double | 0.1     | fraction of the total indicator to refine |
+   * | `/discretization/adaptivity/coarsen_percent`  | double | 0.05    | fraction of the total indicator to coarsen |
+   * | `/discretization/adaptivity/coarsen_buffer`   | uint   | 2       | cell layers around refined cells that are not coarsened |
+   * | `/discretization/adaptivity/coarsen_age`      | uint   | 2       | cells created by the last that many adaptations are not coarsened |
+   *
+   * Since `level` is absolute, a mesh created with `/discretization/grid/refine` \f$= r\f$ is only refined further if
+   * `level` \f$> r\f$.
+   *
+   * @tparam Assembler The assembler; must provide get_discretization(), refinement_indicator(), reinit(),
+   * reinit_vector() and reinit_solution_view().
    */
+  // clang-format on
   template <typename Assembler>
   class HAdaptivity : public AbstractAdaptor<typename Assembler::Discretization::VectorType>
   {
@@ -40,6 +70,7 @@ namespace DiFfRG
     static constexpr uint dim = Discretization::dim;
 
   public:
+    /// Read the parameters (see the class description) and record the level of the initial mesh.
     HAdaptivity(Assembler &assembler, const ConfigTree &config)
         : assembler(assembler), discretization(assembler.get_discretization())
     {
@@ -55,17 +86,18 @@ namespace DiFfRG
         min_level = std::min(min_level, uint(cell->level()));
     }
 
+    /// @copydoc AbstractAdaptor::last_adaptation_time
     virtual double last_adaptation_time() const override { return last_adapt; }
+    /// @copydoc AbstractAdaptor::set_last_adaptation_time
     virtual void set_last_adaptation_time(const double t) override { last_adapt = t; }
 
     virtual ~HAdaptivity() = default;
 
     /**
-     * @brief Check if an adaptation step should be done and tranfer the given solution to the new mesh.
+     * @brief Adapt if `level` > 0, @p t ≥ `start_adapt_at`, and at least `adapt_dt` has passed since the last
+     * adaptation; transfer @p sol to the new mesh.
      *
-     * @param t Current time; at adapt_dt time distances we perform an adaptation
-     * @param sol Current solution
-     * @return true if adapation has happened, false otherwise
+     * @return true if the mesh changed. A skipped adaptation (nothing to refine) does not reset the schedule.
      */
     virtual bool operator()(const double t, VectorType &sol) override { return adapt_at(t, sol, {}); }
 
@@ -81,9 +113,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Force an adaptation and transfer the solution sol to the new mes
-
-     * @param solution to be transferred
+     * @brief Adapt now, regardless of the schedule, and transfer @p solution to the new mesh.
+     *
+     * @return true if the mesh changed.
      */
     virtual bool adapt(VectorType &solution) override { return adapt(solution, {}); }
 
@@ -192,9 +224,8 @@ namespace DiFfRG
 
   protected:
     /**
-     * @brief Clear the coarsening flags near a moving front: within coarsen_buffer layers of active neighbours of a
-     * cell flagged for refinement, and on cells created by one of the last coarsen_age adaptations. Coarsening
-     * re-interpolates the solution, which right behind a steep front can overshoot by more than the scheme tolerates.
+     * @brief Clear the coarsening flags within coarsen_buffer layers around cells flagged for refinement and on cells
+     * created by one of the last coarsen_age adaptations.
      */
     template <typename Tria> void protect_from_coarsening(Tria &triangulation) const
     {

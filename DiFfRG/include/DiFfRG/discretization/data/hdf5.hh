@@ -10,6 +10,7 @@
 
 namespace DiFfRG::hdf5
 {
+  /// HDF5 type of a complex number: compound {real, imag}.
   template <typename T> struct TypeTrait<DiFfRG::complex<T>> {
     static Datatype get()
     {
@@ -20,6 +21,7 @@ namespace DiFfRG::hdf5
     }
   };
 
+  /// HDF5 type of an autodiff number: compound {val, d_1, ..., d_N}.
   template <std::size_t N, typename T> struct TypeTrait<autodiff::Real<N, T>> {
     static Datatype get()
     {
@@ -31,6 +33,7 @@ namespace DiFfRG::hdf5
     }
   };
 
+  /// HDF5 type of an array: compound {component 0, ..., component N-1}.
   template <typename T, std::size_t N> struct TypeTrait<std::array<T, N>> {
     static Datatype get()
     {
@@ -41,6 +44,7 @@ namespace DiFfRG::hdf5
     }
   };
 
+  /// As for std::array.
   template <typename T, std::size_t N>
     requires(!std::is_same_v<std::array<T, N>, DiFfRG::device::array<T, N>>)
   struct TypeTrait<DiFfRG::device::array<T, N>> {

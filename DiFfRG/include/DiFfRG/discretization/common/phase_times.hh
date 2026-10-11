@@ -6,13 +6,12 @@
 namespace DiFfRG
 {
   /**
-   * @brief Wall time of the stages of the batched assemblers' residual or jacobian calls, summed over all calls.
+   * @brief Wall time in seconds of the stages of the assemblers' residual or Jacobian calls, summed over all calls.
    *
    * The stages follow each other without gaps, so total() is the time of the calls themselves.
    */
   struct AssemblyPhaseTimes {
-    /// The extractors and, for a jacobian, their derivatives; under LDG also building the levels (which extract()
-    /// does) and their jacobians.
+    /// Extractors (and, for a Jacobian, their derivatives); LDG: also the auxiliary levels and their Jacobians.
     double extract = 0.;
     /// The solution at the batch points (KT: the reconstruction and the traces).
     double gather = 0.;
@@ -21,19 +20,16 @@ namespace DiFfRG
     /// Contraction with the test functions and insertion into the global system (LDG: and the chain rule through
     /// the levels; KT: and the chain rule through the reconstruction).
     double scatter = 0.;
+    /// Number of assembly calls.
     unsigned int calls = 0;
 
+    /// Sum of all stages, in seconds.
     double total() const { return extract + gather + evaluate + scatter; }
   };
 
   namespace internal
   {
-    /**
-     * @brief Books the consecutive stages of one assembly call into an AssemblyPhaseTimes.
-     *
-     * One clock read per stage boundary and no CPU time, so the timing stays negligible even for small calls on a
-     * machine where reading the clock is a system call.
-     */
+    /// Adds the consecutive stages of one assembly call to an AssemblyPhaseTimes.
     class PhaseTimer
     {
       using clock = std::chrono::steady_clock;

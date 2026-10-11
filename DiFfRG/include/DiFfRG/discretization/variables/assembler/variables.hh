@@ -31,9 +31,19 @@ namespace DiFfRG
     } // namespace internal
 
     /**
-     * @brief The basic assembler that can be used for any standard CG scheme with flux and source.
+     * @brief The assembler of a flow with variables only, i.e. without FE functions and without a mesh.
      *
-     * @tparam Model The model class which contains the physical equations.
+     * The flow is the ODE system \f$\partial_t v + D(v) = 0\f$ for the variables \f$v\f$, with \f$D\f$ =
+     * Model::dt_variables (which therefore returns \f$-\partial_t v\f$). There is no discretization: construct it
+     * directly from the model,
+     * @code
+     * Variables::Assembler<Model> assembler(model, config);
+     * TimeStepperBoostRK54<Variables::Assembler<Model>> time_stepper(config, assembler, data_out);
+     * @endcode
+     * The FE part of the AbstractAssembler interface (mass, residual, jacobian) does nothing. Readouts see only
+     * "variables". Serial.
+     *
+     * @tparam Model_ The model; its ComponentDescriptor must declare no FE functions.
      */
     template <typename Model_> class Assembler : public AbstractAssembler<Vector<double>, SparseMatrix<double>, 0>
     {
@@ -48,8 +58,7 @@ namespace DiFfRG
       using Components = typename Model_::Components;
       static constexpr uint dim = 0;
 
-      /// This assembler has no FE space at all (dim == 0), so it needs no report port; the config is
-      /// unused.
+      /// @p model must outlive the assembler; @p config is not read.
       Assembler(Model &model, const ConfigTree & /*config*/) : model(model)
       {
         static_assert(Components::count_fe_functions() == 0, "The pure variable assembler cannot handle FE functions!");
@@ -115,6 +124,7 @@ namespace DiFfRG
       }
       virtual const SparseMatrix<NumberType> &get_mass_matrix() const override { return mass_matrix; }
 
+      /// \f$D(v)\f$ = Model::dt_variables; also completes any map() calls the model left pending.
       virtual void residual_variables(VectorType &residual, const VectorType &variables, const VectorType &) override
       {
         Timer timer;
@@ -124,6 +134,7 @@ namespace DiFfRG
         timings_residual.push_back(timer.wall_time());
       };
 
+      /// \f$\partial D/\partial v\f$ from the model's jacobian_variables (e.g. by autodiff, def::ADjacobian_variables).
       virtual void jacobian_variables(FullMatrix<NumberType> &jacobian, const VectorType &variables,
                                       const VectorType &) override
       {
@@ -133,6 +144,7 @@ namespace DiFfRG
         timings_jacobian.push_back(timer.wall_time());
       };
 
+      /// Write the model's readouts, which see the variables only.
       void readouts(OutputFrame<dim, VectorType> &data_out, const VectorType &, const VectorType &variables) const
       {
         auto helper = [&](auto &&...args) {
@@ -148,6 +160,7 @@ namespace DiFfRG
         model.readouts_multiple(helper, data_out);
       }
 
+      /// No FE functions: mass, residual, jacobian_mass and jacobian do nothing.
       virtual void mass(VectorType &, const VectorType &, const VectorType &, NumberType) override {}
 
       virtual void residual(VectorType &, const VectorType &, NumberType, const VectorType &, NumberType,
@@ -174,6 +187,7 @@ namespace DiFfRG
         return result;
       }
 
+      /// Mean wall time of residual_variables, in seconds.
       double average_time_residual_assembly() const
       {
         double t = 0.;
@@ -184,6 +198,7 @@ namespace DiFfRG
       }
       uint num_residuals() const { return timings_residual.size(); }
 
+      /// Mean wall time of jacobian_variables, in seconds.
       double average_time_jacobian_assembly() const
       {
         double t = 0.;

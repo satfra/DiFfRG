@@ -12,18 +12,49 @@
 #include <DiFfRG/common/utils.hh>
 #include <DiFfRG/model/batch.hh>
 
+/**
+ * @file numflux.hh
+ * @brief Numerical flux mixins for the FEM assemblers: def::LLFFlux, def::NoNumFlux, def::LDGUpDownFluxes and
+ * def::FlowBoundaries.
+ *
+ * On a face between two cells, the solution has two values (traces): \f$u_s\f$ from the cell being assembled and
+ * \f$u_n\f$ from its neighbour, with \f$n\f$ the unit normal pointing out of the cell of \f$u_s\f$. A numerical flux
+ * \f$\hat F(u_s, u_n)\f$ replaces the model's flux \f$F\f$ there. A model inherits
+ * - for interior faces (DG, LDG main level): def::LLFFlux or def::NoNumFlux; CG has no interior face terms,
+ * - for the LDG levels: def::LDGUpDownFluxes,
+ * - for the domain boundary (CG, DG, LDG): def::FlowBoundaries.
+ *
+ * The KT assembler builds its own numerical flux and uses the mixins of fv_boundaries.hh instead.
+ */
+
 namespace DiFfRG
 {
   namespace def
   {
     using namespace dealii;
 
+    /**
+     * @brief Local Lax-Friedrichs (Rusanov) numerical flux on interior faces:
+     * \f[
+     *   \hat F_c = \tfrac{1}{2}\big(F_c(u_s) + F_c(u_n)\big) - \tfrac{1}{2}\,\alpha_c\,(u_{n,c} - u_{s,c})\, n\,,
+     * \f]
+     * per component \f$c\f$, with \f$\alpha_c\f$ the larger of \f$|\partial (F_c\cdot n)/\partial u_c|\f$ on the two
+     * traces, by finite differences. This is a per-component diagonal estimate, not the spectral radius of the full
+     * flux jacobian.
+     */
     template <typename Model> class LLFFlux
     {
       Model &asImp() { return static_cast<Model &>(*this); }
       const Model &asImp() const { return static_cast<const Model &>(*this); }
 
     public:
+      /**
+       * @brief The numerical flux at one face point.
+       * @param NF the result, one \f$d\f$-vector per FE function.
+       * @param normal unit normal pointing out of the cell of @p sol_s.
+       * @param p the face point.
+       * @param sol_s, sol_n the solution tuples of the two traces, as passed to the model's flux().
+       */
       template <int dim, typename NumberType, typename Solutions_s, typename Solutions_n, typename M = Model>
       void numflux(std::array<Tensor<1, dim, NumberType>, M::Components::count_fe_functions(0)> &NF,
                    const Tensor<1, dim> &normal, const Point<dim> &p, const Solutions_s &sol_s,
@@ -43,8 +74,7 @@ namespace DiFfRG
         const auto &u_s = get<0>(sol_s);
         const auto &u_n = get<0>(sol_n);
 
-        // A lengthy calculation for the diffusion
-        // we use FD here, as nested AD calculations would be quite the hassle
+        // The dissipation speed alpha by finite differences: nested AD would be a hassle.
         auto du_s = vector_to_array<Components::count_fe_functions(0), NumberType>(u_s);
         auto du_n = vector_to_array<Components::count_fe_functions(0), NumberType>(u_n);
         std::array<Tensor<1, dim, NumberType>, Components::count_fe_functions(0)> dflux_s{};
@@ -68,9 +98,8 @@ namespace DiFfRG
       }
 
       /**
-       * @brief numflux at all points of an interior-face batch: the same formula, with every flux it needs
-       * (both traces, and each trace with one component perturbed for the finite-difference wave speed)
-       * evaluated by ONE evaluate_batch call over 2 + 2 n_fe stacked copies of the traces.
+       * @brief numflux at all points of an interior-face batch. All fluxes it needs (both traces, and each trace
+       * with one component perturbed) come from a single evaluate_batch call over \f$2 + 2 N_f\f$ stacked copies.
        */
       template <typename Out, typename Normals, typename Batch>
       void numflux_batch(Out &out, const Normals &normals, const Batch &batch_s, const Batch &batch_n) const
@@ -134,20 +163,39 @@ namespace DiFfRG
       }
     };
 
+    /// LDGUpDownFluxes: take the flux from the cell on the + side (larger coordinate) of the face.
     constexpr uint from_right = 0;
+    /// LDGUpDownFluxes: take the flux from the cell on the - side (smaller coordinate) of the face.
     constexpr uint from_left = 1;
 
+    /// The numerical flux of one LDG level: `UpDownFlux<FlowDirections<...>, UpDown<...>>`.
     template <typename... T> struct UpDownFlux {
       template <uint i> using value = typename std::tuple_element<i, std::tuple<T...>>::type;
     };
+    /// Per component of an LDG level: the direction \f$d_i\f$ (0 to dim - 1) of its flux.
     template <int... n> struct FlowDirections {
       static constexpr std::array<int, sizeof...(n)> value{{n...}};
       static constexpr int size = sizeof...(n);
     };
+    /// Per component of an LDG level: def::from_right or def::from_left.
     template <int... n> struct UpDown {
       static constexpr std::array<int, sizeof...(n)> value{{n...}};
       static constexpr int size = sizeof...(n);
     };
+
+    /**
+     * @brief One-sided (up/down-wind) numerical fluxes for the LDG levels.
+     *
+     * `Collections` holds one def::UpDownFlux per LDG level k = 1, 2, ..., each listing per component i of level k
+     * a direction \f$d_i\f$ and a side. The numerical flux of component i is ldg_flux<k> evaluated on the trace of
+     * the chosen side, in direction \f$d_i\f$ only; its other directions are zero. Example, one level with one
+     * component \f$L_1 = \partial_x u\f$, taken from the right:
+     * @code
+     * template <typename Model>
+     * using LDGFluxes =
+     *     def::LDGUpDownFluxes<Model, def::UpDownFlux<def::FlowDirections<0>, def::UpDown<def::from_right>>>;
+     * @endcode
+     */
     template <typename Model, typename... Collections> class LDGUpDownFluxes
     {
       Model &asImp() { return static_cast<Model &>(*this); }
@@ -155,6 +203,7 @@ namespace DiFfRG
       template <int i> using C = typename std::tuple_element<i, std::tuple<Collections...>>::type;
 
     public:
+      /// The numerical flux of LDG level @p dependent at one face point; @p normal points out of the cell of @p u_s.
       template <uint dependent, int dim, typename NumberType, typename Solutions_s, typename Solutions_n,
                 typename M = Model>
       void ldg_numflux(std::array<Tensor<1, dim, NumberType>, M::Components::count_fe_functions(dependent)> &NF,
@@ -233,9 +282,11 @@ namespace DiFfRG
       }
     };
 
+    /// Zero numerical flux on interior faces.
     template <typename Model> class NoNumFlux
     {
     public:
+      /// Does nothing: @p NF stays zero.
       template <int dim, typename NumberType, typename Solutions_s, typename Solutions_n, typename M = Model>
       void numflux(std::array<Tensor<1, dim, NumberType>, M::Components::count_fe_functions(0)> &,
                    const Tensor<1, dim> &, const Point<dim> &, const Solutions_s &, const Solutions_n &) const
@@ -251,12 +302,17 @@ namespace DiFfRG
       }
     };
 
+    /**
+     * @brief Boundary flux = the model's own flux of the inner trace, i.e. the boundary does not constrain the flow
+     * (outflow). Also for the LDG levels, with ldg_flux.
+     */
     template <typename Model> class FlowBoundaries
     {
       Model &asImp() { return static_cast<Model &>(*this); }
       const Model &asImp() const { return static_cast<const Model &>(*this); }
 
     public:
+      /// The model's flux() at boundary point @p p with the inner solution @p sol.
       template <int dim, typename NumberType, typename Solutions, typename M = Model>
       void boundary_numflux(std::array<Tensor<1, dim, NumberType>, M::Components::count_fe_functions(0)> &F,
                             const Tensor<1, dim> & /*normal*/, const Point<dim> &p, const Solutions &sol) const
@@ -274,6 +330,7 @@ namespace DiFfRG
         asImp().evaluate_batch(out, batch);
       }
 
+      /// The model's ldg_flux<dependent> at boundary point @p p with the inner values @p u.
       template <uint dependent, int dim, typename NumberType, typename Solutions, typename M = Model>
       void
       ldg_boundary_numflux(std::array<Tensor<1, dim, NumberType>, M::Components::count_fe_functions(dependent)> &BNF,

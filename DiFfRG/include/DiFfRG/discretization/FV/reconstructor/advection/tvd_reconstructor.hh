@@ -25,20 +25,24 @@ namespace DiFfRG
   namespace def
   {
     /**
-     * @brief TVD gradient reconstructor parameterised by a slope limiter.
+     * @brief Slope-limited linear reconstruction on a rectangular mesh.
      *
-     * Computes piecewise-linear cell gradients on a rectangular mesh using
-     * two one-sided finite-difference slopes per dimension, each pair
-     * limited by the injected @c Limiter.
+     * Per direction \f$d\f$, the backward and forward slopes of cell \f$K\f$,
+     * \f$a = (\bar u_K - \bar u_{K^-})/(x_K - x_{K^-})_d\f$ and \f$b = (\bar u_{K^+} - \bar u_K)/(x_{K^+} - x_K)_d\f$
+     * with \f$K^-, K^+\f$ the lower and upper neighbours, give the cell slope
+     * \f$(g_K)_d\f$ = Limiter::slope_limit(a, b).
+     * The reconstruction is total variation diminishing (TVD) for a TVD limiter (all but CentralLimiter).
      *
-     * When the limiter satisfies the TVD property (e.g. @c MinModLimiter),
-     * the resulting reconstruction is Total Variation Diminishing.
+     * The gradient handed to the model at a point \f$x\f$ (compute_gradient_at_point) is, per direction, \f$a\f$ if
+     * \f$x\f$ lies below the centre, \f$b\f$ if above, and the limited slope if level with it (up to rounding). At a
+     * face this is the unlimited one-sided slope across the face in the normal direction, and the limited slope in
+     * the others.
      *
-     * @tparam dim          The spatial dimension of the reconstruction.
-     * @tparam Limiter      A type satisfying the @c HasSlopeLimiter concept
-     *                      (e.g. @c MinModLimiter).
-     * @tparam NumberType   The numeric type used for computations
-     *                      (e.g. @c double, @c float).
+     * Third derivatives (1D) are the divided difference of four cell averages.
+     *
+     * @tparam dim_ The spatial dimension.
+     * @tparam Limiter The slope limiter (def::HasSlopeLimiter), e.g. MinModLimiter.
+     * @tparam NumberType The scalar type of the cell averages.
      *
      * Usage with the KT assembler:
      * @code
@@ -53,6 +57,7 @@ namespace DiFfRG
     public:
       static constexpr int dim = dim_;
       static constexpr int n_faces = 2 * dim;
+      /// A face depends on its two cells and their face neighbours.
       static constexpr int jacobian_stencil_radius = 2;
 
     private:
@@ -68,25 +73,15 @@ namespace DiFfRG
       }
 
     public:
-
-      // Expose the Limiter type for use by other templates
+      /// The slope limiter.
       using LimiterType = Limiter;
       /**
-       * @brief Compute the gradient of u using the injected slope limiter.
+       * @brief The limited cell slope \f$g_K\f$, per component and direction.
        *
-       * For every component and every spatial dimension the method computes
-       * two one-sided slopes from the cell centre to its axis-aligned
-       * neighbours and returns the limiter-processed gradient.
-       *
-       * @tparam n_components the number of components in u
-       *
-       * @param center_pos  position of the cell centre
-       * @param u_center    solution values at the cell centre
-       * @param x_n         positions of the def::n_faces<dim> neighbouring cell centres,
-       *                    ordered as pairs (left, right) for dim 0, then dim 1, …
-       * @param u_n         solution values at those neighbours
-       *
-       * @return per-component gradient vector
+       * @param center_pos The cell centre.
+       * @param u_center The cell averages.
+       * @param x_n The centres of the \f$2d\f$ face neighbours, ordered (lower, upper) for direction 0, then 1.
+       * @param u_n Their cell averages (model ghosts across the boundary).
        */
       template <int n_components>
       static GradientType<dim, NumberType, n_components>
@@ -114,6 +109,8 @@ namespace DiFfRG
         return u_grad;
       }
 
+      /// The gradient handed to the model at @p x: per direction the one-sided slope towards @p x, or the limited
+      /// slope if @p x is level with the centre.
       template <int n_components>
       static GradientType<dim, NumberType, n_components>
       compute_gradient_at_point(const dealii::Point<dim> &center_pos, const dealii::Point<dim> &x,
@@ -147,24 +144,12 @@ namespace DiFfRG
       }
 
       /**
-       * @brief Compute the derivative of the limited gradient w.r.t. a single stencil DOF.
+       * @brief The derivative of compute_gradient by the one stencil value whose autodiff input is seeded.
        *
-       * The inputs are already seeded @c autodiff::Real<1,NumberType> values;
-       * exactly one entry across @p u_center and @p u_n should have a non-zero
-       * derivative part (set via @c seed()).
-       *
-       * Unlike @c compute_gradient, this method does not evaluate the
-       * reconstruction at a face point — it returns the per-component
-       * derivative of the gradient itself.
-       *
-       * @tparam n_components the number of solution components
-       *
-       * @param center_pos  position of the cell centre
-       * @param u_center    cell-centre values as seeded AD types
-       * @param x_n         positions of the def::n_faces<dim> neighbouring cell centres
-       * @param u_n         neighbour values as seeded AD types
-       *
-       * @return per-component gradient-derivative tensor  d(grad u_c) / d(u_target)
+       * @param center_pos The cell centre.
+       * @param u_center The cell averages, as autodiff numbers.
+       * @param x_n The centres of the \f$2d\f$ face neighbours.
+       * @param u_n Their cell averages, as autodiff numbers.
        */
       template <int n_components>
       static GradientType<dim, NumberType, n_components>
@@ -180,6 +165,7 @@ namespace DiFfRG
             center_pos, u_center, x_n, u_n));
       }
 
+      /// The derivative of compute_gradient_at_point by the one seeded stencil value.
       template <int n_components>
       static GradientType<dim, NumberType, n_components>
       compute_gradient_at_point_derivative(const dealii::Point<dim> &center_pos, const dealii::Point<dim> &x,
@@ -192,6 +178,7 @@ namespace DiFfRG
                 center_pos, x, u_center, x_n, u_n));
       }
 
+      /// In 1D, \f$u'''\f$ from the divided difference of the four cell averages around a face; zero otherwise.
       template <int n_components>
       static ThirdDerivativeType<dim, NumberType, n_components> compute_third_derivatives_at_face(
           const std::array<dealii::Point<dim>, 4> &x_stencil,
@@ -215,6 +202,7 @@ namespace DiFfRG
         return result;
       }
 
+      /// The derivative of compute_third_derivatives_at_face by the one seeded stencil value.
       template <int n_components>
       static ThirdDerivativeType<dim, NumberType, n_components> compute_third_derivatives_at_face_derivative(
           const std::array<dealii::Point<dim>, 4> &x_stencil,

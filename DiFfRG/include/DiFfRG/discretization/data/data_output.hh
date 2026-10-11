@@ -7,9 +7,7 @@ namespace DiFfRG
     template <typename> inline constexpr bool data_output_removed = false;
   }
 
-  /**
-   * One-release compile-time tombstone for the removed output coordinator.
-   */
+  /// Removed; use OutputSession. Naming it gives a compile error explaining the replacement.
   template <unsigned int dim, typename VectorType>
   class [[deprecated("DataOutput was removed. Construct OutputPath, then OutputSession<Assembler>, and pass the "
                      "session to the timestepper instead. For assembler callbacks, override "

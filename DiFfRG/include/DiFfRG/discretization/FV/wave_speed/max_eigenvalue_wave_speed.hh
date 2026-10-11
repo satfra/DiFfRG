@@ -13,16 +13,21 @@ namespace DiFfRG
   {
     namespace KurganovTadmor
     {
+      /// Which trace sets the wave speed: the one with the larger spectral radius, or both (a tie).
       enum class WaveSpeedBranch { plus, minus, average };
 
       /**
-       * @brief Default wave-speed strategy.
+       * @brief The default wave speed of FV::KurganovTadmor::Assembler,
+       * \f$a_d = \max\big(\rho(J^+_d), \rho(J^-_d)\big)\f$, with \f$\rho\f$ the spectral radius (largest eigenvalue modulus) of the flux jacobian
+       * \f$J^\pm_d = \partial F_d/\partial u\f$ on either trace.
        *
-       * compute_speeds: a[d] = max(spectral_radius(J_plus[d]), spectral_radius(J_minus[d]))
-       * compute_speed_derivatives: analytical derivative via eigenvector perturbation theory
-       * compute_selected_speed_derivatives: derivative for the branch selected by compute_speeds
+       * For one component \f$\rho = |J|\f$; for several, the eigenvalues are computed numerically (Eigen). The
+       * derivative for the jacobian is that of the selected trace (half of each at a tie), by first-order eigenvalue
+       * perturbation theory. For a dominant complex eigenvalue the derivative uses only the real parts of the
+       * eigenvectors, i.e. it is approximate.
        */
       struct MaxEigenvalueWaveSpeed {
+        /// \f$a_d = \max(\rho(J^+_d), \rho(J^-_d))\f$ per direction.
         template <typename NumberType, int dim, size_t n_components>
         static std::array<NumberType, dim>
         compute_speeds(const std::array<internal::JacobianMatrix<NumberType, n_components>, dim> &J_plus,
@@ -37,6 +42,7 @@ namespace DiFfRG
           return a;
         }
 
+        /// Per direction, which trace has the larger spectral radius.
         template <typename NumberType, int dim, size_t n_components>
         static std::array<WaveSpeedBranch, dim>
         select_speed_branches(const std::array<internal::JacobianMatrix<NumberType, n_components>, dim> &J_plus,
@@ -92,20 +98,15 @@ namespace DiFfRG
 
       public:
         /**
-         * @brief Compute da[d]/du_c analytically from J and H:
-         *   a[d] = spectral_radius(J[d])
-         *   da[d]/du_c = d(spectral_radius)/dJ[d] : H[d][:][:][ c]
+         * @brief \f$\partial \rho(J^\pm_d)/\partial u_c\f$ on each trace, from the flux hessian
+         * \f$H_{d,ijc} = \partial^2 F_{d,i}/\partial u_j \partial u_c\f$.
          *
-         * For n_components == 1:
-         *   a[d] = |J[d][0][0]|,  da/du_c = sign(J[d][0][0]) * H[d][0][0][c]
+         * One component: \f$\mathrm{sgn}(J_d)\, H_{d,00c}\f$. Several: with \f$\lambda\f$ the eigenvalue of largest
+         * modulus and \f$v, w\f$ its right and left eigenvectors, \f$\mathrm{sgn}(\mathrm{Re}\,\lambda)
+         * \sum_{ij} \mathrm{Re}\,w_i\, \mathrm{Re}\,v_j\, H_{d,ijc} / \mathrm{Re}(w \cdot v)\f$ (exact for a real
+         * eigenvalue).
          *
-         * For n_components > 1:
-         *   Find the dominant eigenvalue lambda* and its right/left eigenvectors v, w
-         *   (Eigen EigenSolver).  Then by first-order eigenvalue perturbation theory:
-         *     da[d]/du_c = sign(Re(lambda*)) * sum_{i,j} Re(w[i]) * Re(v[j]) * H[d][i][j][c]
-         *                  / Re(w . v)
-         *
-         * @return {da_plus, da_minus}
+         * @return {derivatives on the + trace, derivatives on the - trace}
          */
         template <typename NumberType, int dim, size_t n_components>
         static std::pair<std::array<std::array<NumberType, n_components>, dim>,
@@ -170,6 +171,8 @@ namespace DiFfRG
           return {da_plus, da_minus};
         }
 
+        /// \f$\partial a_d/\partial u^\pm\f$: compute_speed_derivatives of the trace that sets \f$a_d\f$ (half each
+        /// at a tie), zero for the other.
         template <typename NumberType, int dim, size_t n_components>
         static std::pair<std::array<std::array<NumberType, n_components>, dim>,
                          std::array<std::array<NumberType, n_components>, dim>>

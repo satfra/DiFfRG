@@ -40,29 +40,23 @@ namespace DiFfRG
   };
 
   /**
-   * @brief A read-only snapshot of the discrete solution, one sample per active cell.
+   * @brief The solution sampled at the centre of every active cell; handed to a model's `extractor_point`.
    *
-   * Exists so a model can answer questions about the solution that are *not* pointwise. The EoM
-   * machinery in common/eom.hh drives everything from a pointwise field `EoM(x, u)`, which is
-   * enough to locate a minimum but cannot express a feature defined by comparing a cell with its
-   * neighbours -- a shock, a kink, the edge of a plateau. A model that needs one of those overrides
-   * `extractor_point` (see model/model.hh) and is handed one of these.
+   * Lets a model locate features defined by comparing neighbouring cells (a shock, a kink, the edge of a plateau),
+   * which the pointwise EoM field cannot express; see HasExtractorPoint.
    *
-   * Sampling is at cell centres, one entry per active cell, which is the resolution such features
-   * are defined at in the first place. Entries are sorted lexicographically by coordinate, so in
-   * one dimension they simply run left to right and neighbouring entries are neighbouring cells.
-   * In higher dimensions the ordering is well-defined but adjacency is the model's problem.
-   *
-   * Like the rest of discretization/common, this assumes the replicated-mesh rung: the mesh is
-   * whole on every rank and the solution reaches it through a SolutionView that holds every index,
-   * so the sample is built rank-locally and is identical on every rank without communicating.
+   * Entries are sorted lexicographically by their centre (first coordinate first). In one dimension they run left to
+   * right and neighbouring entries are neighbouring cells; in higher dimensions neighbouring entries need not be
+   * adjacent. The sample is identical on every MPI rank.
    */
   template <int dim, typename NumberType> class SolutionSample
   {
   public:
     using Entry = SolutionSampleEntry<dim, NumberType>;
 
+    /// An empty sample.
     SolutionSample() = default;
+    /// Take @p entries (each with @p n_components values and gradients) and sort them by centre.
     SolutionSample(std::vector<Entry> entries, const uint n_components)
         : entries(std::move(entries)), m_n_components(n_components)
     {
@@ -73,23 +67,25 @@ namespace DiFfRG
       });
     }
 
+    /// Number of entries, i.e. of active cells.
     size_t size() const { return entries.size(); }
+    /// Whether there are no entries.
     bool empty() const { return entries.empty(); }
+    /// Number of solution components per entry (the length of Entry::values and Entry::gradients).
     uint n_components() const { return m_n_components; }
 
+    /// The @p i-th entry in sorted order.
     const Entry &operator[](const size_t i) const { return entries[i]; }
+    /// Iterate over the entries in sorted order.
     auto begin() const { return entries.begin(); }
+    /// End of the entries.
     auto end() const { return entries.end(); }
 
     /**
-     * @brief Fill the gradients by central differences between neighbouring samples.
+     * @brief Replace the gradients by differences of neighbouring entries: central inside, one-sided at the ends.
      *
-     * For a builder that can supply values cheaply but not gradients -- a finite-volume assembler,
-     * whose piecewise-constant shape functions have none -- this recovers a usable gradient in O(n)
-     * without touching the scheme's reconstruction machinery. It is a plain difference, not the
-     * limited slope the scheme itself uses, so it is deliberately NOT what the flux path sees.
-     *
-     * Only meaningful in one dimension, where the sorted order is the mesh order; a no-op otherwise.
+     * One dimension only (a no-op otherwise). Used for FV solutions, whose cell-wise constant shape functions have
+     * no gradient. Unrelated to the limited slopes of the FV scheme.
      */
     void compute_central_difference_gradients()
     {
@@ -110,28 +106,18 @@ namespace DiFfRG
   };
 
   /**
-   * @brief Whether @p Model chooses its own point at which the extractors are evaluated.
+   * @brief Whether @p Model chooses the point at which its extractors are evaluated.
    *
-   * By default the extractors are evaluated at the EoM, i.e. the minimum of the potential
-   * reconstructed from `Model::EoM` (see discretization/common/eom.hh). A model that needs them
-   * somewhere else declares
+   * By default, Model::extract is evaluated at the EoM point (get_EoM_point_with_potential). A model that wants
+   * another point implements
    *
    * ```cpp
    * template <int dim, typename NT>
    * Point<dim> extractor_point(const Point<dim> &EoM, const SolutionSample<dim, NT> &sample) const;
    * ```
    *
-   * and returns whatever point it likes -- typically after inspecting @p sample for a feature that
-   * is not expressible pointwise, such as a shock or a kink. Returning @p EoM reproduces the
-   * default exactly.
-   *
-   * This affects `Model::extract` only. `Model::readouts` keeps being evaluated at the EoM supplied
-   * by `readouts_multiple`, so a model can report at the minimum while feeding its Variables from
-   * somewhere else entirely.
-   *
-   * Note that DiFfRG::def::AbstractModel deliberately provides no default implementation: the
-   * absence of the method is what this concept detects, and it is what lets an assembler skip
-   * building the sample for the models -- almost all of them -- that do not need one.
+   * and returns it; returning @p EoM gives the default. Only extract() is affected; the readouts stay at their EoM.
+   * def::AbstractModel has no default implementation, so the sample is built only for models that declare one.
    */
   template <typename Model, int dim, typename NumberType>
   concept HasExtractorPoint = requires(const Model &model, const dealii::Point<dim> &EoM,
@@ -140,13 +126,11 @@ namespace DiFfRG
   };
 
   /**
-   * @brief Build a SolutionSample, taking values and gradients from a callback.
+   * @brief Build a SolutionSample over the active cells of @p dof_handler, with values and gradients from @p fill.
    *
-   * The geometry -- which cells, where their centres are, how wide they are, and the ordering --
-   * is fixed here; @p fill only has to say what the solution is at a given cell centre. This is
-   * what lets a finite-volume assembler contribute reconstructed gradients (its DG0 shape
-   * functions have none) without duplicating any of the traversal.
-   *
+   * @param dof_handler Its active cells are the cells of the sample.
+   * @param mapping Maps the reference cell to the cells, for the sample points.
+   * @param n_components Number of components sampled per point.
    * @param fill `void(cell, point, std::vector<NumberType> &values, std::vector<Tensor<1,dim,NumberType>> &gradients)`,
    *             with both output vectors pre-sized to @p n_components.
    */
@@ -172,11 +156,8 @@ namespace DiFfRG
   }
 
   /**
-   * @brief Build a SolutionSample by evaluating the finite-element solution at each cell centre.
-   *
-   * The general path, correct for any continuous or discontinuous element. Note that for a DG0
-   * (finite-volume) solution the gradients come out identically zero, because the shape functions
-   * are constant -- such an assembler should reconstruct them and use the callback overload above.
+   * @brief Build a SolutionSample by evaluating the FE solution at each cell centre. For a cell-wise constant (DG0/FV)
+   * solution the gradients are zero.
    */
   template <int dim, typename VectorType>
   SolutionSample<dim, typename VectorType::value_type>

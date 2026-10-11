@@ -15,6 +15,7 @@ namespace DiFfRG
 
   namespace internal
   {
+    /// Compile-time check that a readout helper takes (id, EoM, outputter).
     template <typename... Args> constexpr void validate_readout_helper_arity()
     {
       static_assert(sizeof...(Args) == 3,
@@ -24,47 +25,66 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief This is the general assembler interface for any kind of discretization.
-   * An assembler is responsible for calculating residuals and their jacobians for any given discretization, including
-   * both the spatial part and any further variables. Any assembler for a specific spatial discretization must fully
-   * implement this interface.
+   * @brief Interface shared by all assemblers (CG, DG, LDG, FV, variables only).
    *
-   * In general, we have either a system of differential and algebraic equations which can be written as
-   * \f[\large
-   * m_i(u, \partial_t u) + \partial_x F_i(u, \dots) + s_i(u, \dots) = 0\,,i\in \{0, \dots, N_f-1\}\,,
+   * An assembler turns a discretization and a model into the vectors and matrices a timestepper needs: the mass
+   * term, the residual and their Jacobians with respect to the degrees of freedom (dofs). Timesteppers only talk to
+   * this interface.
+   *
+   * ### Equation
+   * The model describes \f$N_f\f$ fields \f$u_i(x)\f$, \f$x \in \Omega \subset \mathbb{R}^{dim}\f$, through
+   * \f[
+   *   m_i(u, \partial_t u) + \nabla\cdot F_i(u, \nabla u, \dots) + s_i(u, \nabla u, \dots) = 0\,,
+   *   \qquad i = 0, \dots, N_f - 1\,,
    * \f]
-   * or a system of differential equations which can be written as
-   * \f[\large
-   * m_{ij}\partial_t u_j + \partial_x F_i(u, \dots) + s_i(u, \dots) = 0\,,i\in \{0, \dots, N_f-1\}\,.
+   * with mass \f$m_i\f$ (Model::mass), flux \f$F_i\f$ (a vector in \f$\mathbb{R}^{dim}\f$, Model::flux) and source
+   * \f$s_i\f$ (Model::source). For an ordinary flow, \f$m_i = \sum_j M_{ij}\,\partial_t u_j\f$ is linear in
+   * \f$\partial_t u\f$; components with \f$\partial m_i / \partial(\partial_t u) = 0\f$ are algebraic constraints.
+   *
+   * Multiplying with a test function \f$\phi\f$ (one per dof) and integrating the flux by parts gives the
+   * residual this interface assembles,
+   * \f[
+   *   r_\phi = w_m \int_\Omega m\,\phi
+   *         + w_r \Big[ \int_\Omega \big( s\,\phi - F\cdot\nabla\phi \big)
+   *         + \int_{\partial\Omega} (\widehat F\cdot n)\,\phi
+   *         + \sum_{\text{interior faces } f} \int_f (\widehat F\cdot n_f)\,[\![\phi]\!] \Big]\,,
    * \f]
-   * Here, \f$u_i\f$ is the solution vector, \f$\partial_t u_i\f$ is the time derivative of the solution vector,
-   * \f$m_i\f$ is the mass function and \f$m_{ij}\f$ the mass matrix, \f$F_i\f$ is called the flux, and \f$s_i\f$ is the
-   * source term. We will henceforth call the first equation a **DAE** (differential algebraic equation) and the second
-   * equation an **ODE** (ordinary differential equation).
+   * where \f$w_m\f$, \f$w_r\f$ are weights chosen by the timestepper, \f$n\f$ is the outward unit normal,
+   * \f$\widehat F\f$ is the numerical flux on a face (Model::boundary_numflux on \f$\partial\Omega\f$) and
+   * \f$[\![\phi]\!]\f$ is the jump of \f$\phi\f$ across the face \f$f\f$ with normal \f$n_f\f$. The
+   * interior-face sum is present only for discontinuous spaces (DG, LDG); the FV assembler builds the analogous
+   * cell-average balance. The flow is then \f$r(u, \partial_t u) = 0\f$.
    *
-   * For more information, please also refer to the Numerical Models guide in the documentation and the documentation
-   * of DiFfRG::def::AbstractModel.
+   * Methods that take \f$\partial_t u\f$ explicitly evaluate \f$m(u, \partial_t u)\f$. The convenience overloads
+   * without it pass \f$u\f$ in place of \f$\partial_t u\f$: for a mass linear in \f$\partial_t u\f$ they
+   * compute \f$M u\f$ (and its Jacobian \f$M\f$), which is what explicit steppers need.
    *
-   * The second equation is used in all residual and jacobian functions which do not take the time derivative as an
-   * explicit argument, while the first equation is used in all other methods.
+   * Additional scalar *variables* \f$v\f$ (Model::dt_variables) are handled by residual_variables and
+   * jacobian_variables.
    *
-   * @tparam VectorType The vector type used in the spatial discretization
-   * @tparam dim The dimension of the spatial discretization
+   * @tparam VectorType Vector type of the dofs (e.g. dealii::Vector<double>).
+   * @tparam SparseMatrixType Matrix type of the Jacobians.
+   * @tparam dim Spatial dimension.
    */
   template <typename VectorType, typename SparseMatrixType, uint dim> class AbstractAssembler
   {
   public:
     using NumberType = typename get_type::NumberType<VectorType>;
 
-    /** Return aggregate assembly statistics for the run summary. */
+    /// Aggregate assembly statistics for the run summary.
     virtual SummaryEvent summary() const { return {}; }
 
     /**
-     * @brief Contribute the assembler's fields and model readouts to one scoped output frame.
+     * @brief Write the FE functions and the model's readouts into one output frame.
      *
-     * @param data_out The current output frame
-     * @param solution The spatial solution vector
-     * @param variables The additional variables vector
+     * The FE functions appear under their names from the model's ComponentDescriptor; if given, their time
+     * derivatives and residuals are added as `<name>_dot` and `<name>_residual`.
+     *
+     * @param data_out The current output frame.
+     * @param solution The spatial solution.
+     * @param variables The additional variables (empty if the model has none).
+     * @param dt_solution \f$\partial_t u\f$; empty to skip the `<name>_dot` fields.
+     * @param residual The residual vector; empty to skip the `<name>_residual` fields.
      */
     virtual void attach_data_output(OutputFrame<dim, VectorType> &data_out, const VectorType &solution,
                                     const VectorType &variables = VectorType(),
@@ -76,105 +96,86 @@ namespace DiFfRG
                        const VectorType & = VectorType(), const VectorType & = VectorType()) = delete;
 
     /**
-     * @brief Reinitialize the assembler. This is necessary if the mesh has changed, e.g. after a mesh refinement.
-     *
+     * @brief Rebuild all mesh-dependent data. Required after the mesh changed (e.g. adaptive refinement).
      */
     virtual void reinit() = 0;
 
     /**
-     * @brief Set the current time. The assembler should usually just forward this to the numerical model.
-     *
-     * @param t The current time
+     * @brief Set the current RG time \f$t\f$; forwarded to the model.
      */
     virtual void set_time(double t) = 0;
 
     /**
-     * @brief Obtain the sparsity pattern of the jacobian matrix.
+     * @brief The sparsity pattern of the Jacobian.
      *
-     * @return const SparsityPattern<VectorType>& The sparsity pattern of the jacobian matrix
+     * @return The pattern, of type get_type::SparsityPattern<SparseMatrixType>.
      */
     virtual const get_type::SparsityPattern<SparseMatrixType> &get_sparsity_pattern_jacobian() const = 0;
 
     /**
-     * @brief Obtain the dofs which contain time derivatives.
-     *
-     * @return IndexSet The indices of the dofs which contain time derivatives
+     * @brief The dofs whose equation contains a time derivative; all others, and all constrained dofs, are algebraic.
      */
     virtual IndexSet get_differential_indices() const = 0;
 
     /**
-     * @brief Per-dof absolute tolerances for an implicit (IDA) time stepper.
+     * @brief Per-dof absolute tolerances for the implicit (IDA) timesteppers.
      *
-     * The uniform /timestepping/implicit/abs_tol treats every dof alike. A model whose components live on very
-     * different scales -- e.g. small expansion coefficients that only ever enter added to a much larger
-     * quantity -- can instead set an absolute tolerance per dof through the model hook `abs_tolerances` (see
-     * def::HasAbsTolerances). The tolerances may depend on the state; the IDA steppers re-read them (a warm restart
-     * of IDA) whenever some dof needs a tighter one by more than /timestepping/implicit/local_tolerance_refresh.
+     * Instead of the uniform `/timestepping/implicit/abs_tol`, a model can set one absolute tolerance per dof through
+     * the hook `abs_tolerances` (def::HasAbsTolerances), useful when components live on very different scales. The
+     * tolerances may depend on the state; the IDA steppers re-read them when some dof needs a tolerance tighter by more
+     * than the factor `/timestepping/implicit/local_tolerance_refresh`.
      *
-     * @param atol     Output, sized and filled by the assembler when it returns true.
-     * @param solution The current (spatial) solution.
-     * @return false if the assembler or model does not provide local tolerances; the stepper then uses abs_tol.
+     * @param atol Output; sized and filled when the function returns true.
+     * @param solution The current spatial solution.
+     * @param abs_tol The stepper's uniform absolute tolerance, passed on to the model hook.
+     * @param rel_tol The stepper's relative tolerance, passed on to the model hook.
+     * @return false if the assembler or model provides no per-dof tolerances; the stepper then uses abs_tol.
      */
-    virtual bool local_abs_tolerances(VectorType & /*atol*/, const VectorType & /*solution*/, double /*abs_tol*/,
-                                      double /*rel_tol*/) const
+    virtual bool local_abs_tolerances([[maybe_unused]] VectorType &atol, [[maybe_unused]] const VectorType &solution,
+                                      [[maybe_unused]] double abs_tol, [[maybe_unused]] double rel_tol) const
     {
       return false;
     }
 
     /**
-     * @brief Reinitialize an arbitrary vector so that it has the correct size and structure.
-     *
-     * @param vector The vector to be reinitialized
+     * @brief Resize @p vector to the dofs of this discretization (with the parallel layout, if distributed).
      */
     virtual void reinit_vector(VectorType &vector) const = 0;
 
     /**
-     * @brief Reinitialize a matrix to the jacobian's sparsity pattern.
-     *
-     * The counterpart of reinit_vector, and it exists for the same reason: callers must not build
-     * the object themselves. `SparseMatrixType m(get_sparsity_pattern_jacobian())` is fine for a
-     * serial matrix and impossible for a distributed one, which needs the owned row set and a
-     * communicator as well -- neither of which a timestepper has any business knowing. Routing
-     * this through the assembler keeps the timesteppers policy-agnostic.
+     * @brief Reinitialize @p matrix with the Jacobian's sparsity pattern (and parallel layout, if distributed).
      */
     virtual void reinit_matrix(SparseMatrixType &matrix) const = 0;
 
     /**
-     * @brief The communicator this assembler's linear algebra lives on.
-     *
-     * MPI_COMM_SELF for a serial discretization, so callers never branch on the build type.
+     * @brief The MPI communicator of the linear algebra; MPI_COMM_SELF for a serial discretization.
      */
     virtual MPI_Comm get_communicator() const = 0;
 
     /**
-     * @brief Establish the layout of a fully-replicated read-only view of the solution.
-     *
-     * Output, the EoM search and the potential solves all read arbitrary global dof indices, which
-     * a vector holding only this rank's rows cannot answer. Refreshing one of these before handing
-     * it to them keeps all of that code unchanged. See SolutionView.
+     * @brief Set up @p view as a read-only copy of the solution in which every global dof is readable on every
+     * rank. Used by output and the EoM search; see SolutionView.
      */
     virtual void reinit_solution_view(SolutionView<VectorType> &view) const = 0;
 
     /**
-     * @brief Obtain the mass matrix.
-     *
-     * @return const SparseMatrixType& The mass matrix
+     * @brief The mass matrix \f$M_{\phi\psi} = \int_\Omega \phi\,\psi\f$ of the test functions.
      */
     virtual const SparseMatrixType &get_mass_matrix() const = 0;
 
     /**
      * @name Flow snapshots
      *
-     * Used by AbstractTimestepper::run to write and restore snapshots of a flow. The defaults make
-     * an assembler that does not implement them fail loudly only when snapshots are actually used.
+     * Used by AbstractTimestepper::run to write and restore snapshots. The defaults throw, so an assembler without
+     * snapshot support fails only when snapshots are requested.
      */
     //@{
 
     /**
-     * @brief Record the spatial state in a dof-numbering independent layout.
+     * @brief Record the spatial state (mesh and values) independently of the dof numbering.
      *
-     * @param spatial_replica A vector from which every global dof can be read (a refreshed
-     * SolutionView). Only reads, so it may be called on the writer rank alone.
+     * @param spatial_replica A vector in which every global dof is readable (a refreshed SolutionView). Read-only,
+     * so it may be called on the writing rank alone.
      */
     virtual SnapshotSpatialState capture_snapshot_state([[maybe_unused]] const VectorType &spatial_replica) const
     {
@@ -182,8 +183,8 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Rebuild the snapshot's mesh if it differs from the current one, reinitialize, and
-     * fill @p spatial with the snapshot's values. Collective: called on every rank.
+     * @brief Rebuild the snapshot's mesh if it differs from the current one, reinitialize, and fill @p spatial with
+     * the snapshot's values. Collective: call on every rank.
      */
     virtual void restore_snapshot_state([[maybe_unused]] const SnapshotSpatialState &state,
                                         [[maybe_unused]] VectorType &spatial)
@@ -191,10 +192,10 @@ namespace DiFfRG
       throw std::runtime_error("This assembler does not support restarting from flow snapshots.");
     }
 
-    /** @brief Let the model add its history-dependent state; see ModelState. */
+    /// Let the model store its history-dependent state (Model::save_state); see ModelState.
     virtual void save_model_state([[maybe_unused]] ModelState &state) const {}
 
-    /** @brief Hand restored state to the model. @return whether the model implements load_state. */
+    /// Hand restored state to the model (Model::load_state). @return whether the model implements load_state.
     virtual bool load_model_state([[maybe_unused]] const ModelState &state) { return false; }
     //@}
 
@@ -204,12 +205,12 @@ namespace DiFfRG
     //@{
 
     /**
-     * @brief When coupling the spatial discretization to additional variables, this function should calculate the
-     * residual for the additional variables.
+     * @brief Residual of the variables, \f$D(v, u)\f$ = Model::dt_variables, evaluated with the extractors at
+     * the EoM point. Note the convention: the variables obey \f$\partial_t v + D(v, u) = 0\f$.
      *
-     * @param residual The residual vector of the additional variables
-     * @param variables The current additional variables vector
-     * @param spatial_solution The spatial solution vector, which is needed for the calculation of the residual
+     * @param residual Output, one entry per variable.
+     * @param variables The current variables \f$v\f$.
+     * @param spatial_solution The spatial solution \f$u\f$.
      */
     virtual void residual_variables([[maybe_unused]] VectorType &residual, [[maybe_unused]] const VectorType &variables,
                                     [[maybe_unused]] const VectorType &spatial_solution)
@@ -218,12 +219,11 @@ namespace DiFfRG
     };
 
     /**
-     * @brief When coupling the spatial discretization to additional variables, this function should calculate the
-     * jacobian for the additional variables.
+     * @brief Jacobian \f$\partial D / \partial v\f$ of the variables' residual.
      *
-     * @param jacobian The jacobian matrix of the additional variables
-     * @param variables The current additional variables vector
-     * @param spatial_solution The spatial solution vector, which is needed for the calculation of the jacobian
+     * @param jacobian Output, a square matrix of size n_variables.
+     * @param variables The current variables \f$v\f$.
+     * @param spatial_solution The spatial solution \f$u\f$.
      */
     virtual void jacobian_variables([[maybe_unused]] FullMatrix<NumberType> &jacobian,
                                     [[maybe_unused]] const VectorType &variables,
@@ -233,13 +233,10 @@ namespace DiFfRG
     };
 
     /**
-     * @brief Calculates the mass \f$m_i(u)\f$ for an **ODE**.
+     * @brief Mass term with @p solution_global in place of \f$\partial_t u\f$, i.e.
+     * \f$w_m \int_\Omega m(u, u)\,\phi\f$. For a mass linear in \f$\partial_t u\f$ this is \f$w_m\,M u\f$.
      *
-     * This function calculates the mass as \f$ w_m \, \int_\Omega\, m_ij \partial_t u_j \phi_i\f$.
-     *
-     * @param mass The mass vector to be filled
-     * @param solution_global The spatial solution vector
-     * @param weight The weight for the mass \f$ w_m \f$
+     * Calls mass(mass, solution_global, solution_global, weight).
      */
     void mass(VectorType &mass, const VectorType &solution_global, NumberType weight)
     {
@@ -247,35 +244,21 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Calculates the mass \f$m(u, \partial_t u)\f$ for a **DAE**.
+     * @brief Mass term \f$w_m \int_\Omega m(u, \partial_t u)\,\phi\f$, one entry per test function \f$\phi\f$.
      *
-     * This function calculates the mass as \f$ w_m \, \int_\Omega\, m_i(u_j, \partial_t u_j) \phi_i\f$.
-     *
-     * @param mass The mass vector to be filled
-     * @param solution_global The spatial solution vector
-     * @param solution_global_dot The spatial solution vector time derivative
-     * @param weight The weight for the mass \f$ w_m \f$
+     * @param mass Output vector.
+     * @param solution_global The spatial solution \f$u\f$.
+     * @param solution_global_dot Its time derivative \f$\partial_t u\f$.
+     * @param weight The weight \f$w_m\f$.
      */
     virtual void mass(VectorType &mass, const VectorType &solution_global, const VectorType &solution_global_dot,
                       NumberType weight) = 0;
 
     /**
-     * @brief Calculates the residual for an **ODE**.
+     * @brief Residual \f$r_\phi\f$ (see the class description) with @p solution_global in place of
+     * \f$\partial_t u\f$ in the mass term.
      *
-     * This function calculates the sum
-     * \f[\large
-     *    \int_\Omega\, \bigg(w_m m_ij \partial_t u_j \phi_i - w_r F_i(u_j, \dots) \partial_x \phi_i + w_r s_i(u_j,
-     * \dots) \phi_i \bigg)
-     *    + \int_{\partial\Omega}\, w_r \widehat{F}_i(u_j, \dots) \phi_i
-     * \f].
-     *
-     * Here, \f$w_r\f$ is the residual weight, \f$w_m\,\,\f$ is the weight for the mass, and \f$\widehat{F}_i\f$
-     * are any boundary terms picked up by the partial integration of the flux.
-     *
-     * @param residual The residual vector to be filled
-     * @param solution_global The spatial solution vector
-     * @param weight The weight for the residual \f$ w_r \f$
-     * @param weight_mass The weight for the mass \f$ w_m \f$
+     * Calls residual(residual, solution_global, weight, solution_global, weight_mass, variables).
      */
     void residual(VectorType &residual, const VectorType &solution_global, NumberType weight, NumberType weight_mass,
                   const VectorType &variables = VectorType())
@@ -284,39 +267,24 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Calculates the residual for a **DAE**.
+     * @brief Residual \f$r_\phi\f$ of the class description: mass, flux, source and face terms.
      *
-     * This function calculates the sum
-     * \f[\large
-     *    \int_\Omega\, \bigg(w_m m_i(u_j, \partial_t u_j) \phi_i - w_r F_i(u_j, \dots) \partial_x \phi_i + w_r s_i(u_j,
-     * \dots) \phi_i \bigg)
-     *    + \int_{\partial\Omega}\, w_r \widehat{F}_i(u_j, \dots) \phi_i
-     * \f].
-     *
-     * Here, \f$w_r\f$ is the residual weight, \f$w_m\,\,\f$ is the weight for the mass, and \f$\widehat{F}_i\f$
-     * are the boundary terms picked up by the partial integration of the  flux.
-     *
-     * @param residual The residual vector to be filled
-     * @param solution_global The spatial solution vector
-     * @param weight The weight for the residual \f$ w_r \f$
-     * @param solution_global_dot The spatial solution vector time derivative
-     * @param weight_mass The weight for the mass \f$ w_m \f$
+     * @param residual Output vector.
+     * @param solution_global The spatial solution \f$u\f$.
+     * @param weight The weight \f$w_r\f$ of flux and source.
+     * @param solution_global_dot Its time derivative \f$\partial_t u\f$.
+     * @param weight_mass The weight \f$w_m\f$ of the mass.
+     * @param variables The variables \f$v\f$, on which flux and source may depend; empty if none.
      */
     virtual void residual(VectorType &residual, const VectorType &solution_global, NumberType weight,
                           const VectorType &solution_global_dot, NumberType weight_mass,
                           const VectorType &variables = VectorType()) = 0;
 
     /**
-     * @brief Calculates the jacobian of the mass function for an **ODE**.
+     * @brief Adds \f$w_m\,\partial m / \partial(\partial_t u)\f$ to @p jacobian, evaluated with @p solution_global
+     * in place of \f$\partial_t u\f$. For a mass linear in \f$\partial_t u\f$ this is \f$w_m M\f$.
      *
-     * This function calculates the jacobian of the mass, i.e.
-     * \f[\large
-     * w_m\, \int_\Omega\,  m_{ij} \phi_i
-     * \f].
-     *
-     * @param jacobian The jacobian matrix to be filled. This function adds to the matrix.
-     * @param solution_global The spatial solution vector
-     * @param mass_weight The weight for the mass \f$ w_m \f$
+     * Calls jacobian_mass(jacobian, solution_global, solution_global, mass_weight, 0).
      */
     void jacobian_mass(SparseMatrixType &jacobian, const VectorType &solution_global, NumberType mass_weight = 1.)
     {
@@ -324,32 +292,26 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Calculates the jacobian of the mass function for a **DAE**.
+     * @brief Adds the Jacobian of the mass term to @p jacobian:
+     * \f[
+     *   \alpha \int_\Omega \frac{\partial m}{\partial(\partial_t u_\psi)}\,\phi
+     *   + \beta \int_\Omega \frac{\partial m}{\partial u_\psi}\,\phi\,,
+     * \f]
+     * row \f$\phi\f$, column \f$\psi\f$ (dof with coefficient \f$u_\psi\f$).
      *
-     * This function calculates the jacobian of the mass, i.e.
-     * \f[\large
-     * \alpha\, \int_\Omega\, \frac{\partial m_i(u_k, \partial_t u_k)}{\partial (\partial_t u_j)} \phi_i
-     * + \beta\, \int_\Omega\, \frac{\partial m_i(u_k, \partial_t u_k)}{\partial u_j} \phi_i
-     * \f].
-     *
-     * @param jacobian The jacobian matrix to be filled. This function adds to the matrix.
-     * @param solution_global The spatial solution vector
-     * @param solution_global_dot The spatial solution vector time derivative
-     * @param alpha The weight \f$ \alpha \f$ for the derivative with respect to \f$ \partial_t \f$
-     * @param beta The weight \f$ \beta \f$ for the derivative with respect to \f$ u \f$
+     * @param jacobian Matrix to add to.
+     * @param solution_global The spatial solution \f$u\f$.
+     * @param solution_global_dot Its time derivative \f$\partial_t u\f$.
+     * @param alpha Weight of the derivative with respect to \f$\partial_t u\f$.
+     * @param beta Weight of the derivative with respect to \f$u\f$.
      */
     virtual void jacobian_mass(SparseMatrixType &jacobian, const VectorType &solution_global,
                                const VectorType &solution_global_dot, NumberType alpha = 1., NumberType beta = 1.) = 0;
 
     /**
-     * @brief Calculates the jacobian of the residual function for an **ODE**.
+     * @brief Jacobian of residual(residual, solution_global, weight, mass_weight, variables): adds to @p jacobian.
      *
-     *
-     *
-     * @param jacobian
-     * @param solution_global
-     * @param weight
-     * @param mass_weight
+     * Calls jacobian(jacobian, solution_global, weight, solution_global, mass_weight, mass_weight, variables).
      */
     void jacobian(SparseMatrixType &jacobian, const VectorType &solution_global, NumberType weight,
                   NumberType mass_weight, const VectorType &variables = VectorType())
@@ -358,14 +320,18 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Calculates the jacobian of the residual function for a **DAE**.
+     * @brief Adds the Jacobian of the residual with respect to \f$u\f$ to @p jacobian:
+     * the mass part as in jacobian_mass (weights \f$\alpha\f$, \f$\beta\f$) plus @p weight times the derivative of
+     * the flux, source and face terms. For an implicit step, \f$\alpha\f$ is the factor in
+     * \f$\partial(\partial_t u)/\partial u\f$ set by the time discretization.
      *
-     * @param jacobian
-     * @param solution_global
-     * @param weight
-     * @param solution_global_dot
-     * @param alpha
-     * @param beta
+     * @param jacobian Matrix to add to.
+     * @param solution_global The spatial solution \f$u\f$.
+     * @param weight The weight \f$w_r\f$ of flux and source.
+     * @param solution_global_dot Its time derivative \f$\partial_t u\f$.
+     * @param alpha Weight of \f$\partial m / \partial(\partial_t u)\f$.
+     * @param beta Weight of \f$\partial m / \partial u\f$.
+     * @param variables The variables \f$v\f$; empty if none.
      */
     virtual void jacobian(SparseMatrixType &jacobian, const VectorType &solution_global, NumberType weight,
                           const VectorType &solution_global_dot, NumberType alpha, NumberType beta,

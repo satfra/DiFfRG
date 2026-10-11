@@ -23,16 +23,39 @@
 #include <utility>
 #include <vector>
 
+/**
+ * @file batch.hh
+ * @brief What a model's evaluate_batch() sees: the input PointBatch, the output BatchOutput, and Term.
+ *
+ * The assemblers evaluate the model at many points at once (all quadrature points of many cells, or all points of
+ * many faces). Inputs and outputs are stored component-major with the points fastest: `batch.values(c)` is one
+ * contiguous column over all points, a PointSpan that can be handed directly to an integrator's map_points() as a
+ * per-point argument. Point i is the same point in every input and output column.
+ * @code
+ * template <typename Out, typename Batch> void evaluate_batch(Out &out, const Batch &batch) const
+ * {
+ *   // one integral per point; arguments as declared by the generated integrator (here k and u),
+ *   // cf. Examples/ONfiniteT/model_batched.hh
+ *   if (out.requested(Term::flux)) integrator.map_points(out.flux(idx("u"), 0), k, batch.values(idx("u")));
+ *   if (out.requested(Term::source))
+ *     for (size_t i = 0; i < batch.size(); ++i)
+ *       out.source(idx("u"))[i] = -2. * batch.values(idx("u"))[i];
+ * }
+ * @endcode
+ * The rest of this file (namespace internal) is assembler plumbing: the per-point fallbacks and the seed-stacked
+ * AD jacobians of def::AD / def::FE_AD.
+ */
+
 namespace DiFfRG
 {
   /**
-   * @brief The per-point solution tuple the per-point model callbacks (flux, source, numflux, boundary_numflux and
-   * their jacobians) receive from a batched FEM assembler. It holds only the inputs the assembler gathered:
-   * - values only (DG, or batch_reads_derivatives = false): "fe_functions", "extractors", "variables", "cell_width"
-   * - with derivatives (batch_reads_hessians = false): "fe_functions", "fe_derivatives", "extractors", ...
-   * - with derivatives and hessians: "fe_functions", "fe_derivatives", "fe_hessians", "extractors", ...
+   * @brief The named tuple the per-point callbacks (flux, source, numflux, boundary_numflux and their jacobians)
+   * receive from CG and DG. It holds only the inputs the assembler gathered:
+   * - `batch_reads_derivatives = false`: "fe_functions", "extractors", "variables", "cell_width"
+   * - `batch_reads_hessians = false`: "fe_functions", "fe_derivatives", "extractors", "variables", "cell_width"
+   * - otherwise: "fe_functions", "fe_derivatives", "fe_hessians", "extractors", "variables", "cell_width"
    *
-   * A model that reads an entry its assembler does not provide therefore fails to compile.
+   * "cell_width" is the width of the cell the point belongs to. Reading an entry that is not there does not compile.
    */
   template <bool with_derivatives, bool with_hessians, typename... T> auto batch_tie(T &&...t)
   {
@@ -50,10 +73,11 @@ namespace DiFfRG
   }
 
   /**
-   * @brief The terms a batch evaluation (Model::evaluate_batch) can produce. The assembler requests only
-   * those it uses, e.g. `Term::flux | Term::source` at cell points and `Term::flux` at faces.
+   * @brief The terms an evaluate_batch call can be asked for: BatchOutput::requested(). Typically
+   * `Term::flux | Term::source` at cell points, `Term::flux` at faces; KT asks for one term per call.
    */
   enum class Term : unsigned { flux = 1, source = 2, diffusion_flux = 4 };
+  /// Union of two sets of terms.
   constexpr Term operator|(const Term a, const Term b) { return Term(unsigned(a) | unsigned(b)); }
 
   namespace internal
@@ -89,20 +113,15 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief The FE solution at a set of points: values and (if gathered) derivatives and hessians of every
-   * FE function, plus the position and cell width of each point. Extractors and variables are shared by
-   * all points.
+   * @brief The solution at a set of points: values and (if gathered) derivatives and hessians of every FE
+   * function, plus position and cell width of each point. Extractors and variables are shared by all points.
    *
-   * Storage is component-major with the points fastest, so values(c), derivatives(c, d) and
-   * hessians(c, d1, d2) are contiguous columns (PointSpan) that can be passed directly as per-point
-   * arguments to an integrator's map_points().
+   * Columns are contiguous over the points (see batch.hh); the order of the points carries no meaning.
    *
-   * Point i means the same point in every column, and in every column of the output BatchOutput.
-   * The order of the points carries no meaning for the model.
-   *
-   * @tparam with_derivatives, with_hessians which inputs the assembler gathers. Reading one it does not gather
-   * (derivatives() / hessians(), or the matching entry of the per-point tuple) does not compile; a model
-   * shared between assemblers asks `if constexpr (Batch::has_derivatives)`.
+   * @tparam with_derivatives, with_hessians which inputs the assembler gathers. CG and DG gather what the model's
+   * `batch_reads_derivatives` / `batch_reads_hessians` ask for, KT always derivatives and hessians only with
+   * `source_uses_hessians`. Reading one that is not gathered does not compile; a model used with several
+   * assemblers tests `if constexpr (Batch::has_derivatives)`.
    */
   template <int dim_, typename NT, size_t n_fe, typename Extractors, typename Variables, bool with_derivatives,
             bool with_hessians>
@@ -111,10 +130,15 @@ namespace DiFfRG
     static_assert(with_derivatives || !with_hessians, "Hessians are only gathered together with derivatives.");
 
   public:
+    /// Dimension of the field space.
     static constexpr int dim = dim_;
+    /// Number of FE functions (columns per input kind).
     static constexpr size_t n_fe_functions = n_fe;
+    /// Whether derivatives() is available.
     static constexpr bool has_derivatives = with_derivatives;
+    /// Whether hessians() is available.
     static constexpr bool has_hessians = with_hessians;
+    /// double, or an AD type when the jacobian is computed.
     using number_type = NT;
     using extractors_type = Extractors;
     /// The same batch in another number type, e.g. for AD.
@@ -126,6 +150,7 @@ namespace DiFfRG
     /// Where tie() puts the extractors, i.e. the tuple index of the per-point extractor jacobians.
     static constexpr uint extractor_index = 1 + with_derivatives + with_hessians;
 
+    /// Assembler side: resize to @p n_points points.
     void reinit(const size_t n_points)
     {
       n = n_points;
@@ -134,6 +159,7 @@ namespace DiFfRG
       widths.resize(n);
     }
 
+    /// Assembler side: point the batch to the extractors and variables, which must outlive its use.
     void set_shared(const Extractors &extractors, const Variables &variables)
     {
       m_extractors = &extractors;
@@ -146,23 +172,27 @@ namespace DiFfRG
       m_variables = nullptr;
     }
 
+    /// Number of points.
     size_t size() const { return n; }
 
+    /// Values \f$u_c\f$ of FE function @p c at all points.
     PointSpan<const NT> values(const size_t c) const { return {column(value_column(c)), n}; }
-    /// Only if the assembler gathers derivatives (not under DG, nor with batch_reads_derivatives = false).
+    /// \f$\partial_d u_c\f$ at all points; only if `has_derivatives`.
     PointSpan<const NT> derivatives(const size_t c, const size_t d) const
       requires with_derivatives
     {
       return {column(derivative_column(c, d)), n};
     }
-    /// Only if the assembler gathers hessians (not under DG, nor with batch_reads_hessians = false).
+    /// \f$\partial_{d_1}\partial_{d_2} u_c\f$ at all points; only if `has_hessians`.
     PointSpan<const NT> hessians(const size_t c, const size_t d1, const size_t d2) const
       requires with_hessians
     {
       return {column(hessian_column(c, d1, d2)), n};
     }
+    /// Coordinate @p d of all points.
     PointSpan<const double> coordinates(const size_t d) const { return {positions.data() + d * n, n}; }
 
+    /// Position of point @p i.
     dealii::Point<dim> x(const size_t i) const
     {
       dealii::Point<dim> p;
@@ -170,9 +200,12 @@ namespace DiFfRG
         p[d] = positions[d * n + i];
       return p;
     }
+    /// Width of the cell containing point @p i.
     double cell_width(const size_t i) const { return widths[i]; }
 
+    /// The extractors \f$e_b\f$, the same for all points.
     const Extractors &extractors() const { return *m_extractors; }
+    /// The variables \f$v_a\f$, the same for all points.
     const Variables &variables() const { return *m_variables; }
 
     /// Point i as a State; only the gathered inputs are loaded.
@@ -286,12 +319,10 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief The solution at a set of points of an LDG main level: the values of the FE functions and of every
-   * LDG level, plus position and cell width; no derivatives. `values(c)` is FE function c, as in PointBatch,
-   * and `ldg_values(k, c)` component c of level k >= 1, both contiguous columns.
+   * @brief The batch of the LDG main level: values of the FE functions and of every LDG level, plus position and
+   * cell width; no derivatives. `values(c)` is FE function c, `ldg_values(k, c)` component c of level k >= 1.
    *
-   * Internally a PointBatch whose components are those of all levels in a row; seed-stacked AD therefore
-   * differentiates with respect to all levels at once.
+   * Internally a PointBatch over the components of all levels in a row, so the AD jacobian covers all levels.
    */
   template <int dim_, typename NT, typename Components, typename Extractors, typename Variables>
   class LDGPointBatch : public PointBatch<dim_, NT,
@@ -318,6 +349,7 @@ namespace DiFfRG
       return offset;
     }
 
+    /// Component @p c of LDG level @p k (k = 0: the FE functions) at all points.
     PointSpan<const NT> ldg_values(const uint k, const size_t c) const { return Base::values(level_offset(k) + c); }
     NT &ldg_value(const uint k, const size_t c, const size_t i) { return Base::value(level_offset(k) + c, i); }
 
@@ -347,15 +379,17 @@ namespace DiFfRG
   };
 
   /**
-   * @brief The requested terms (flux, source, diffusion flux) of every FE function at the points of a
-   * PointBatch, as contiguous columns (PointSpan). Only requested terms are stored, and asking for another one
-   * throws; reinit() zeroes them, so a model only writes what it computes.
+   * @brief The output of evaluate_batch: the requested terms of every FE function at all points of the batch, as
+   * contiguous columns (PointSpan). All columns are zero on entry, so a model writes only what it computes. Only
+   * requested terms are stored; accessing another one throws.
    */
   template <int dim, typename NT, size_t n_fe> class BatchOutput
   {
   public:
+    /// Number of output components (FE functions, or components of an LDG level).
     static constexpr size_t n_components = n_fe;
 
+    /// Assembler side: @p n_points points, storage for @p terms, all zero.
     void reinit(const size_t n_points, const Term terms)
     {
       n = n_points;
@@ -372,14 +406,18 @@ namespace DiFfRG
       diffusion_offset = place(Term::diffusion_flux, n_fe * dim);
       internal::parallel_assign(data, n * columns, NT(0));
     }
+    /// Number of points.
     size_t size() const { return n; }
     /// Whether the assembler asked for @p t; a model may skip computing anything else.
     bool requested(const Term t) const { return internal::contains(m_terms, t); }
 
+    /// Flux \f$F_c\f$ in direction @p d at all points.
     PointSpan<NT> flux(const size_t c, const size_t d) { return column(flux_offset, c * dim + d, "flux"); }
     PointSpan<const NT> flux(const size_t c, const size_t d) const { return column(flux_offset, c * dim + d, "flux"); }
+    /// Source \f$s_c\f$ at all points.
     PointSpan<NT> source(const size_t c) { return column(source_offset, c, "source"); }
     PointSpan<const NT> source(const size_t c) const { return column(source_offset, c, "source"); }
+    /// KT diffusion flux of component @p c in direction @p d at all points.
     PointSpan<NT> diffusion_flux(const size_t c, const size_t d)
     {
       return column(diffusion_offset, c * dim + d, "diffusion flux");
@@ -389,17 +427,20 @@ namespace DiFfRG
       return column(diffusion_offset, c * dim + d, "diffusion flux");
     }
 
+    /// Write the fluxes of all components at point @p i.
     void store_flux(const size_t i, const std::array<dealii::Tensor<1, dim, NT>, n_fe> &F)
     {
       for (size_t c = 0; c < n_fe; ++c)
         for (int d = 0; d < dim; ++d)
           flux(c, d)[i] = F[c][d];
     }
+    /// Write the sources of all components at point @p i.
     void store_source(const size_t i, const std::array<NT, n_fe> &S)
     {
       for (size_t c = 0; c < n_fe; ++c)
         source(c)[i] = S[c];
     }
+    /// Write the diffusion fluxes of all components at point @p i.
     void store_diffusion_flux(const size_t i, const std::array<dealii::Tensor<1, dim, NT>, n_fe> &D)
     {
       for (size_t c = 0; c < n_fe; ++c)
@@ -428,9 +469,9 @@ namespace DiFfRG
   };
 
   /**
-   * @brief Model traits read by the batched assemblers. A model declares
-   * `static constexpr bool batch_reads_derivatives = false` (or `batch_reads_hessians`) when neither its
-   * flux nor its source reads that input: the batch then skips it, and so do the AD jacobian seeds.
+   * @brief The model's `batch_reads_derivatives` (default true). Declare `static constexpr bool
+   * batch_reads_derivatives = false` in the model when no term reads \f$\partial u\f$: CG and DG then neither
+   * gather it nor seed it in the AD jacobians.
    */
   template <typename Model> constexpr bool batch_reads_derivatives()
   {
@@ -439,6 +480,7 @@ namespace DiFfRG
     else
       return true;
   }
+  /// The model's `batch_reads_hessians` (default true), as batch_reads_derivatives for \f$\partial^2 u\f$.
   template <typename Model> constexpr bool batch_reads_hessians()
   {
     if constexpr (requires { Model::batch_reads_hessians; })

@@ -15,17 +15,32 @@
 
 namespace DiFfRG
 {
+  /// A set of dofs of one FE function and their support points: points[i] belongs to dofs.nth_index_in_set(i).
   template <int dim> struct AffineConstraintComponentView {
+    /// Global dof indices.
     const dealii::IndexSet &dofs;
+    /// Support point of each dof, in the order of @p dofs.
     const std::vector<dealii::Point<dim>> &points;
   };
 
+  /**
+   * @brief What a model's affine-constraint hooks get to see: the dofs and support points of each FE function.
+   *
+   * Passed as `context` to `apply_boundary_affine_constraints(constraints, context)` and
+   * `apply_affine_constraints(constraints, context)` of the model (see def::ConstrainOriginBoundaryPointToZero for an
+   * example). A model that fixes \f$u(x_0) = c\f$ for its function "u" picks a dof from
+   * `context.template support<"u">()` (or `boundary<"u">()`) and adds the line to the deal.II AffineConstraints.
+   *
+   * @tparam Components_ The model's ComponentDescriptor; FE functions are addressed by their names.
+   * @tparam dim Spatial dimension.
+   */
   template <typename Components_, int dim> class AffineConstraintContext
   {
   public:
     using Components = Components_;
     static constexpr int dimension = dim;
 
+    /// Built by the assembler; one entry per FE function in each vector.
     AffineConstraintContext(const std::vector<dealii::IndexSet> &component_boundary_dofs,
                             const std::vector<std::vector<dealii::Point<dim>>> &component_boundary_points,
                             const std::vector<dealii::IndexSet> &component_support_dofs,
@@ -35,6 +50,7 @@ namespace DiFfRG
     {
     }
 
+    /// Built by the assembler from internal::AffineConstraintMetadata.
     template <typename Metadata>
     explicit AffineConstraintContext(const Metadata &metadata)
         : AffineConstraintContext(metadata.component_boundary_dofs, metadata.component_boundary_points,
@@ -42,22 +58,26 @@ namespace DiFfRG
     {
     }
 
+    /// Index of the FE function @p component_name in the ComponentDescriptor.
     template <FixedString component_name> static consteval unsigned int component_index()
     {
       return static_cast<unsigned int>(typename Components::FEFunction_Descriptor{}(component_name));
     }
 
+    /// Declared size of the FE function @p component_name in the ComponentDescriptor.
     template <FixedString component_name> static consteval std::size_t component_size()
     {
       return Components::FEFunction_Descriptor::sizes[component_index<component_name>()];
     }
 
+    /// The dofs of @p component_name on the domain boundary, with their support points.
     template <FixedString component_name> AffineConstraintComponentView<dim> boundary() const
     {
       constexpr auto c = component_index<component_name>();
       return {component_boundary_dofs[c], component_boundary_points[c]};
     }
 
+    /// All dofs of @p component_name, with their support points.
     template <FixedString component_name> AffineConstraintComponentView<dim> support() const
     {
       constexpr auto c = component_index<component_name>();
@@ -75,6 +95,7 @@ namespace DiFfRG
   {
     template <typename> inline constexpr bool accepts_affine_constraint_context = false;
 
+    /// Call the model's affine_constraints(constraints, context).
     template <typename Model, typename Constraints, typename Context>
     void apply_model_affine_constraints(Model &model, Constraints &constraints, const Context &context)
     {
@@ -88,6 +109,7 @@ namespace DiFfRG
       }
     }
 
+    /// Storage behind AffineConstraintContext.
     template <int dim> struct AffineConstraintMetadata {
       std::vector<dealii::IndexSet> component_boundary_dofs;
       std::vector<std::vector<dealii::Point<dim>>> component_boundary_points;
@@ -95,6 +117,7 @@ namespace DiFfRG
       std::vector<std::vector<dealii::Point<dim>>> component_support_points;
     };
 
+    /// Collect the dofs and support points of every FE function from the discretization.
     template <typename Components, int dim, typename Discretization>
     AffineConstraintMetadata<dim> build_affine_constraint_metadata(const Discretization &discretization)
     {

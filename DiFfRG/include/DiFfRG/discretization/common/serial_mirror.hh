@@ -16,35 +16,10 @@ namespace DiFfRG
   namespace internal
   {
     /**
-     * @brief A process-local, serial mirror of a (possibly partitioned) triangulation.
+     * @brief A serial copy of a parallel triangulation, or @p source itself if it is serial.
      *
-     * Returns @p source itself when it is already serial, so a serial build allocates nothing and
-     * behaves exactly as before.
-     *
-     * Why this exists: at the replicated-mesh rung every rank holds the whole mesh and (through
-     * SolutionView) the whole solution, so anything that only needs to *read* the mesh can and should
-     * do so without communicating. But deal.II decides collectiveness from the triangulation's type,
-     * not from what the caller intends:
-     *
-     *  * DoFHandler::distribute_dofs() on a parallel triangulation is collective.
-     *  * A loop over the locally owned cells (internal::ColoredCells) visits only the calling rank's
-     *    cells.
-     *  * DataOut::add_data_vector() routes every vector type through a ghosted
-     *    LinearAlgebra::distributed::BlockVector built on dof_handler.get_mpi_communicator().
-     *
-     * Each of those is a hang or a silently truncated result when it runs inside a rank-0-only region
-     * such as OutputSession's contributor. Handing that code a serial mirror makes all three local,
-     * complete and identical on every rank.
-     *
-     * The mirror is cached and refreshed IN PLACE, and the stable address is load-bearing:
-     * dealii::DataOut latches onto the triangulation of the first DoFHandler it is handed and never
-     * lets go -- DataOut_DoFData::clear() resets `dofs` but leaves `triangulation` alone, and
-     * add_data_vector only re-reads it while it is still null. A fresh mirror per call therefore
-     * leaves the output pointing at a destroyed mesh, which surfaces much later as
-     * ReferenceCell::get_default_linear_mapping() throwing ExcNotImplemented out of build_patches.
-     *
-     * Refreshed when the source mesh changes: the any_change signal covers refinement, coarsening and
-     * clearing, and the size comparison covers a source we never managed to connect to.
+     * Lets code that runs on one rank only (output, potential reconstruction) use deal.II functions that are collective
+     * on a parallel triangulation. The copy is cached, updated in place when the source changes, and keeps its address.
      */
     template <int dim> const dealii::Triangulation<dim> &serial_mirror(const dealii::Triangulation<dim> &source)
     {

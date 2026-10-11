@@ -28,39 +28,40 @@ namespace DiFfRG
   using namespace dealii;
 
   /**
-   * @brief A class to output finite element data to disk as .vtu files and .pvd time series.
+   * @brief One series of FE fields, written once per frame as VTK (a `.vtu` file per frame, collected in a `.pvd` time
+   * series) and/or into an HDF5 file.
    *
-   * @tparam dim Dimension of the problem
-   * @tparam VectorType Type of the vector
+   * Applications use it through OutputFrame::fields. Per frame: attach() the fields, then flush(time). Files:
+   * - VTK: `<top_folder>/<output_name>.pvd` and `<top_folder>/<output_folder>/<output_name>_NNNNNN.vtu`, NNNNNN the
+   *   frame number; written on background threads, with at most `/output/max_pending_frames` (at least 2) frames in
+   *   flight.
+   * - HDF5 (if set_hdf5_output was called): group `<group_name>/NNNNNN` with the dataset `nodes` (the output points,
+   *   shape n_nodes × dim) and one dataset per field (its values at the nodes).
+   *
+   * Each cell is subdivided `/discretization/output_subdivisions` times for the output.
+   *
+   * @tparam dim Spatial dimension (for dim = 0 nothing is written).
+   * @tparam VectorType Vector type of the attached fields.
    */
   template <uint dim, typename VectorType> class FEOutput
   {
-    /**
-     * @brief What the DataOut actually gets handed.
-     *
-     * Never a distributed vector. DataOut::add_data_vector() routes every vector type through
-     * internal::DataOutImplementation::CreateVectors::create_dof_vector(), which builds a ghosted
-     * LinearAlgebra::distributed::BlockVector on dof_handler.get_mpi_communicator() and calls
-     * update_ghost_values() -- two collectives, in a code path OutputSession runs on rank 0 alone.
-     * Under the replicated-mesh policy rank 0 already holds every dof, so it copies the replica into
-     * a plain serial vector and attaches that to a serial mirror DoFHandler instead. Nothing
-     * communicates and the whole domain still gets written.
-     */
+    /// The vector type handed to deal.II's DataOut: a serial copy for distributed vectors.
     using OutputVectorType =
         std::conditional_t<is_distributed_la<VectorType>, dealii::Vector<get_type::NumberType<VectorType>>, VectorType>;
 
   public:
     /**
-     * @brief Construct a new FEOutput object
+     * @brief Set up the series; creates the folders.
      *
-     * @param dof_handler DoFHandler associated with the solution
-     * @param top_folder Folder where the output will be written, i.e. the folder containing the .pvd file.
-     * @param output_name Name of the output, i.e. the name of the .pvd file.
-     * @param output_folder Folder where the .vtu files will be saved. Should be relative to top_folder.
-     * @param subdivisions Number of subdivisions of the cells in the .vtu files.
+     * @param top_folder Folder of the .pvd file.
+     * @param output_name Name of the series: the .pvd file and the prefix of the .vtu files.
+     * @param output_folder Folder of the .vtu files, relative to @p top_folder.
+     * @param settings Output settings: write_vtk, max_pending_frames, subdivisions, asynchronous.
+     * @param active False on ranks that do not write (everything attached is discarded).
      */
     FEOutput(std::string top_folder, std::string output_name, std::string output_folder,
              const Config::OutputSettings &settings, bool active = true);
+    /// Settings taken from @p config.
     [[deprecated(
         "Use FEOutput(top_folder, output_name, output_folder, Config::OutputSettings(config), active) instead")]]
     FEOutput(std::string top_folder, std::string output_name, std::string output_folder, const ConfigTree &config,
@@ -71,57 +72,55 @@ namespace DiFfRG
     }
 
     FEOutput();
+    /// finish(), ignoring errors.
     ~FEOutput() noexcept;
 
-    /** Join pending writers and surface the first worker error without closing the output. */
+    /// Wait for the pending frames to be written; rethrow the first writer error.
     void drain();
 
-    /** Drain pending writers, release terminal resources, and close the output. */
+    /// Wait for the pending frames and close the series.
     void finish();
 
     /**
-     * @brief Route the finite-element frame data into an HDF5 file owned by someone else.
+     * @brief Also write the frames into @p output (not owned), under the group @p group_name.
      *
-     * @param session_closes_file When true, flush() leaves the file open and relies on the
-     * owner to close it once per frame -- which is what OutputSession does, since it flushes
-     * its HDF5Output sinks after this one. Standalone users, who may never call
-     * HDF5Output::flush() at all, keep the default and get a close per frame.
-     * @param group_name Top-level HDF5 group that owns this field series.
+     * @param output The HDF5 file.
+     * @param session_closes_file true if the owner flushes @p output after each frame (as OutputSession does);
+     * false to let flush() write the HDF5 frame itself.
+     * @param group_name Top-level group of this series in the file.
      */
     void set_hdf5_output(HDF5Output *output, bool session_closes_file = false, std::string group_name = "FE");
 
-    /** True when flush() would throw everything attached to it away. */
+    /// True if nothing is written: VTK off (or inactive rank) and no HDF5 file set.
     bool will_discard() const { return !save_vtk && hdf5_output == nullptr; }
 
-    /** Number of writer threads that have not been joined yet. */
+    /// Number of frames still being written in the background.
     std::size_t pending_workers() const { return output_threads.size(); }
 
     /**
-     * @brief Attach a solution to the output.
+     * @brief Add a scalar field to the current frame (copied).
      *
-     * @param dof_handler The DoFHandler associated with the solution.
-     * @param solution The solution to attach.
-     * @param name The name of the solution.
+     * @param dof_handler The dofs of @p solution.
+     * @param solution The field; for a distributed vector, every global dof must be readable (a SolutionView).
+     * @param name Name of the field in the output.
      */
     void attach(const DoFHandler<dim> &dof_handler, const VectorType &solution, const std::string &name);
 
     /**
-     * @brief Attach a solution to the output.
+     * @brief Add a vector-valued field to the current frame (copied), one output field per component.
      *
-     * @param dof_handler The DoFHandler associated with the solution.
-     * @param solution The solution to attach.
-     * @param names The names of each component of the solution.
+     * @param dof_handler The dofs of @p solution.
+     * @param solution The field; for a distributed vector, every global dof must be readable (a SolutionView).
+     * @param names One name per component.
      */
     void attach(const DoFHandler<dim> &dof_handler, const VectorType &solution, const std::vector<std::string> &names);
 
     /**
-     * @brief Flush all attached solutions to disk.
-     *
-     * @param time The time tag to attach to the solution.
+     * @brief Write the attached fields as the next frame, at RG time @p time, and start a new frame.
      */
     void flush(double time);
 
-    /** Timing buckets accumulated since the last call, and reset by it. */
+    /// The timings accumulated since the last call.
     internal::FrameTimings take_frame_timings()
     {
       const internal::FrameTimings taken = frame_timings;
@@ -143,18 +142,10 @@ namespace DiFfRG
     constexpr static uint safe_dim = dim == 0 ? 1 : dim;
     std::vector<DataOut<safe_dim>> data_outs;
     std::list<std::thread> output_threads;
-    // series number each worker thread is responsible for, kept in lockstep with output_threads so
-    // the main thread can clear() the corresponding DataOut once the worker has been joined. Clearing
-    // a DataOut frees its Kokkos-backed vectors, which (with deal.II's Kokkos host backend) must not
-    // happen on a worker thread concurrently with the main thread's own Kokkos work.
+    // Frame of each worker thread, so the main thread can clear its DataOut after joining (clearing frees Kokkos
+    // memory, which must happen on the main thread).
     std::list<uint> output_thread_series;
-    // Owned outright rather than drawn from a GrowingVectorMemory pool. A pooled vector is not
-    // destroyed when the frame retires, it is handed back to a process-wide pool that lives until
-    // InitFinalize::finalize() tears it down -- i.e. these buffers would be freed during MPI/Kokkos
-    // shutdown, concurrently with whatever else is being finalised. That showed up as an
-    // intermittent segfault in GrowingVectorMemory::release_unused_memory() after the run had
-    // already printed its final line. Owning them means they die in retire_oldest()/drain(), on the
-    // main thread, while the run is still up.
+    // Copies of the attached fields per pending frame; owned (not pooled) so they are freed on the main thread.
     std::list<std::list<std::unique_ptr<OutputVectorType>>> attached_solutions;
     std::list<std::size_t> attached_bytes;
     std::size_t pending_bytes = 0;
@@ -170,15 +161,7 @@ namespace DiFfRG
     std::exception_ptr stored_exception;
     bool finished = false;
 
-    /**
-     * @brief Serial mirror of the solution DoFHandler, plus the map from its dof numbering to ours.
-     *
-     * The numbering genuinely differs: a DoFHandler on a parallel::shared::Triangulation renumbers
-     * so that each rank owns a contiguous range, so global index i means different nodes in the two
-     * handlers as soon as there is more than one rank. (At one rank they coincide, which is exactly
-     * why single-rank distributed runs looked fine.) The permutation is built cell by cell -- the
-     * two triangulations are structurally identical, so cells match by level and index.
-     */
+    /// DoFHandler on a serial copy of a parallel mesh, and the map from the original dof numbering to its numbering.
     struct SerialMirrorDoFs {
       std::unique_ptr<DoFHandler<safe_dim>> dof_handler;
       std::vector<types::global_dof_index> to_mirror;
@@ -187,7 +170,7 @@ namespace DiFfRG
     };
     SerialMirrorDoFs mirror_dofs;
 
-    /** The DoFHandler to hand DataOut, and the values permuted into its numbering. */
+    /// The DoFHandler to hand DataOut, and the values permuted into its numbering.
     const DoFHandler<safe_dim> &prepare_output_vector(const DoFHandler<dim> &dof_handler, const VectorType &solution,
                                                       OutputVectorType &target);
 
@@ -204,20 +187,22 @@ namespace DiFfRG
     internal::FrameTimings frame_timings;
   };
 
+  /// Zero-dimensional field space: there are no fields, nothing is written.
   template <typename VectorType> class FEOutput<0, VectorType>
   {
   public:
     /**
-     * @brief Construct a new FEOutput object
+     * @brief Set up the series; creates the folders.
      *
-     * @param dof_handler DoFHandler associated with the solution
-     * @param top_folder Folder where the output will be written, i.e. the folder containing the .pvd file.
-     * @param output_name Name of the output, i.e. the name of the .pvd file.
-     * @param output_folder Folder where the .vtu files will be saved. Should be relative to top_folder.
-     * @param subdivisions Number of subdivisions of the cells in the .vtu files.
+     * @param top_folder Folder of the .pvd file.
+     * @param output_name Name of the series: the .pvd file and the prefix of the .vtu files.
+     * @param output_folder Folder of the .vtu files, relative to @p top_folder.
+     * @param settings Output settings: write_vtk, max_pending_frames, subdivisions, asynchronous.
+     * @param active False on ranks that do not write (everything attached is discarded).
      */
     FEOutput(std::string top_folder, std::string output_name, std::string output_folder,
              const Config::OutputSettings &settings, bool active = true);
+    /// Settings taken from @p config.
     [[deprecated(
         "Use FEOutput(top_folder, output_name, output_folder, Config::OutputSettings(config), active) instead")]]
     FEOutput(std::string top_folder, std::string output_name, std::string output_folder, const ConfigTree &config,

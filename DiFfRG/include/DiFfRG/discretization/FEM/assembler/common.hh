@@ -24,7 +24,8 @@ namespace DiFfRG
   using std::array;
 
   /**
-   * @brief What CG and DG share: the solution at a single point, from the FE space (see internal::AssemblerCore).
+   * @brief Common base of CG::Assembler and DG::Assembler: evaluating the FE solution at a single point (for the
+   * extractors and readouts, see internal::AssemblerCore).
    */
   template <typename Discretization_, typename Model_>
   class FEMAssembler : public internal::AssemblerCore<FEMAssembler<Discretization_, Model_>, Discretization_, Model_>
@@ -40,6 +41,7 @@ namespace DiFfRG
 
     using Core::Core;
 
+    /// Rebuild the sparsity pattern of the jacobian, e.g. when the dofs the extractors read have changed.
     virtual void rebuild_jacobian_sparsity() = 0;
 
     /// The FE solution and the reconstructed raw potential at one point.

@@ -16,27 +16,15 @@ namespace DiFfRG
   namespace internal
   {
     /**
-     * @brief Writes staged HDF5 frames on a single background thread.
+     * @brief Writes HDF5 frames on one background thread, shared by all HDF5Outputs of a run (HDF5 is not thread-safe).
      *
-     * One writer serves every HDF5Output of a run. That is a correctness requirement, not a
-     * tuning choice: HDF5 here is built without thread safety, so all of its API calls must be
-     * serialised, and confining them to one thread is the cheapest way to guarantee that.
-     *
-     * Each frame is still opened, written, flushed and closed on its own, so the file stays
-     * readable while the run continues and a crash leaves a complete prefix of frames behind.
-     * What the thread buys is that the integrator no longer waits for any of it.
-     *
-     * Backpressure blocks rather than drops: a producer that outruns the disk waits, and no
-     * scientific data is ever discarded.
+     * Each frame opens, writes and closes the file, so the file stays readable during the run. A full queue blocks the
+     * producer; no frame is dropped.
      */
     class HDF5FrameWriter
     {
     public:
-      /**
-       * @param queue_depth How many frames may be in flight. 0 runs every frame inline on the
-       * calling thread and starts no thread at all -- the synchronous behaviour, kept because a
-       * hard abort can otherwise lose the frames still queued.
-       */
+      /// @param queue_depth Maximum frames in flight; 0 writes every frame on the calling thread.
       explicit HDF5FrameWriter(unsigned int queue_depth);
       ~HDF5FrameWriter() noexcept;
 
@@ -45,22 +33,16 @@ namespace DiFfRG
 
       bool asynchronous() const noexcept { return depth > 0; }
 
-      /**
-       * @brief Hand a frame over, blocking while the queue is full.
-       *
-       * Rethrows a stored worker error first, so a failure surfaces on the thread that can act on
-       * it. `timings` is charged the blocking wait only -- the write itself is deliberately not
-       * charged to the frame, because it no longer sits on the frame's critical path.
-       */
+      /// Queue a frame, blocking while the queue is full; rethrows an earlier writer error.
       void submit(HDF5Frame frame, FrameTimings *timings = nullptr);
 
-      /** Wait for the queue to empty, then rethrow the first worker error, if any. */
+      /// Wait until the queue is empty; rethrow the first writer error.
       void drain();
 
-      /** Drain and join. Idempotent; safe to call before destruction. */
+      /// Drain and stop the thread. Idempotent.
       void finish();
 
-      /** Work done by the writer thread so far, off the critical path. */
+      /// Time spent by the writer thread so far.
       FrameTimings worker_totals() const;
 
     private:
