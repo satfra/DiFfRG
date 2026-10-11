@@ -134,7 +134,7 @@ namespace
 
 static_assert(Assembler::supports_mesh_adaptation);
 static_assert(!FV::KurganovTadmor::Assembler<FV::Discretization<ComponentDescriptor<FEFunctionDescriptor<Scalar<"u">>>,
-                                                                 RectangularMeshSerial<2>, double>,
+                                                                RectangularMeshSerial<2>, double>,
                                              Advection>::supports_mesh_adaptation,
               "2D KT must refuse HAdaptivity at compile time");
 
@@ -248,4 +248,57 @@ TEST_CASE("HAdaptivity refines a 1D KT mesh where the indicator is large", "[FV]
   const auto r = s.residual(s.u);
   for (const auto v : r)
     REQUIRE(std::isfinite(v));
+}
+
+TEST_CASE("HAdaptivity prolongates 1D KT cell averages with their slope", "[FV][KT][adaptivity]")
+{
+  DiFfRG::Init();
+  // The exact average over [a, b] of q(x) = c0 + c1 x + c2 x^2.
+  const double c0 = 0.3, c1 = 2.;
+  const auto average = [&](const double c2, const double a, const double b) {
+    return c0 + c1 * (a + b) / 2. + c2 * (a * a + a * b + b * b) / 3.;
+  };
+  const auto check = [&](const double c2, const bool interior_only) {
+    Setup s;
+    s.interpolate();
+    std::vector<types::global_dof_index> dof(1);
+    for (const auto &cell : s.discretization.get_dof_handler().active_cell_iterators()) {
+      cell->get_dof_indices(dof);
+      s.u[dof[0]] = average(c2, cell->vertex(0)[0], cell->vertex(1)[0]);
+    }
+    HAdaptivity<Assembler> adaptor(s.assembler, s.config);
+    REQUIRE(adaptor.adapt(s.u));
+    uint refined = 0;
+    for (const auto &cell : s.discretization.get_dof_handler().active_cell_iterators()) {
+      if (cell->level() == 0) continue;
+      const auto parent = cell->parent();
+      if (interior_only && (parent->at_boundary(0) || parent->at_boundary(1))) continue;
+      cell->get_dof_indices(dof);
+      ++refined;
+      CHECK(s.u[dof[0]] == Catch::Approx(average(c2, cell->vertex(0)[0], cell->vertex(1)[0])).epsilon(1e-12));
+    }
+    CHECK(refined > 0);
+  };
+  // Linear data: exact everywhere, also next to the boundary (one-sided slope there).
+  SECTION("linear") { check(0., false); }
+  // Monotone quadratic data: exact child averages away from the boundary.
+  SECTION("quadratic") { check(-0.5, true); }
+}
+
+TEST_CASE("HAdaptivity prolongates 1D KT cell averages without new extrema", "[FV][KT][adaptivity]")
+{
+  DiFfRG::Init();
+  Setup s;
+  s.interpolate();
+  // A step: the slope of the cells next to it must not push their children beyond the values on either side.
+  std::vector<types::global_dof_index> dof(1);
+  for (const auto &cell : s.discretization.get_dof_handler().active_cell_iterators()) {
+    cell->get_dof_indices(dof);
+    s.u[dof[0]] = cell->center()[0] < 0.5 ? 1. : 2.;
+  }
+  HAdaptivity<Assembler> adaptor(s.assembler, s.config);
+  REQUIRE(adaptor.adapt(s.u));
+  CHECK(s.u.linfty_norm() <= 2. + 1e-12);
+  for (std::size_t i = 0; i < s.u.size(); ++i)
+    CHECK(s.u[i] >= 1. - 1e-12);
 }

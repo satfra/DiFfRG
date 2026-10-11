@@ -1895,6 +1895,49 @@ namespace DiFfRG
         static constexpr bool supports_mesh_adaptation = dim == 1;
 
         /**
+         * @brief Per active cell, the slope of the cell averages @p v used to prolongate them to the cell's children.
+         *
+         * The slope is the derivative at the cell centre of the parabola through the cell's and its two neighbours'
+         * averages (at a domain boundary, the one-sided difference), scaled down where needed so that the children's
+         * values \f$\bar v \pm v'\,\Delta x/4\f$ stay within the range of these averages: no new extrema, which
+         * could put a cell beyond a pole of the flow.
+         *
+         * HAdaptivity gives the children of a refined cell \f$\bar v + v'\,(x_{\rm child} - x_{\rm cell})\f$ instead of
+         * the bare average. This keeps the average and, where the profile is monotone and the mesh uniform, gives the
+         * exact child averages of a quadratic profile.
+         */
+        std::vector<internal::GradientType<dim, NumberType, n_components>> prolongation_slopes(const VectorType &v) const
+        {
+          static_assert(supports_mesh_adaptation, "KT mesh adaptation is implemented in 1D only.");
+          std::vector<internal::GradientType<dim, NumberType, n_components>> slopes(triangulation.n_active_cells());
+          for (const auto &cell : dof_handler.active_cell_iterators()) {
+            const auto &stencil = cell_topology_cache[cell->active_cell_index()].stencil;
+            auto &slope = slopes[cell->active_cell_index()];
+            const bool has_left = !cell->at_boundary(0), has_right = !cell->at_boundary(1);
+            const double dl = has_left ? stencil.cell.x[0] - stencil.neighbors.x[0][0] : 0.;
+            const double dr = has_right ? stencil.neighbors.x[1][0] - stencil.cell.x[0] : 0.;
+            for (uint c = 0; c < n_components; ++c) {
+              const NumberType u = v[stencil.cell.dof_indices[c]];
+              const NumberType jump_l = has_left ? u - v[stencil.neighbors.dof_indices[0][c]] : NumberType(0);
+              const NumberType jump_r = has_right ? v[stencil.neighbors.dof_indices[1][c]] - u : NumberType(0);
+              if (has_left && has_right)
+                slope[c][0] = (dl * dl * jump_r + dr * dr * jump_l) / (dl * dr * (dl + dr));
+              else if (has_left)
+                slope[c][0] = jump_l / dl;
+              else if (has_right)
+                slope[c][0] = jump_r / dr;
+              else
+                slope[c][0] = 0.;
+              // The children's centres lie a quarter cell width from the parent's.
+              const NumberType lo = std::min({u, u - jump_l, u + jump_r}), hi = std::max({u, u - jump_l, u + jump_r});
+              const NumberType reach = std::abs(slope[c][0]) * cell->diameter() / 4.;
+              if (reach > 0) slope[c][0] *= std::min<NumberType>({1., (hi - u) / reach, (u - lo) / reach});
+            }
+          }
+          return slopes;
+        }
+
+        /**
          * @brief Refinement indicator for HAdaptivity (1D only): for each owned cell, the model's cell_indicator at the
          * cell centre times the cell width.
          *
