@@ -91,7 +91,7 @@ public:
   {
     const auto &fe_hessians = get<"fe_hessians">(sol);
 
-    indicator = fe_hessians[idxf("m2")][0][0];
+    indicator = std::abs(fe_hessians[idxf("m2")][0][0]);
   }
 
   template <int dim, typename DataOut, typename Solutions> void readouts(DataOut &output, const Point<dim> &x, const Solutions &sol) const

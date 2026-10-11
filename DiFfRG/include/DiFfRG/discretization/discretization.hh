@@ -56,7 +56,7 @@
  * | CG           | CG::Discretization, CG::Assembler         | nodal values of continuous \f$Q_p\f$ elements | weak form; flux enters only through the boundary             | boundary_numflux, cell_indicator                    | HAdaptivity     | yes |
  * | DG           | DG::Discretization, DG::Assembler         | discontinuous \f$Q_p\f$ elements           | CG terms plus a numerical flux on every interior face        | numflux (e.g. def::LLFFlux), face_indicator          | HAdaptivity     | yes |
  * | LDG          | LDG::Discretization, LDG::Assembler       | DG for \f$u\f$, plus 1 to 3 auxiliary levels  | DG for \f$u\f$; each level \f$L_k \approx \nabla\cdot F^{(k)} + s^{(k)}\f$ of the level below | ldg_flux<k>, ldg_source<k>, ldg_numflux, ldg_boundary_numflux | HAdaptivity | no |
- * | FV (KT)      | FV::Discretization, FV::KurganovTadmor::Assembler | cell averages                     | Kurganov-Tadmor central-upwind fluxes of a slope-limited reconstruction | diffusion_flux, apply_boundary_stencil, wave_speed_blocks | no (NoAdaptivity) | yes |
+ * | FV (KT)      | FV::Discretization, FV::KurganovTadmor::Assembler | cell averages                     | Kurganov-Tadmor central-upwind fluxes of a slope-limited reconstruction | diffusion_flux, apply_boundary_stencil, wave_speed_blocks | 1D: HAdaptivity; 2D: no | yes |
  * | Variables    | Variables::Assembler<Model>               | variables \f$v\f$ only                     | Model::dt_variables                                          | dt_variables                                        | -               | no  |
  *
  * - CG is the default for smooth solutions. DG and LDG allow jumps between cells, coupled through a numerical flux
@@ -79,9 +79,9 @@
  * | `/discretization/output_subdivisions`        | uint | 1                  | output  | subdivisions of each cell in VTK output |
  * | `/discretization/diagnose_flux_conditioning` | bool | false              | KT      | warn if a diffusion flux is dominated by a gradient-independent constant |
  *
- * Mesh adaptation (CG, DG, LDG) is controlled by `/discretization/adaptivity/{start_adapt_at, adapt_dt, level,
- * refine_percent, coarsen_percent, coarsen_buffer, coarsen_age}` (defaults 0, 0.1, 0 = off, 0.1, 0.05, 2, 2); see
- * HAdaptivity in mesh/h_adaptivity.hh. The keys of the extractor search (EoM, raw potential) are documented in
+ * Mesh adaptation (CG, DG, LDG; KT in 1D) is controlled by `/discretization/adaptivity/{start_adapt_at, adapt_dt,
+ * level, refine_percent, coarsen_percent, coarsen_buffer, coarsen_age}` (defaults 0, 0.1, 0 = off, 0.1, 0.05, 2, 2);
+ * see HAdaptivity in mesh/h_adaptivity.hh. The keys of the extractor search (EoM, raw potential) are documented in
  * common/eom_config.hh.
  */
 // clang-format on

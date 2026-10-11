@@ -435,7 +435,8 @@ namespace DiFfRG
        * mass, flux, diffusion_flux and source (or evaluate_batch), apply_boundary_stencil, wave_speed_blocks, the
        * extractor and readout hooks; optionally `source_uses_hessians` and fv_kt_pre_assembly(stage, context), called
        * before every residual and jacobian assembly with a view of the reconstruction (see AssemblyStage,
-       * AssemblyContextView). There is no mesh adaptation (refinement_indicator does nothing): use NoAdaptivity.
+       * AssemblyContextView). Mesh adaptation (HAdaptivity) works in 1D, see refinement_indicator; in 2D use
+       * NoAdaptivity.
        *
        * ### Parameters
        * | Key                                          | Type | Default             | Meaning |
@@ -852,7 +853,7 @@ namespace DiFfRG
 
         static Iterator face_neighbor(const Iterator &cell, const unsigned int face_index)
         {
-          return cell->neighbor(face_index);
+          return internal::active_face_neighbor(cell, face_index);
         }
 
         void fill_cell_data_from_topology(const CellGeometryDofs &topology, const VectorType &solution_global,
@@ -1890,10 +1891,50 @@ namespace DiFfRG
           timings_jacobian.push_back(phase.finish());
         }
 
-        /// Does nothing: KT does not support mesh adaptation.
-        void refinement_indicator([[maybe_unused]] Vector<double> &indicator,
-                                  [[maybe_unused]] const VectorType &solution_global)
+        /// Mesh adaptation (HAdaptivity) is implemented in 1D only.
+        static constexpr bool supports_mesh_adaptation = dim == 1;
+
+        /**
+         * @brief Refinement indicator for HAdaptivity (1D only): for each owned cell, the model's cell_indicator at the
+         * cell centre times the cell width.
+         *
+         * cell_indicator receives `"fe_functions"`, `"fe_derivatives"` and `"fe_hessians"`: the cell average, and the
+         * first and second derivative of the parabola through the averages of the cell and its two neighbours (at the
+         * domain boundary the one-sided difference and zero curvature).
+         */
+        void refinement_indicator(Vector<double> &indicator, const VectorType &solution)
         {
+          static_assert(supports_mesh_adaptation, "KT mesh adaptation is implemented in 1D only.");
+          const auto state = this->constrained(solution);
+          const VectorType &u = state.u();
+          dealii::Vector<NumberType> values(n_components);
+          std::vector<Tensor<1, dim, NumberType>> gradients(n_components);
+          std::vector<Tensor<2, dim, NumberType>> hessians(n_components);
+          for (const auto &cell : dof_handler.active_cell_iterators()) {
+            if (!cell->is_locally_owned()) continue;
+            const auto &stencil = cell_topology_cache[cell->active_cell_index()].stencil;
+            const double x = stencil.cell.x[0];
+            const bool has_left = !cell->at_boundary(0), has_right = !cell->at_boundary(1);
+            for (uint c = 0; c < n_components; ++c) {
+              const NumberType u_c = u[stencil.cell.dof_indices[c]];
+              values[c] = u_c;
+              gradients[c] = Tensor<1, dim, NumberType>();
+              hessians[c] = Tensor<2, dim, NumberType>();
+              if (!has_left && !has_right) continue;
+              const double x_l = has_left ? stencil.neighbors.x[0][0] : x, x_r = has_right ? stencil.neighbors.x[1][0] : x;
+              const NumberType u_l = has_left ? u[stencil.neighbors.dof_indices[0][c]] : u_c;
+              const NumberType u_r = has_right ? u[stencil.neighbors.dof_indices[1][c]] : u_c;
+              gradients[c][0] = (u_r - u_l) / (x_r - x_l);
+              if (has_left && has_right)
+                hessians[c][0][0] = 2. * ((u_r - u_c) / (x_r - x) - (u_c - u_l) / (x - x_l)) / (x_r - x_l);
+            }
+            NumberType value = 0.;
+            model.cell_indicator(value, cell->center(),
+                                 named_tuple<std::tuple<decltype(values) &, decltype(gradients) &, decltype(hessians) &>,
+                                             StringSet<"fe_functions", "fe_derivatives", "fe_hessians">>(
+                                     std::tie(values, gradients, hessians)));
+            indicator[cell->active_cell_index()] = value * cell->measure();
+          }
         }
 
       private:

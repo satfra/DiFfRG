@@ -69,6 +69,16 @@ namespace DiFfRG
     using VectorType = typename Discretization::VectorType;
     static constexpr uint dim = Discretization::dim;
 
+    static consteval bool assembler_supports_adaptation()
+    {
+      if constexpr (requires { Assembler::supports_mesh_adaptation; })
+        return Assembler::supports_mesh_adaptation;
+      else
+        return true;
+    }
+    static_assert(assembler_supports_adaptation(),
+                  "This assembler does not support mesh adaptation in this dimension; use NoAdaptivity.");
+
   public:
     /// Read the parameters (see the class description) and record the level of the initial mesh.
     HAdaptivity(Assembler &assembler, const ConfigTree &config)

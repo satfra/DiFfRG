@@ -1,0 +1,251 @@
+#include <catch2/catch_all.hpp>
+
+#include <DiFfRG/common/init.hh>
+#include <DiFfRG/discretization/FV/assembler/KurganovTadmor.hh>
+#include <DiFfRG/discretization/FV/discretization.hh>
+#include <DiFfRG/discretization/mesh/h_adaptivity.hh>
+#include <DiFfRG/discretization/mesh/rectangular_mesh.hh>
+#include <DiFfRG/model/model.hh>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
+
+#include <cmath>
+#include <set>
+#include <utility>
+
+using namespace DiFfRG;
+using namespace dealii;
+
+// KT on an adapted 1D mesh: neighbouring cells of different refinement levels.
+
+namespace
+{
+  using Components = ComponentDescriptor<FEFunctionDescriptor<Scalar<"u">>>;
+
+  /// Linear advection F = c u; the ghosts continue the cell average constantly; refines where |u'| is large.
+  class Advection : public def::AbstractModel<Advection, Components>, public def::Time, public def::AD<Advection>
+  {
+  public:
+    static constexpr double c = 1.5;
+    static double exact(const double x) { return 2. + std::sin(3. * x); }
+
+    template <typename Vector> void initial_condition(const Point<1> &x, Vector &values) const
+    {
+      values[0] = exact(x[0]);
+    }
+
+    template <typename NT, typename Solution>
+    void flux(std::array<Tensor<1, 1, NT>, 1> &F, const Point<1> &, const Solution &sol) const
+    {
+      F[0][0] = c * get<"fe_functions">(sol)[0];
+    }
+
+    template <typename NT, typename Solution>
+    void source(std::array<NT, 1> &S, const Point<1> &, const Solution &) const
+    {
+      S[0] = 0.;
+    }
+
+    template <int dim, typename NT, typename Solution>
+    void cell_indicator(NT &indicator, const Point<dim> &, const Solution &sol) const
+    {
+      indicator = std::abs(get<"fe_derivatives">(sol)[0][0]);
+    }
+
+    template <int mdim, typename NT, size_t n>
+    bool apply_boundary_stencil(def::BoundaryStencilValues<mdim, NT, n> &u, def::BoundaryStencilPoints<mdim> &x,
+                                const Point<mdim> &x_face) const
+    {
+      using namespace def::BoundaryStencilIndex;
+      const Tensor<1, mdim> to_ghost = 2. * (x_face - x[physical_cell]);
+      const bool lower = to_ghost[0] < 0.;
+      const auto [inner, outer] = lower ? std::pair{lower_inner, lower_outer} : std::pair{upper_inner, upper_outer};
+      x[inner] = x[physical_cell] + to_ghost;
+      x[outer] = x[physical_cell] + 2. * to_ghost;
+      u[inner][0] = u[outer][0] = u[physical_cell][0];
+      return true;
+    }
+  };
+
+  using Discretization = FV::Discretization<Advection, RectangularMeshSerial<1>, double>;
+  using Assembler = FV::KurganovTadmor::Assembler<Discretization, Advection>;
+  using VectorType = typename Discretization::VectorType;
+
+  ConfigTree make_config()
+  {
+    try {
+      spdlog::stdout_color_mt("log")->set_pattern("log: [%v]");
+    } catch (const spdlog::spdlog_ex &) {
+    }
+    return json::value({{"physical", {{"Lambda", 1.}}},
+                        {"discretization",
+                         {{"fe_order", 0},
+                          {"overintegration", 0},
+                          {"EoM_abs_tol", 1e-10},
+                          {"EoM_max_iter", 0},
+                          {"grid", {{"x_grid", "0:0.05:1"}, {"refine", 0}}},
+                          {"adaptivity",
+                           {{"start_adapt_at", 0.},
+                            {"adapt_dt", 0.1},
+                            {"level", 3},
+                            {"refine_percent", 0.3},
+                            {"coarsen_percent", 0.},
+                            {"coarsen_buffer", 0},
+                            {"coarsen_age", 0}}}}},
+                        {"output", {{"verbosity", 0}}}});
+  }
+
+  struct Setup {
+    ConfigTree config = make_config();
+    Advection model;
+    RectangularMeshSerial<1> mesh{Config::ConfigurationMesh<1>(config)};
+    Discretization discretization{mesh, config};
+    Assembler assembler{discretization, model, config};
+    VectorType u;
+
+    /// Refine the cells in [0.3, 0.55] once and those in [0.4, 0.45] twice: level jumps in both directions.
+    void refine_locally()
+    {
+      auto &tria = discretization.get_triangulation();
+      for (const auto [lower, upper] : {std::pair{0.3, 0.55}, std::pair{0.4, 0.45}}) {
+        for (const auto &cell : tria.active_cell_iterators())
+          if (cell->center()[0] > lower && cell->center()[0] < upper) cell->set_refine_flag();
+        tria.execute_coarsening_and_refinement();
+      }
+      discretization.reinit();
+      assembler.reinit();
+    }
+
+    void interpolate()
+    {
+      FV::FlowingVariables<Discretization> state(discretization);
+      state.interpolate(model);
+      u = state.spatial_data();
+    }
+
+    VectorType residual(const VectorType &v) const
+    {
+      VectorType r(v.size()), v_dot(v.size());
+      const_cast<Assembler &>(assembler).residual(r, v, 1., v_dot, 0.);
+      return r;
+    }
+  };
+} // namespace
+
+static_assert(Assembler::supports_mesh_adaptation);
+static_assert(!FV::KurganovTadmor::Assembler<FV::Discretization<ComponentDescriptor<FEFunctionDescriptor<Scalar<"u">>>,
+                                                                 RectangularMeshSerial<2>, double>,
+                                             Advection>::supports_mesh_adaptation,
+              "2D KT must refuse HAdaptivity at compile time");
+
+TEST_CASE("KT on a 1D mesh with level jumps", "[FV][KT][adaptivity]")
+{
+  DiFfRG::Init();
+  Setup s;
+  s.refine_locally();
+  std::set<uint> levels;
+  for (const auto &cell : s.discretization.get_triangulation().active_cell_iterators())
+    levels.insert(cell->level());
+  REQUIRE(levels.size() == 3);
+  s.interpolate();
+  const auto r = s.residual(s.u);
+
+  SECTION("Conservative: the residual sums to the net boundary flux")
+  {
+    double total = 0.;
+    for (const auto v : r)
+      total += v;
+    // Constant ghosts: the boundary fluxes are c times the first and last cell averages.
+    double u_first = 0., u_last = 0., x_first = 2., x_last = -1.;
+    for (const auto &cell : s.discretization.get_dof_handler().active_cell_iterators()) {
+      std::vector<types::global_dof_index> dof(1);
+      cell->get_dof_indices(dof);
+      if (cell->center()[0] < x_first) x_first = cell->center()[0], u_first = s.u[dof[0]];
+      if (cell->center()[0] > x_last) x_last = cell->center()[0], u_last = s.u[dof[0]];
+    }
+    CHECK(total == Catch::Approx(Advection::c * (u_last - u_first)).margin(1e-12));
+  }
+
+  SECTION("Consistent: refining locally does not make residual / |K| a worse approximation of c u'")
+  {
+    // Max error over the cells away from the boundary, where the constant ghosts make the reconstruction first order.
+    const auto worst_error = [](const Setup &setup, const VectorType &residual) {
+      double worst = 0.;
+      for (const auto &cell : setup.discretization.get_dof_handler().active_cell_iterators()) {
+        if (cell->center()[0] < 0.1 || cell->center()[0] > 0.9) continue;
+        std::vector<types::global_dof_index> dof(1);
+        cell->get_dof_indices(dof);
+        const double expected = Advection::c * 3. * std::cos(3. * cell->center()[0]);
+        worst = std::max(worst, std::abs(residual[dof[0]] / cell->measure() - expected));
+      }
+      return worst;
+    };
+    Setup uniform;
+    uniform.interpolate();
+    const double worst_uniform = worst_error(uniform, uniform.residual(uniform.u));
+    const double worst_adapted = worst_error(s, r);
+    CAPTURE(worst_uniform, worst_adapted);
+    CHECK(worst_adapted <= worst_uniform);
+  }
+
+  SECTION("Jacobian matches finite differences")
+  {
+    SparseMatrix<double> J(s.assembler.get_sparsity_pattern_jacobian());
+    VectorType u_dot(s.u.size());
+    s.assembler.jacobian(J, s.u, 1., u_dot, 0., 0.);
+    double worst = 0., scale = 0.;
+    for (size_t j = 0; j < s.u.size(); ++j) {
+      auto up = s.u, down = s.u;
+      up[j] += 1e-6;
+      down[j] -= 1e-6;
+      auto column = s.residual(up);
+      column -= s.residual(down);
+      column /= 2e-6;
+      for (size_t i = 0; i < s.u.size(); ++i) {
+        worst = std::max(worst, std::abs(column[i] - J.el(i, j)));
+        scale = std::max(scale, std::abs(column[i]));
+      }
+    }
+    REQUIRE(scale > 0.);
+    CHECK(worst <= 1e-6 * scale);
+  }
+}
+
+TEST_CASE("HAdaptivity refines a 1D KT mesh where the indicator is large", "[FV][KT][adaptivity]")
+{
+  DiFfRG::Init();
+  Setup s;
+  s.interpolate();
+  HAdaptivity<Assembler> adaptor(s.assembler, s.config);
+  const auto n_before = s.discretization.get_triangulation().n_active_cells();
+  REQUIRE(adaptor.adapt(s.u));
+  REQUIRE(s.discretization.get_triangulation().n_active_cells() > n_before);
+  REQUIRE(s.u.size() == s.discretization.get_dof_handler().n_dofs());
+
+  // |u'| = 3 |cos 3x| is largest near x = 0 and x = pi/3 ~ 1.05: refined cells sit there, not around x = pi/6.
+  for (const auto &cell : s.discretization.get_triangulation().active_cell_iterators())
+    if (cell->level() > 0) CHECK(std::abs(cell->center()[0] - M_PI / 6.) > 0.15);
+
+  // Transfer of cell averages: a refined cell's children inherit its average.
+  double total_before = 0., total_after = 0.;
+  {
+    Setup fresh;
+    fresh.interpolate();
+    for (const auto &cell : fresh.discretization.get_dof_handler().active_cell_iterators()) {
+      std::vector<types::global_dof_index> dof(1);
+      cell->get_dof_indices(dof);
+      total_before += fresh.u[dof[0]] * cell->measure();
+    }
+  }
+  for (const auto &cell : s.discretization.get_dof_handler().active_cell_iterators()) {
+    std::vector<types::global_dof_index> dof(1);
+    cell->get_dof_indices(dof);
+    total_after += s.u[dof[0]] * cell->measure();
+  }
+  CHECK(total_after == Catch::Approx(total_before).epsilon(1e-12));
+
+  // And the assembler works on the adapted mesh.
+  const auto r = s.residual(s.u);
+  for (const auto v : r)
+    REQUIRE(std::isfinite(v));
+}

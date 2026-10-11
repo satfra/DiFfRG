@@ -67,7 +67,7 @@
  * | extract | \f$e_b\f$ | all PDE assemblers |
  * | raw_potential_gradient | gradient of the potential reconstructed for extract, readouts | all PDE assemblers |
  * | readouts_multiple, readouts | output at the EoM point(s) | all |
- * | face_indicator, cell_indicator | mesh refinement indicators | DG, LDG: faces, cells; CG: cells |
+ * | face_indicator, cell_indicator | mesh refinement indicators | DG, LDG: faces, cells; CG, KT (1D): cells |
  * | affine_constraints | constraints on individual dofs | all PDE assemblers |
  * | ldg_flux, ldg_source, ldg_evaluate_batch | the LDG levels, see below | LDG |
  * | `extractor_point` (optional) | extractor point from the whole solution, see EoM_postprocess | all PDE assemblers |

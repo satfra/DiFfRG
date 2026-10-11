@@ -255,7 +255,7 @@ namespace DiFfRG
               const bool boundary = cell->at_boundary(face_index);
               unsigned int neighbor_index = std::numeric_limits<unsigned int>::max();
               if (!boundary) {
-                neighbor_index = cell->neighbor(face_index)->active_cell_index();
+                neighbor_index = internal::active_face_neighbor(cell, face_index)->active_cell_index();
                 if (neighbor_index < cell_index) continue;
               }
               descriptors_.push_back({cell, face_index, boundary, neighbor_index});
