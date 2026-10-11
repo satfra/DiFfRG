@@ -36,8 +36,7 @@
       "start_adapt_at": 0E0,
       "adapt_dt": 2E-1,
       "level": 0,
-      "refine_percent": 1E-1,
-      "coarsen_percent": 2E-1
+      "tolerance": 3E-4
     }
   },
   "timestepping": {

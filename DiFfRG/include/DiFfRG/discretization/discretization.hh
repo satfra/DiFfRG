@@ -79,9 +79,9 @@
  * | `/discretization/output_subdivisions`        | uint | 1                  | output  | subdivisions of each cell in VTK output |
  * | `/discretization/diagnose_flux_conditioning` | bool | false              | KT      | warn if a diffusion flux is dominated by a gradient-independent constant |
  *
- * Mesh adaptation (CG, DG, LDG; KT in 1D) is controlled by `/discretization/adaptivity/{start_adapt_at, adapt_dt,
- * level, refine_percent, coarsen_percent, coarsen_buffer, coarsen_age}` (defaults 0, 0.1, 0 = off, 0.1, 0.05, 2, 2);
- * see HAdaptivity in mesh/h_adaptivity.hh. The keys of the extractor search (EoM, raw potential) are documented in
+ * Mesh adaptation (CG, DG, LDG; KT in 1D) is controlled by `/discretization/adaptivity/...`: by default, every
+ * `adapt_dt` = 0.2 cells whose estimated relative resolution error exceeds `tolerance` = 3e-4 are refined, up to
+ * `level` (default 0 = off); see HAdaptivity in mesh/h_adaptivity.hh for all keys. The keys of the extractor search (EoM, raw potential) are documented in
  * common/eom_config.hh.
  */
 // clang-format on

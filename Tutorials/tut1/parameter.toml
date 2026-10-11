@@ -31,10 +31,9 @@ refine = 0
 
 [discretization.adaptivity]
 start_adapt_at = 0.0
-adapt_dt = 1e-1
+adapt_dt = 2e-1
 level = 0
-refine_percent = 1e-1
-coarsen_percent = 5e-2
+tolerance = 3e-4
 
 [timestepping]
 final_time = 10.0
