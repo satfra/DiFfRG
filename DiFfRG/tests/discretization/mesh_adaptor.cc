@@ -12,6 +12,7 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <vector>
 
 using namespace DiFfRG;
 using namespace dealii;
@@ -46,7 +47,7 @@ namespace
   };
 
   ConfigTree make_config(const uint refine, const uint level, const uint coarsen_buffer = 2, const uint coarsen_age = 2,
-                         const std::string &marking = "fraction")
+                         const std::string &marking = "fraction", const bool predict = true)
   {
     return json::value({{"physical", {}},
                         {"discretization",
@@ -63,6 +64,7 @@ namespace
                             {"coarsen_percent", 0.3},
                             {"marking", marking},
                             {"tolerance", 1e-3},
+                            {"predict", predict},
                             {"coarsen_buffer", coarsen_buffer},
                             {"coarsen_age", coarsen_age}}}}},
                         {"output", {{"verbosity", 0}}}});
@@ -244,4 +246,35 @@ TEST_CASE("HAdaptivity with tolerance marking refines only where a feature is un
     CHECK(finest >= 3);
     CHECK(coarsest == 0);
   }
+}
+
+TEST_CASE("HAdaptivity with predict refines a feature that is about to become unresolved",
+          "[discretization][adaptivity]")
+{
+  DiFfRG::Init();
+  using Discretization = CG::Discretization<Smooth, RectangularMeshSerial<1>>;
+  // Adapt at u = tanh((x - 0.4) / w) for each w in turn; whether each adaptation changed the mesh. On this mesh,
+  // a single profile is refined for w below about 3.9.
+  const auto adapt_sequence = [](const bool predict, const std::vector<double> &widths) {
+    const auto config = make_config(0, 5, 2, 0, "tolerance", predict);
+    Smooth model;
+    RectangularMeshSerial<1> mesh{Config::ConfigurationMesh<1>(config)};
+    Discretization discretization(mesh, config);
+    CG::Assembler<Discretization> assembler(discretization, model, config);
+    HAdaptivity<CG::Assembler<Discretization>> adaptor(assembler, config);
+    std::vector<bool> changed;
+    for (const double w : widths) {
+      model.width = w;
+      FE::FlowingVariables<Discretization> state(discretization);
+      state.interpolate(model);
+      typename Discretization::VectorType u(state.spatial_data());
+      changed.push_back(adaptor.adapt(u));
+    }
+    return changed;
+  };
+  // Steepening, but still resolved at the second adaptation: only the extrapolated indicator crosses the tolerance.
+  CHECK(adapt_sequence(false, {6., 4.4}) == std::vector<bool>{false, false});
+  CHECK(adapt_sequence(true, {6., 4.4}) == std::vector<bool>{false, true});
+  // Without growth, nothing is extrapolated.
+  CHECK(adapt_sequence(true, {4.4, 4.4}) == std::vector<bool>{false, false});
 }

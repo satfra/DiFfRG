@@ -541,6 +541,7 @@ namespace DiFfRG
           }
           assembler.save_model_state(snapshot.model);
           snapshot.last_adaptation_time = adaptor.last_adaptation_time();
+          adaptor.save_state(snapshot.adaptor);
           snapshot.config_json = json::serialize(static_cast<json::value>(config));
           DiFfRG::write_snapshot(path, snapshot);
           log.info("Wrote the snapshot at t = {} (k = {}) to '{}'.", t, snapshot.k, path.string());
@@ -621,6 +622,7 @@ namespace DiFfRG
       data.collect_sizes();
 
       if (std::isfinite(snapshot.last_adaptation_time)) adaptor.set_last_adaptation_time(snapshot.last_adaptation_time);
+      adaptor.load_state(snapshot.adaptor);
       return snapshot.t;
     }
 

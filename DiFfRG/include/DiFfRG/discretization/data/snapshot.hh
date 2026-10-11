@@ -42,6 +42,8 @@ namespace DiFfRG
     ModelState model;
     /// Time of the last mesh adaptation, NaN if the adaptor does not track one.
     double last_adaptation_time = std::numeric_limits<double>::quiet_NaN();
+    /// The mesh adaptor's own state, see AbstractAdaptor::save_state. Empty in snapshots written before it existed.
+    ModelState adaptor;
     /// The configuration of the run that wrote the snapshot, verbatim.
     std::string config_json = "{}";
   };

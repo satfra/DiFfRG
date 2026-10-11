@@ -1,6 +1,8 @@
 #pragma once
 
 // standard library
+#include <DiFfRG/discretization/common/snapshot_state.hh>
+
 #include <limits>
 #include <stdexcept>
 #include <vector>
@@ -59,5 +61,14 @@ namespace DiFfRG
 
     /// Restore the adaptation schedule from a snapshot; see last_adaptation_time().
     virtual void set_last_adaptation_time(const double /*t*/) {}
+
+    /**
+     * @brief Store what later adaptations depend on beyond the schedule (e.g. the age of cells), for flow snapshots.
+     *
+     * load_state() is called on a restart once the mesh of the snapshot is rebuilt.
+     */
+    virtual void save_state([[maybe_unused]] ModelState &state) const {}
+    /// Restore what save_state() stored.
+    virtual void load_state([[maybe_unused]] const ModelState &state) {}
   };
 } // namespace DiFfRG
