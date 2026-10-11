@@ -148,18 +148,15 @@ namespace DiFfRG
         const auto &variables = get<0>(sol);
         AssertThrow(jac.m() == variables.size() && jac.n() == variables.size(),
                     ExcMessage("Assure that the jacobian has the right dimension!"));
-        {
-          auto du = AD_tools::template vector_to_AD<Model::Components::count_variables()>(variables);
-          auto ad_sol = std::tuple_cat(tuple_first<to>(sol), std::tie(du), tuple_last<Solution::size - to - 1>(sol));
-          for (uint j = 0; j < Model::Components::count_variables(); ++j) {
-            std::array<AD_type, Model::Components::count_variables()> res{{}};
-            seed(du[j]);
-            asImp().dt_variables(res, Solution::as(ad_sol));
-            for (uint i = 0; i < Model::Components::count_variables(); ++i) {
-              jac(i, j) = grad(res[i]);
-            }
-            unseed(du[j]);
-          }
+        auto du = AD_tools::template vector_to_AD<Model::Components::count_variables()>(variables);
+        auto ad_sol = std::tuple_cat(std::tie(du), tuple_last<Solution::size - 1>(sol));
+        for (uint j = 0; j < Model::Components::count_variables(); ++j) {
+          std::array<AD_type, Model::Components::count_variables()> res{{}};
+          seed(du[j]);
+          asImp().dt_variables(res, Solution::as(ad_sol));
+          for (uint i = 0; i < Model::Components::count_variables(); ++i)
+            jac(i, j) = grad(res[i]);
+          unseed(du[j]);
         }
       }
     };

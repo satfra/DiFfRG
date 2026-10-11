@@ -347,8 +347,6 @@ namespace
 
     auto data_out_path = OutputPath::temporary(TemporaryRetention::remove_on_destruction,
                                                "o2_model_kt_2D_case_i_regression", "output");
-    std::clog << "[O2 DIAG] using temporary output directory "
-              << data_out_path.root() << '\n';
     OutputSession<Discretization> data_out(data_out_path, json);
     auto adaptor = std::make_unique<NoAdaptivity<VectorType>>();
     ImplicitTimeStepper time_stepper(json, assembler, data_out, *adaptor);
@@ -376,7 +374,6 @@ namespace
 
     auto data_out_path = OutputPath::temporary(TemporaryRetention::remove_on_destruction,
                                                "o2_model_kt_2D_case_i_origin_centered_quarter_domain", "output");
-    std::clog << "[O2 DIAG] using temporary output directory " << data_out_path.root() << '\n';
     OutputSession<Discretization> data_out(data_out_path, json);
     auto adaptor = std::make_unique<NoAdaptivity<VectorType>>();
     ImplicitTimeStepper time_stepper(json, assembler, data_out, *adaptor);

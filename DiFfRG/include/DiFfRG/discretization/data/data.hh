@@ -23,6 +23,16 @@
 
 namespace DiFfRG
 {
+  namespace internal
+  {
+    /// Index of the variables block of a FlowingVariables vector; throws if the model has no variables.
+    template <typename BlockVector> unsigned int variables_block(const BlockVector &data)
+    {
+      if (data.n_blocks() < 2) throw std::logic_error("FlowingVariables::variable_data: the model has no variables.");
+      return 1;
+    }
+  } // namespace internal
+
   using namespace dealii;
 
   namespace internal
@@ -146,17 +156,10 @@ namespace DiFfRG
       virtual const VectorType &spatial_data() const override { return m_data.block(0); }
 
       /// The variables (block 1); throws std::logic_error if the model has no variables.
-      virtual VectorType &variable_data() override { return m_data.block(variables_block()); }
-      virtual const VectorType &variable_data() const override { return m_data.block(variables_block()); }
+      virtual VectorType &variable_data() override { return m_data.block(internal::variables_block(m_data)); }
+      virtual const VectorType &variable_data() const override { return m_data.block(internal::variables_block(m_data)); }
 
     private:
-      /// Index of the variables block; throws if the model has no variables.
-      unsigned int variables_block() const
-      {
-        if (m_data.n_blocks() < 2)
-          throw std::logic_error("FlowingVariables::variable_data: the model has no variables.");
-        return 1;
-      }
 
       const Discretization &discretization;
       const DoFHandler<dim> &dof_handler;
@@ -263,17 +266,10 @@ namespace DiFfRG
       virtual const VectorType &spatial_data() const override { return m_data.block(0); }
 
       /// The variables (block 1); throws std::logic_error if the model has no variables.
-      virtual VectorType &variable_data() override { return m_data.block(variables_block()); }
-      virtual const VectorType &variable_data() const override { return m_data.block(variables_block()); }
+      virtual VectorType &variable_data() override { return m_data.block(internal::variables_block(m_data)); }
+      virtual const VectorType &variable_data() const override { return m_data.block(internal::variables_block(m_data)); }
 
     private:
-      /// Index of the variables block; throws if the model has no variables.
-      unsigned int variables_block() const
-      {
-        if (m_data.n_blocks() < 2)
-          throw std::logic_error("FlowingVariables::variable_data: the model has no variables.");
-        return 1;
-      }
 
       const Discretization &discretization;
       const DoFHandler<dim> &dof_handler;

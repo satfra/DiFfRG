@@ -155,7 +155,8 @@ namespace DiFfRG
        */
       void refinement_indicator(Vector<double> &indicator, const VectorType &solution)
       {
-        const VectorType solution_global = this->constrained(solution);
+        const auto state = this->constrained(solution);
+        const VectorType &solution_global = state.u();
         tbb::enumerable_thread_specific<CellScratch> scratch([this]() {
           return CellScratch(mapping, fe, quadrature, quadrature_face, gather_flags() | update_hessians);
         });
@@ -184,8 +185,8 @@ namespace DiFfRG
       virtual void mass(VectorType &mass, const VectorType &solution, const VectorType &solution_dot,
                         NumberType weight) override
       {
-        const VectorType solution_global = this->constrained(solution);
-        const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         scatter_residual(mass, [&](const size_t, CellScratch &s, Vector<NumberType> &r) {
           const auto &fe_v = s.fe_values;
           fe_v.get_function_values(solution_global, s.values);
@@ -204,8 +205,8 @@ namespace DiFfRG
                             const VectorType &solution_dot, NumberType weight_mass,
                             const VectorType &variables = VectorType()) override
       {
-        const VectorType solution_global = this->constrained(solution);
-        const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         DiFfRG::internal::PhaseTimer phase(residual_times);
         Extractors extracted_data{{}};
         if constexpr (n_extr > 0) this->extract(extracted_data, solution_global, variables, true, false, true);
@@ -264,8 +265,8 @@ namespace DiFfRG
       virtual void jacobian_mass(SparseMatrixType &jacobian, const VectorType &solution, const VectorType &solution_dot,
                                  NumberType alpha, NumberType beta) override
       {
-        const VectorType solution_global = this->constrained(solution);
-        const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         Timer timer;
         scatter_jacobian(jacobian, [&](const size_t, CellScratch &s, LocalData &out) {
           add_mass_jacobian(s, out.jacobian, solution_global, solution_global_dot, alpha, beta);
@@ -282,8 +283,8 @@ namespace DiFfRG
                             const VectorType &solution_dot, NumberType alpha, NumberType beta,
                             const VectorType &variables = VectorType()) override
       {
-        const VectorType solution_global = this->constrained(solution);
-        const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         DiFfRG::internal::PhaseTimer phase(jacobian_times);
         Extractors extracted_data{{}};
         if constexpr (n_extr > 0) {

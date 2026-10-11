@@ -692,8 +692,8 @@ namespace DiFfRG
         virtual void mass(VectorType &mass, const VectorType &solution, const VectorType &solution_dot,
                           NumberType weight) override
         {
-          const VectorType solution_global = this->constrained(solution);
-          const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
+          const auto state = this->constrained(solution, solution_dot);
+          const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
           scatter_rows(mass, [&](const size_t k, Scratch &scratch, CellRows &local) {
             const auto &cell = cells[k];
             const auto &geometry = cell_topology_cache[cell->active_cell_index()];
@@ -1776,12 +1776,10 @@ namespace DiFfRG
                               const VectorType &solution_dot, NumberType weight_mass,
                               const VectorType &variables = VectorType()) override
         {
-          const VectorType solution_global = this->constrained(solution);
-          const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
-          // Find the EoM and extract whatever data is needed for the model, as the FEM assemblers do. Beyond
-          // filling `extracted_data` this is what gives a model the chance to refresh whatever internal state its
-          // flux depends on (interpolators, self-consistently solved anomalous dimensions, ...) before the fluxes
-          // are evaluated. Models without extractors are unaffected.
+          const auto state = this->constrained(solution, solution_dot);
+          const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
+          // The extractors at the EoM, as in the FEM assemblers; extract() also lets the model refresh state its
+          // flux depends on before the fluxes are evaluated.
           DiFfRG::internal::PhaseTimer phase(residual_times);
           Extractors extracted{};
           if constexpr (Components::count_extractors() > 0)
@@ -1796,9 +1794,7 @@ namespace DiFfRG
           gather_sources<Reconstructor>(reconstruction_cache, extracted, variables);
           phase.lap(&PhaseTimes::gather);
 
-          // Runs on the first residual assembly only, so it costs nothing on the hot path. The first assembly is
-          // also the most informative sample: for an fRG flow it happens at k = Lambda, where a flux baseline is
-          // largest.
+          // Only on the first residual assembly, where (at k = Lambda) a flux baseline is largest.
           if (diagnose_flux_conditioning && !flux_conditioning_probed) {
             flux_conditioning_probed = true;
             const NoMapsHere no_maps_during_assembly; // the probe calls the model's per-point diffusion flux
@@ -1825,8 +1821,8 @@ namespace DiFfRG
                                    const VectorType &solution_dot, NumberType alpha = 1.,
                                    NumberType beta = 1.) override
         {
-          const VectorType solution_global = this->constrained(solution);
-          const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
+          const auto state = this->constrained(solution, solution_dot);
+          const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
           Timer timer;
           scatter_rows(jacobian, [&](const size_t k, Scratch &scratch, CellRows &local) {
             const auto &cell = cells[k];
@@ -1859,8 +1855,8 @@ namespace DiFfRG
                               const VectorType &solution_dot, NumberType alpha, NumberType beta,
                               const VectorType &variables = VectorType()) override
         {
-          const VectorType solution_global = this->constrained(solution);
-          const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
+          const auto state = this->constrained(solution, solution_dot);
+          const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
           // See residual(): keep the model's extractor-driven state consistent with the point the jacobian is
           // linearised about. The extractor jacobian contribution itself is not assembled, so extractors are
           // frozen w.r.t. the FE solution within a Newton step; likewise the variables (jacobian_variables is a no-op).

@@ -1711,7 +1711,7 @@ namespace DiFfRG
     auto potential =
         internal::reconstruct_potential(EoM_cell, sol, dof_handler, mapping, get_EoM, config, initial_guess, cache);
     auto EoM = internal::polish_EoM_root(potential.minimum, sol, dof_handler, mapping, get_EoM);
-    EoM_cell = dealii::GridTools::find_active_cell_around_point(dof_handler, EoM);
+    EoM_cell = dealii::GridTools::find_active_cell_around_point(mapping, dof_handler, EoM).first;
 
     dealii::Vector<typename VectorType::value_type> values(dof_handler.get_fe().n_components());
     dealii::Functions::FEFieldFunction<dim, VectorType> fe_function(dof_handler, sol, mapping);

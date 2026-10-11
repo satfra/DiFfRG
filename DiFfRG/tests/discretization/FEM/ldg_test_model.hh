@@ -174,16 +174,17 @@ namespace ldg_test
    * assembled.
    *
    * With `swapped`, it is the other way round: level 1 (lu, lv) = ((u^2 / 2)', v') is nonlinear in u, and level 2,
-   * llu = (lu + 0.3 lv)', is linear in level 1 and declared constant.
+   * llu = (lu + 0.3 lv)', is linear in level 1 and declared constant. With `misdeclared`, level 2 keeps its nonlinear
+   * definition but is declared constant all the same.
    */
-  template <bool constant, bool batched = false, bool swapped = false>
-  class Model3 : public def::AbstractModel<Model3<constant, batched, swapped>, Components3>,
-                 public ModelBase<Model3<constant, batched, swapped>, Components3, false, batched>,
+  template <bool constant, bool batched = false, bool swapped = false, bool misdeclared = false>
+  class Model3 : public def::AbstractModel<Model3<constant, batched, swapped, misdeclared>, Components3>,
+                 public ModelBase<Model3<constant, batched, swapped, misdeclared>, Components3, false, batched>,
                  public def::Time,
-                 public def::LLFFlux<Model3<constant, batched, swapped>>,
-                 public def::LDGUpDownFluxes<Model3<constant, batched, swapped>, Level1Fluxes, Level2Fluxes>,
-                 public def::FlowBoundaries<Model3<constant, batched, swapped>>,
-                 public def::AD<Model3<constant, batched, swapped>>
+                 public def::LLFFlux<Model3<constant, batched, swapped, misdeclared>>,
+                 public def::LDGUpDownFluxes<Model3<constant, batched, swapped, misdeclared>, Level1Fluxes, Level2Fluxes>,
+                 public def::FlowBoundaries<Model3<constant, batched, swapped, misdeclared>>,
+                 public def::AD<Model3<constant, batched, swapped, misdeclared>>
   {
     static_assert(!(constant && swapped), "With `swapped`, level 1 is nonlinear and cannot be constant.");
 
@@ -207,7 +208,7 @@ namespace ldg_test
       this->components().add_dependency(2, 0, 1, 0);
       this->components().add_dependency(2, 0, 1, 1);
       if constexpr (constant) this->components().set_jacobian_constant(1, 0);
-      if constexpr (swapped) this->components().set_jacobian_constant(2, 1);
+      if constexpr (swapped || misdeclared) this->components().set_jacobian_constant(2, 1);
     }
 
     template <typename Out, typename Batch> void default_evaluate_batch(Out &out, const Batch &batch) const

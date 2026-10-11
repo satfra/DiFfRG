@@ -115,3 +115,11 @@ TEST_CASE("Repeated LDG jacobians at the same state agree", "[discretization][ld
   INFO("worst deviation " << worst << ", scale " << scale);
   REQUIRE(worst <= 1e-12 * scale);
 }
+
+// A level declared constant in the level below but not linear in it is detected when its jacobian is reused.
+TEST_CASE("LDG rejects a level wrongly declared constant", "[discretization][ldg]")
+{
+  DiFfRG::Init();
+  Setup<Model3<false, false, false, true>> s(1);
+  REQUIRE_THROWS_WITH(s.jacobian(), Catch::Matchers::ContainsSubstring("was declared constant"));
+}

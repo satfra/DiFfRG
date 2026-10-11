@@ -37,6 +37,48 @@ namespace DiFfRG
   namespace internal
   {
     /**
+     * @brief A solution vector, and optionally its time derivative, with the constraints applied: hanging-node
+     * values from their masters, and the model's affine constraints. The timesteppers do not apply them, so the
+     * constrained entries of their vectors are stale, and the assemblers read this instead.
+     *
+     * Applying the constraints is affine, D(x) = C x + g, so the time derivative is D(u + u_dot) - D(u) = C u_dot.
+     * Without constraints nothing is copied.
+     */
+    template <typename VectorType> class ConstrainedSolution
+    {
+    public:
+      template <typename Constraints>
+      ConstrainedSolution(const Constraints &constraints, const VectorType &u) : u_ptr(&u)
+      {
+        if (constraints.n_constraints() == 0) return;
+        u_copy.emplace(u);
+        constraints.distribute(*u_copy);
+        u_ptr = &*u_copy;
+      }
+      template <typename Constraints>
+      ConstrainedSolution(const Constraints &constraints, const VectorType &u, const VectorType &u_dot)
+          : ConstrainedSolution(constraints, u)
+      {
+        u_dot_ptr = &u_dot;
+        if (!u_copy) return;
+        u_dot_copy.emplace(u);
+        *u_dot_copy += u_dot;
+        constraints.distribute(*u_dot_copy);
+        *u_dot_copy -= *u_copy;
+        u_dot_ptr = &*u_dot_copy;
+      }
+      ConstrainedSolution(const ConstrainedSolution &) = delete;
+      ConstrainedSolution &operator=(const ConstrainedSolution &) = delete;
+
+      const VectorType &u() const { return *u_ptr; }
+      const VectorType &u_dot() const { return *u_dot_ptr; }
+
+    private:
+      std::optional<VectorType> u_copy, u_dot_copy;
+      const VectorType *u_ptr = nullptr, *u_dot_ptr = nullptr;
+    };
+
+    /**
      * @brief What every assembler (CG, DG, LDG, KT) does the same way: the EoM search, the extractors and their
      * jacobian, the readouts, the variables' residual, the constraints, the mass matrix, the linear-algebra setup
      * and the timings.
@@ -163,10 +205,11 @@ namespace DiFfRG
           names_dot.push_back(name + "_dot");
           names_residual.push_back(name + "_residual");
         }
-        const VectorType u = constrained(solution);
+        const auto state = dt_solution.size() > 0 ? constrained(solution, dt_solution) : constrained(solution);
+        const VectorType &u = state.u();
         auto fe_out = data_out.fields();
         fe_out.attach(dof_handler, u, names);
-        if (dt_solution.size() > 0) fe_out.attach(dof_handler, constrained_dot(solution, dt_solution), names_dot);
+        if (dt_solution.size() > 0) fe_out.attach(dof_handler, state.u_dot(), names_dot);
         if (residual.size() > 0) fe_out.attach(dof_handler, residual, names_residual);
 
         readouts(data_out, u, variables);
@@ -179,7 +222,7 @@ namespace DiFfRG
         Timer timer;
         Extractors extracted{};
         if constexpr (Components::count_extractors() > 0)
-          extract(extracted, constrained(spatial_solution), variables, true, false, false);
+          extract(extracted, constrained(spatial_solution).u(), variables, true, false, false);
         model.dt_variables(residual, v_tie(variables, std::as_const(extracted)));
         Kokkos::fence();
         timings_variable_residual.push_back(timer.wall_time());
@@ -191,7 +234,7 @@ namespace DiFfRG
         Timer timer;
         Extractors extracted{};
         if constexpr (Components::count_extractors() > 0)
-          extract(extracted, constrained(spatial_solution), variables, true, false, false);
+          extract(extracted, constrained(spatial_solution).u(), variables, true, false, false);
         model.template jacobian_variables<0>(jacobian, v_tie(variables, std::as_const(extracted)));
         Kokkos::fence();
         timings_variable_jacobian.push_back(timer.wall_time());
@@ -500,29 +543,14 @@ namespace DiFfRG
         return t.empty() ? 0. : std::accumulate(t.begin(), t.end(), 0.) / t.size();
       }
 
-      /**
-       * @brief @p u with the constraints applied: hanging-node values from their masters, and the model's affine
-       * constraints. The timesteppers do not apply them, so the constrained entries of their vectors are stale, and
-       * the assembly reads this instead.
-       */
-      VectorType constrained(const VectorType &u) const
+      /// The solution (and its time derivative) with the constraints applied, see internal::ConstrainedSolution.
+      internal::ConstrainedSolution<VectorType> constrained(const VectorType &u) const
       {
-        VectorType result(u);
-        discretization.get_constraints().distribute(result);
-        return result;
+        return {discretization.get_constraints(), u};
       }
-
-      /**
-       * @brief The time derivative of the constrained solution: @p u_dot with the homogeneous constraints applied.
-       * Applying the constraints is affine, D(x) = C x + g, so this is D(u + u_dot) - D(u) = C u_dot.
-       */
-      VectorType constrained_dot(const VectorType &u, const VectorType &u_dot) const
+      internal::ConstrainedSolution<VectorType> constrained(const VectorType &u, const VectorType &u_dot) const
       {
-        VectorType result(u);
-        result += u_dot;
-        discretization.get_constraints().distribute(result);
-        result -= constrained(u);
-        return result;
+        return {discretization.get_constraints(), u, u_dot};
       }
 
       Discretization &discretization;

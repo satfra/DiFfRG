@@ -180,8 +180,8 @@ namespace DiFfRG
         previous.push_back(view.get());
       }
       // The timesteppers leave the constrained entries (hanging nodes) stale; interpolating them onto the new mesh
-      // would carry that into the unconstrained dofs. For a time derivative this applies the inhomogeneities too,
-      // which only touches dofs that are constrained again after the transfer.
+      // would carry that into the unconstrained dofs. For a time derivative this applies the inhomogeneities too;
+      // harmless, as the IDA steppers only use a transferred derivative as the starting guess of their restart.
       for (auto &v : previous)
         constraints.distribute(v);
       triangulation.prepare_coarsening_and_refinement();
@@ -191,15 +191,15 @@ namespace DiFfRG
         active_before.insert(cell->id());
       triangulation.execute_coarsening_and_refinement();
       ++n_adaptations;
-      std::map<CellId, uint> still_active;
+      std::map<CellId, uint> next_created_at;
       for (const auto &cell : triangulation.active_cell_iterators()) {
         const auto id = cell->id();
         if (!active_before.contains(id))
-          still_active[id] = n_adaptations;
+          next_created_at[id] = n_adaptations;
         else if (const auto found = created_at.find(id); found != created_at.end())
-          still_active.insert(*found);
+          next_created_at.insert(*found);
       }
-      created_at = std::move(still_active);
+      created_at = std::move(next_created_at);
 
       discretization.reinit();
       assembler.reinit();

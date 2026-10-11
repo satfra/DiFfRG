@@ -342,7 +342,8 @@ namespace DiFfRG
        */
       void refinement_indicator(Vector<double> &indicator, const VectorType &solution)
       {
-        const VectorType solution_global = this->constrained(solution);
+        const auto state = this->constrained(solution);
+        const VectorType &solution_global = state.u();
         constexpr uint n_sub = Components::count_fe_subsystems();
         struct IndicatorScratch {
           IndicatorScratch(const Mapping<dim> &mapping, const vector<const DoFHandler<dim> *> &dofh,
@@ -433,8 +434,8 @@ namespace DiFfRG
       virtual void mass(VectorType &residual, const VectorType &solution, const VectorType &solution_dot,
                         NumberType weight) override
       {
-        const VectorType solution_global = this->constrained(solution);
-        const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         scatter_residual(residual, [&](const size_t, Scratch &s, Vector<NumberType> &r) {
           const auto &fe_v = *s.fe_v[0];
           fe_v.get_function_values(solution_global, s.values[0]);
@@ -464,8 +465,8 @@ namespace DiFfRG
                             const VectorType &solution_dot, NumberType weight_mass,
                             const VectorType &variables = VectorType()) override
       {
-        const VectorType solution_global = this->constrained(solution);
-        const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         DiFfRG::internal::PhaseTimer phase(residual_times);
         // Find the EoM and extract whatever data is needed for the model; extract() builds the LDG levels.
         Extractors extracted_data{{}};
@@ -517,8 +518,8 @@ namespace DiFfRG
                                  const VectorType &solution_dot, NumberType alpha = 1.,
                                  NumberType beta = 1.) override
       {
-        const VectorType solution_global = this->constrained(solution);
-        const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         Timer timer;
         scatter_jacobian(jacobian, false, [&](const size_t, Scratch &s, LocalData &out) {
           add_mass_jacobian(s, out.blocks[0][0], solution_global, solution_global_dot, alpha, beta);
@@ -543,8 +544,8 @@ namespace DiFfRG
                             NumberType weight, const VectorType &solution_dot, NumberType alpha, NumberType beta,
                             const VectorType &variables = VectorType()) override
       {
-        const VectorType solution_global = this->constrained(solution);
-        const VectorType solution_global_dot = this->constrained_dot(solution, solution_dot);
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         DiFfRG::internal::PhaseTimer phase(jacobian_times);
         // Find the EoM and extract whatever data is needed for the model; extract() builds the LDG levels.
         Extractors extracted_data{{}};
@@ -1112,6 +1113,18 @@ namespace DiFfRG
                 w * s.shape_values[side][0][i] * scalar_product(Jq.j_extr_flux(s.comp[0][i], e), normal);
       }
 
+      /// Throw if the level @p k computed by its declared-constant map differs from the assembled one.
+      template <typename V> static void require_linear_level(const uint k, const V &assembled, V mapped)
+      {
+        const double scale = assembled.linfty_norm();
+        mapped -= assembled;
+        if (mapped.linfty_norm() > 1e-8 * std::max(scale, 1e-300))
+          throw std::runtime_error("LDG level " + std::to_string(k) +
+                                   " was declared constant (set_jacobian_constant), but it is not a fixed linear map "
+                                   "of the level below: check ldg_flux, ldg_source and the boundary fluxes for "
+                                   "nonlinear or constant terms.");
+      }
+
       /**
        * @brief The LDG levels at @p sol. A level that is a fixed linear map of u (every level up to it declared
        * constant, see ComponentDescriptor::set_jacobian_constant) is j_gu[k] u, the others are assembled.
@@ -1139,13 +1152,7 @@ namespace DiFfRG
           if (first_use) {
             auto assembled = sol_vector[k];
             assemble(assembled, sol_vector_tmp[k]);
-            const double scale = assembled.linfty_norm();
-            assembled -= sol_vector[k];
-            if (assembled.linfty_norm() > 1e-8 * std::max(scale, 1e-300))
-              throw std::runtime_error("LDG level " + std::to_string(k) +
-                                       " was declared constant (set_jacobian_constant), but it is not a fixed linear "
-                                       "map of the level below: check ldg_flux, ldg_source and the boundary fluxes "
-                                       "for nonlinear or constant terms.");
+            require_linear_level(k, assembled, sol_vector[k]);
           }
         });
       }
@@ -1164,6 +1171,14 @@ namespace DiFfRG
           if (!ldg_matrix_built[k - 1]) rebuild_ldg_jacobian<k - 1>(sol);
           if (!level_jacobian_built[k] || !model.get_components().jacobians_constant(k, k - 1)) {
             build_ldg_jacobian<k - 1, k>(sol_vector[k - 1], j_wg[k], j_wg_tmp[k]);
+            // Reused from now on: check that it reproduces the assembled level. (If all levels up to k are constant,
+            // rebuild_ldg_vectors checks the whole chain instead, and level k is not assembled yet here.)
+            if (!level_jacobian_built[k] && model.get_components().jacobians_constant(k, k - 1) &&
+                !model.get_components().jacobians_constant(k, 0)) {
+              auto mapped = sol_vector[k];
+              j_wg[k].vmult(mapped, sol_vector[k - 1]);
+              require_linear_level(k, sol_vector[k], mapped);
+            }
             level_jacobian_built[k] = true;
           }
           // mmult adds into its target, which therefore has to start from zero.
