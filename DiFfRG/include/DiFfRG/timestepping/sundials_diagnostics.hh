@@ -41,9 +41,10 @@ namespace DiFfRG
   {
     const auto ida = time_stepper.get_statistics();
     if (!ida.valid) return;
-    log.info("IDA: steps={} residuals={} setups={} newton_iters={} newton_fails={} error_test_fails={}", ida.num_steps,
-             ida.num_residual_evaluations, ida.num_linear_solver_setups, ida.num_nonlinear_iterations,
-             ida.num_nonlinear_convergence_failures, ida.num_error_test_failures);
+    log.info("IDA: steps={} residuals={} setups={} (alpha updates {}) newton_iters={} newton_fails={} "
+             "error_test_fails={}",
+             ida.num_steps, ida.num_residual_evaluations, ida.num_linear_solver_setups, ida.num_jacobian_alpha_updates,
+             ida.num_nonlinear_iterations, ida.num_nonlinear_convergence_failures, ida.num_error_test_failures);
   }
 
   /// The Jacobian record of an IDA Jacobian build with IDA's \f$\alpha\f$; see jacobian_diagnostics.hh.

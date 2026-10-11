@@ -113,6 +113,8 @@ namespace DiFfRG
   {
     free_ida();
     ida_mem = IDACreate(ctx);
+    assembled = false;
+    alpha_updates = 0;
 
     auto yy = make_nvector_view(solution, ctx);
     auto yp = make_nvector_view(solution_dot, ctx);
@@ -184,10 +186,8 @@ namespace DiFfRG
     check(IDASetJacFn(ida_mem,
                       [](sunrealtype tt, sunrealtype cj, N_Vector y, N_Vector y_dot, N_Vector, SUNMatrix,
                          void *user_data, N_Vector, N_Vector, N_Vector) -> int {
-                        auto &driver = *static_cast<IDADriver *>(user_data);
-                        return call_and_possibly_capture_exception(driver.setup_jacobian, driver.pending_exception, tt,
-                                                                   *unwrap_nvector_const<VectorType>(y),
-                                                                   *unwrap_nvector_const<VectorType>(y_dot), cj);
+                        return static_cast<IDADriver *>(user_data)->jacobian(
+                            tt, cj, *unwrap_nvector_const<VectorType>(y), *unwrap_nvector_const<VectorType>(y_dot));
                       }),
           "IDASetJacFn");
 
@@ -197,7 +197,9 @@ namespace DiFfRG
     }
     // Consistent initial conditions: algebraic components of y and the derivative of the differential ones.
     check(IDASetMaxNumItersIC(ida_mem, 5), "IDASetMaxNumItersIC");
+    computing_initial_condition = true;
     const int status = IDACalcIC(ida_mem, IDA_YA_YDP_INIT, t + h);
+    computing_initial_condition = false;
     handle_pending_exception();
     check(status, "IDACalcIC");
     check(IDAGetConsistentIC(ida_mem, yy, yp), "IDAGetConsistentIC");
@@ -252,6 +254,33 @@ namespace DiFfRG
   }
 
   template <typename VectorType>
+  int IDADriver<VectorType>::jacobian(const double t, const double alpha, const VectorType &y, const VectorType &y_dot)
+  {
+    long int step = 0, newton_failures = 0, failures_this_solve = 0;
+    IDAGetNumSteps(ida_mem, &step);
+    IDAGetNumNonlinSolvConvFails(ida_mem, &newton_failures);
+    SUNNonlinSolGetNumConvFails(newton, &failures_this_solve);
+    // A Newton failure, also one in the current step that IDA retries with a new Jacobian, asks for a current one.
+    const bool reuse = update_jacobian_alpha && assembled && !computing_initial_condition && failures_this_solve == 0 &&
+                       newton_failures == assembly_newton_failures &&
+                       step - assembly_step < static_cast<long int>(prm.jacobian_reuse_steps);
+    if (reuse) {
+      bool updated = false;
+      const int status = call_and_possibly_capture_exception(
+          [&](const double t, const VectorType &y, const VectorType &y_dot, const double alpha) {
+            updated = update_jacobian_alpha(t, y, y_dot, alpha);
+          },
+          pending_exception, t, y, y_dot, alpha);
+      alpha_updates += status == 0 && updated;
+      if (status != 0 || updated) return status;
+    }
+    assembled = true;
+    assembly_step = step;
+    assembly_newton_failures = newton_failures;
+    return call_and_possibly_capture_exception(setup_jacobian, pending_exception, t, y, y_dot, alpha);
+  }
+
+  template <typename VectorType>
   unsigned int IDADriver<VectorType>::solve_dae(VectorType &solution, VectorType &solution_dot)
   {
     double t = prm.initial_time;
@@ -302,6 +331,7 @@ namespace DiFfRG
               IDAGetNumStepSolveFails(ida_mem, &s.num_step_solve_failures) >= 0 &&
               IDAGetLastStep(ida_mem, &s.last_step_size) >= 0 &&
               IDAGetCurrentStep(ida_mem, &s.current_step_size) >= 0 && IDAGetCurrentTime(ida_mem, &s.current_time) >= 0;
+    s.num_jacobian_alpha_updates = alpha_updates;
     return s;
   }
 

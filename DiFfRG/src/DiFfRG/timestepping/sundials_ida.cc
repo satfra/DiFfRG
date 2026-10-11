@@ -21,6 +21,7 @@
 #include <DiFfRG/discretization/data/output_session.hh>
 #include <DiFfRG/timestepping/ida_rank_agreement.hh>
 #include <DiFfRG/timestepping/ida_driver.hh>
+#include <DiFfRG/timestepping/jacobian_alpha_update.hh>
 #include <DiFfRG/timestepping/linear_solver/GMRES.hh>
 #include <DiFfRG/timestepping/linear_solver/PETScDirect.hh>
 #include <DiFfRG/timestepping/linear_solver/PETScKrylov.hh>
@@ -250,6 +251,7 @@ namespace DiFfRG
     // sparsity patterns)
     SparseMatrixType jacobian;
     assembler.reinit_matrix(jacobian);
+    JacobianAlphaUpdate<VectorType, SparseMatrixType, dim> jacobian_update(assembler);
     LinearSolver<SparseMatrixType, VectorType> linSolver;
     linSolver.set_report_port(this->log);
     if constexpr (requires { linSolver.set_iterative_refinement(true); })
@@ -324,6 +326,7 @@ namespace DiFfRG
         assembler.reinit_vector(residual_placeholder);
         residual = &residual_placeholder;
         assembler.reinit_matrix(jacobian);
+        jacobian_update.forget();
         for (auto *view : {&sol_view, &sol_dot_view, &residual_view, &y_state, &y_dot_state})
           assembler.reinit_solution_view(*view);
         local_tol.init(sol);
@@ -464,6 +467,7 @@ namespace DiFfRG
               return agreed_ida_result(assembler.get_communicator(), true);
             }
 
+            jacobian_update.forget();
             jacobian = 0;
             y_state.refresh(y);
             y_dot_state.refresh(y_dot);
@@ -513,9 +517,15 @@ namespace DiFfRG
 
           callback_trace.record("jacobian", t, failure_counter, time_stepper, callback_diagnostics, "success", &y,
                                 &y_dot, nullptr);
+          jacobian_update.remember(t, y_state.get(), y_dot_state.get(), alpha);
           failure_counter = 0;
           return agreed_ida_result(assembler.get_communicator(), false);
         });
+
+    // IDA only changed its step size or order: change the last Jacobian to the new alpha, see IDADriver.
+    time_stepper.update_jacobian_alpha = [&](const double, const VectorType &, const VectorType &, const double alpha) {
+      return jacobian_update.update_and_factorize(jacobian, alpha, linSolver);
+    };
 
     // Solve the linear system J dst = src
     time_stepper.solve_with_jacobian =
