@@ -455,7 +455,7 @@ This is a DiFfRG simulation. You can pass the following optional parameters to t
              {"rel_tol", 1e-3},
              {"coupling_mode", 1}}},
            {"implicit",
-            {{"dt", 1e-4}, {"minimal_dt", 1e-8}, {"maximal_dt", 1.}, {"abs_tol", 1e-13}, {"rel_tol", 1e-7}}}}},
+            {{"dt", 1e-4}, {"minimal_dt", 1e-14}, {"maximal_dt", 1.}, {"abs_tol", 1e-13}, {"rel_tol", 1e-7}}}}},
          {"output", {{"verbosity", 0}, {"folder", "./"}, {"name", "output"}, {"max_pending_frames", 2}}}});
 
     const std::string file_name = std::filesystem::path(parameter_file)

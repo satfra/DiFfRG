@@ -1,7 +1,6 @@
 // external libraries
 #include <deal.II/base/timer.h>
 #include <deal.II/lac/block_vector.h>
-#include <deal.II/sundials/ida.h>
 
 #include <algorithm>
 #include <cmath>
@@ -21,7 +20,7 @@
 #include <DiFfRG/discretization/common/la_policy.hh>
 #include <DiFfRG/discretization/data/output_session.hh>
 #include <DiFfRG/timestepping/ida_rank_agreement.hh>
-#include <DiFfRG/timestepping/ida_step_bounds.hh>
+#include <DiFfRG/timestepping/ida_driver.hh>
 #include <DiFfRG/timestepping/linear_solver/GMRES.hh>
 #include <DiFfRG/timestepping/linear_solver/PETScDirect.hh>
 #include <DiFfRG/timestepping/linear_solver/PETScKrylov.hh>
@@ -259,12 +258,8 @@ namespace DiFfRG
     const DiagnosticPort jacobian_diagnostic_port =
         jacobian_diagnostics_enabled ? data_out.diagnostic_port() : DiagnosticPort{};
 
-    // Create a SUNDIALS IDA object with the right settings
-    typename SUNDIALS::IDA<VectorType>::AdditionalData ida_data(t_start, t_stop, impl.dt, output_dt, impl.minimal_dt, 5,
-                                                                impl.max_non_linear_iterations, 0, impl.abs_tol,
-                                                                impl.rel_tol);
-    typename SUNDIALS::IDA<VectorType> time_stepper(ida_data);
-    internal::set_ida_step_bounds(time_stepper, impl.minimal_dt, impl.maximal_dt);
+    // Create the IDA integrator
+    IDADriver<VectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt));
 
     // Define some variables for monitoring
     uint stuck = 0;
@@ -283,12 +278,8 @@ namespace DiFfRG
     VectorType y_dot = initial_data;
     y_dot *= 0.;
 
-    // Pointer to current residual for monitoring. Must be initialised before
-    // SUNDIALS::IDA calls `output_step` at the initial `t = 0` (the IDA wrapper
-    // may emit an initial-condition output before the first residual lambda
-    // has run and set this pointer). Without this placeholder the first
-    // `output_step` dereferences uninitialised garbage and the process
-    // segfaults inside `time_stepper.solve_dae`.
+    // Pointer to the current residual for the output. The placeholder covers the output of the initial condition,
+    // which comes before the first residual evaluation.
     VectorType residual_placeholder = initial_data;
     residual_placeholder *= 0.;
     VectorType *residual = &residual_placeholder;
@@ -303,9 +294,6 @@ namespace DiFfRG
     }
 
     time_stepper.differential_components = [&]() { return assembler.get_differential_indices(); };
-
-    // Called whenever a vector needs to initalized
-    time_stepper.reinit_vector = [&](VectorType &v) { assembler.reinit_vector(v); };
 
     // Fully-replicated read-only views for the output path; see SolutionView.
     SolutionView<VectorType> sol_view, sol_dot_view, residual_view;
@@ -348,12 +336,8 @@ namespace DiFfRG
 
     // At output_dt intervals this function saves intermediate solutions
     double last_save = -1.;
-    // SUNDIALS::IDA::solve_dae reports the initial condition as t = 0, whatever the start time is.
-    // The first call is always that one, so it is relabelled to the actual start of the run.
-    bool initial_output = true;
-    time_stepper.output_step = [&](const double t_reported, const VectorType &sol, const VectorType &sol_dot,
+    time_stepper.output_step = [&](const double t, const VectorType &sol, const VectorType &sol_dot,
                                    unsigned int /*step_number*/) {
-      const double t = std::exchange(initial_output, false) ? t_start : t_reported;
       if (!is_close(last_save, t, 1e-10)) {
         assembler.set_time(t);
         // Refreshed here, OUTSIDE write_frame: refreshing a ghosted replica communicates, while
@@ -575,6 +559,7 @@ namespace DiFfRG
     // Start the time loop
     try {
       time_stepper.solve_dae(y, y_dot);
+      log_ida_statistics(time_stepper, this->log);
     } catch (const std::exception &e) {
       this->log.error("Timestepping failed: {}", e.what());
       output_after_failure = true;
@@ -612,12 +597,8 @@ namespace DiFfRG
     const DiagnosticPort jacobian_diagnostic_port =
         jacobian_diagnostics_enabled ? data_out.diagnostic_port() : DiagnosticPort{};
 
-    // Create a SUNDIALS IDA object with the right settings
-    typename SUNDIALS::IDA<BlockVectorType>::AdditionalData ida_data(t_start, t_stop, impl.dt, output_dt,
-                                                                     impl.minimal_dt, 5, impl.max_non_linear_iterations,
-                                                                     0, impl.abs_tol, impl.rel_tol);
-    typename SUNDIALS::IDA<BlockVectorType> time_stepper(ida_data);
-    internal::set_ida_step_bounds(time_stepper, impl.minimal_dt, impl.maximal_dt);
+    // Create the IDA integrator
+    IDADriver<BlockVectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt));
 
     // Define some variables for monitoring
     uint stuck = 0;
@@ -633,9 +614,7 @@ namespace DiFfRG
     BlockVectorType y_dot = initial_data;
     y_dot *= 0.;
 
-    // Pointer to current residual for monitoring. See the VectorType overload
-    // for why this needs a placeholder before SUNDIALS::IDA's first
-    // `output_step` call at `t = 0`.
+    // Pointer to the current residual for the output; see the VectorType overload.
     BlockVectorType residual_placeholder = initial_data;
     residual_placeholder *= 0.;
     BlockVectorType *residual = &residual_placeholder;
@@ -646,14 +625,6 @@ namespace DiFfRG
       differential_indices.add_indices(dof_indices.begin(), dof_indices.end());
       differential_indices.add_range(n_FE_dofs, n_FE_dofs + n_vars);
       return differential_indices;
-    };
-
-    // Called whenever a vector needs to initalized
-    time_stepper.reinit_vector = [&](BlockVectorType &v) {
-      v.reinit(2);
-      assembler.reinit_vector(v.block(0));
-      internal::reinit_la_variables_vector(v.block(1), n_vars, assembler.get_communicator());
-      v.collect_sizes();
     };
 
     // Fully-replicated read-only views for the output path; see SolutionView. The variables block
@@ -706,12 +677,8 @@ namespace DiFfRG
 
     // At output_dt intervals this function saves intermediate solutions
     double last_save = -1.;
-    // SUNDIALS::IDA::solve_dae reports the initial condition as t = 0, whatever the start time is.
-    // The first call is always that one, so it is relabelled to the actual start of the run.
-    bool initial_output = true;
-    time_stepper.output_step = [&](const double t_reported, const BlockVectorType &sol, const BlockVectorType &sol_dot,
+    time_stepper.output_step = [&](const double t, const BlockVectorType &sol, const BlockVectorType &sol_dot,
                                    unsigned int /*step_number*/) {
-      const double t = std::exchange(initial_output, false) ? t_start : t_reported;
       if (!is_close(last_save, t, 1e-10)) {
         assembler.set_time(t);
         // Refreshed here, OUTSIDE write_frame: refreshing a ghosted replica communicates, while
@@ -966,6 +933,7 @@ namespace DiFfRG
     // Start the time loop
     try {
       time_stepper.solve_dae(y, y_dot);
+      log_ida_statistics(time_stepper, this->log);
     } catch (const std::exception &e) {
       this->log.error("Timestepping failed: {}", e.what());
       this->finalize_output_after_failure([&]() { time_stepper.output_step(stuck_t, y, y_dot, 0); });
@@ -993,12 +961,8 @@ namespace DiFfRG
     const DiagnosticPort jacobian_diagnostic_port =
         jacobian_diagnostics_enabled ? data_out.diagnostic_port() : DiagnosticPort{};
 
-    // Create a SUNDIALS IDA object with the right settings
-    typename SUNDIALS::IDA<VectorType>::AdditionalData ida_data(t_start, t_stop, impl.dt, output_dt, impl.minimal_dt, 5,
-                                                                impl.max_non_linear_iterations, 0, impl.abs_tol,
-                                                                impl.rel_tol);
-    typename SUNDIALS::IDA<VectorType> time_stepper(ida_data);
-    internal::set_ida_step_bounds(time_stepper, impl.minimal_dt, impl.maximal_dt);
+    // Create the IDA integrator
+    IDADriver<VectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt));
 
     // Define some variables for monitoring
     uint stuck = 0;
@@ -1017,19 +981,10 @@ namespace DiFfRG
     VectorType y_dot = initial_data;
     y_dot *= 0.;
 
-    // Called whenever a vector needs to initalized
-    time_stepper.reinit_vector = [&](VectorType &v) {
-      internal::reinit_la_variables_vector(v, n_vars, assembler.get_communicator());
-    };
-
     // At output_dt intervals this function saves intermediate solutions
     double last_save = -1.;
-    // SUNDIALS::IDA::solve_dae reports the initial condition as t = 0, whatever the start time is.
-    // The first call is always that one, so it is relabelled to the actual start of the run.
-    bool initial_output = true;
-    time_stepper.output_step = [&](const double t_reported, const VectorType &sol, const VectorType & /*sol_dot*/,
+    time_stepper.output_step = [&](const double t, const VectorType &sol, const VectorType & /*sol_dot*/,
                                    uint /*step_number*/) {
-      const double t = std::exchange(initial_output, false) ? t_start : t_reported;
       if (!is_close(last_save, t, 1e-10)) {
         assembler.set_time(t);
         // dim == 0 has no FE space and the variables vector is serial by construction, so no
@@ -1230,6 +1185,7 @@ namespace DiFfRG
     // Start the time loop
     try {
       time_stepper.solve_dae(y, y_dot);
+      log_ida_statistics(time_stepper, this->log);
     } catch (const std::exception &e) {
       this->log.error("Timestepping failed: {}", e.what());
       output_after_failure = true;

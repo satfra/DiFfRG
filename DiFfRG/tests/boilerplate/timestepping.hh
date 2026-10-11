@@ -58,6 +58,8 @@ bool run(std::string test_name, double expected_precision, const std::string &re
   constexpr bool own_error_control = requires { &TimeStepper::get_error; };
   const double implicit_rel_tol = own_error_control ? expected_precision / 100. : 1e-12;
   const double implicit_abs_tol = own_error_control ? implicit_rel_tol * 1e-3 : 1e-16;
+  // IDA fails rather than step below minimal_dt, and these tolerances need small steps at the start.
+  const double implicit_minimal_dt = own_error_control ? 1e-6 : 1e-14;
 
   ConfigTree config = json::value(
       {{"physical", {{"Lambda", 1.}}},
@@ -94,7 +96,7 @@ bool run(std::string test_name, double expected_precision, const std::string &re
           {{"dt", 1e-4}, {"minimal_dt", 1e-6}, {"maximal_dt", 1e-1}, {"abs_tol", 1e-16}, {"rel_tol", 1e-12}}},
          {"implicit",
           {{"dt", 1e-4},
-           {"minimal_dt", 1e-6},
+           {"minimal_dt", implicit_minimal_dt},
            {"maximal_dt", 1e-1},
            {"abs_tol", implicit_abs_tol},
            {"rel_tol", implicit_rel_tol},

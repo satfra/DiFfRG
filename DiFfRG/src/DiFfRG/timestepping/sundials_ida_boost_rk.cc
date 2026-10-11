@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <deal.II/base/timer.h>
 #include <deal.II/lac/block_vector.h>
-#include <deal.II/sundials/ida.h>
 #include <limits>
 #include <utility>
 
@@ -19,7 +18,7 @@
 #include <DiFfRG/discretization/common/solution_view.hh>
 #include <DiFfRG/discretization/data/output_session.hh>
 #include <DiFfRG/timestepping/ida_rank_agreement.hh>
-#include <DiFfRG/timestepping/ida_step_bounds.hh>
+#include <DiFfRG/timestepping/ida_driver.hh>
 #include <DiFfRG/timestepping/linear_solver/GMRES.hh>
 #include <DiFfRG/timestepping/linear_solver/PETScDirect.hh>
 #include <DiFfRG/timestepping/linear_solver/PETScKrylov.hh>
@@ -70,12 +69,8 @@ namespace DiFfRG
     const MPI_Comm comm = assembler.get_communicator();
     const uint n_vars = initial_data.block(1).size();
 
-    // Create a SUNDIALS IDA object with the right settings for spatial data
-    typename SUNDIALS::IDA<VectorType>::AdditionalData ida_data(t_start, t_stop, impl.dt, output_dt, impl.minimal_dt, 5,
-                                                                impl.max_non_linear_iterations, 0, impl.abs_tol,
-                                                                impl.rel_tol);
-    typename SUNDIALS::IDA<VectorType> time_stepper(ida_data);
-    internal::set_ida_step_bounds(time_stepper, impl.minimal_dt, impl.maximal_dt);
+    // Create the IDA integrator for spatial data
+    IDADriver<VectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt));
 
     // Initialize initial condition
     VectorType spatial_y = initial_data.block(0);
@@ -415,17 +410,10 @@ namespace DiFfRG
 
     time_stepper.differential_components = [&]() { return assembler.get_differential_indices(); };
 
-    // Called whenever a vector needs to initalized
-    time_stepper.reinit_vector = [&](VectorType &v) { assembler.reinit_vector(v); };
-
     // At output_dt intervals this function saves intermediate solutions
     double last_save = -1.;
-    // SUNDIALS::IDA::solve_dae reports the initial condition as t = 0, whatever the start time is.
-    // The first call is always that one, so it is relabelled to the actual start of the run.
-    bool initial_output = true;
-    time_stepper.output_step = [&](const double t_reported, const VectorType &sol, const VectorType &sol_dot,
+    time_stepper.output_step = [&](const double t, const VectorType &sol, const VectorType &sol_dot,
                                    uint /*step_number*/) {
-      const double t = std::exchange(initial_output, false) ? t_start : t_reported;
       if (!is_close(last_save, t, 1e-10)) {
         assembler.set_time(t);
 
@@ -596,6 +584,7 @@ namespace DiFfRG
     // Start the time loop
     try {
       time_stepper.solve_dae(spatial_y, spatial_y_dot);
+      log_ida_statistics(time_stepper, this->log);
     } catch (const std::exception &e) {
       this->log.error("Timestepping failed: {}", e.what());
       this->finalize_output_after_failure([&]() { time_stepper.output_step(stuck_t, spatial_y, spatial_y_dot, 0); });

@@ -75,11 +75,11 @@
  * |--------------------------------------------------|--------|---------|---------|
  * | `/timestepping/output_dt`                        | double | 0.1     | all: output every `output_dt` in \f$t\f$ |
  * | `/timestepping/implicit/dt`                      | double | 1e-4    | initial step of the implicit steppers |
- * | `/timestepping/implicit/minimal_dt`              | double | 1e-8    | smallest step. IDA steppers: bound on IDA's step size (needs DiFfRG's deal.II patch) and time resolution of the stuck check; ImplicitEuler, TRBDF2: at it steps are accepted regardless of error estimate and Newton convergence. |
- * | `/timestepping/implicit/maximal_dt`              | double | 1       | largest step (IDA steppers: needs DiFfRG's deal.II patch). |
+ * | `/timestepping/implicit/minimal_dt`              | double | 1e-14   | smallest step. IDA steppers: bound on IDA's step size, which fails rather than step below it, and time resolution of the stuck check; ImplicitEuler, TRBDF2: at it steps are accepted regardless of error estimate and Newton convergence. |
+ * | `/timestepping/implicit/maximal_dt`              | double | 1       | largest step |
  * | `/timestepping/implicit/abs_tol`                 | double | 1e-13 (warns) | local error test (all implicit steppers); ImplicitEuler, TRBDF2: also Newton convergence |
  * | `/timestepping/implicit/rel_tol`                 | double | 1e-7 (warns)  | as abs_tol |
- * | `/timestepping/implicit/max_non_linear_iterations` | uint | 10      | IDA steppers: Newton iterations per step |
+ * | `/timestepping/implicit/max_non_linear_iterations` | uint | 3       | IDA steppers: Newton iterations per step attempt; see IDADriver |
  * | `/timestepping/implicit/local_tolerance_refresh` | double | 4       | IDA without variables and the IDA hybrids, for models with per-dof tolerances; see LocalAbsTolerances |
  * | `/timestepping/implicit/iterative_refinement`    | bool   | true    | UMFPack: refine every direct solve |
  * | `/timestepping/implicit/jacobian_diagnostics`    | bool   | false   | implicit steppers: write `<run>_jacobian_diagnostics.csv` |
@@ -291,9 +291,9 @@ namespace DiFfRG
 
         // Stuff you can set, but defaults are reasonable
         impl.dt = config.get_double("/timestepping/implicit/dt", 1e-4);
-        impl.minimal_dt = config.get_double("/timestepping/implicit/minimal_dt", 1e-8);
+        impl.minimal_dt = config.get_double("/timestepping/implicit/minimal_dt", 1e-14);
         impl.maximal_dt = config.get_double("/timestepping/implicit/maximal_dt", 1.);
-        impl.max_non_linear_iterations = config.get_uint("/timestepping/implicit/max_non_linear_iterations", 10);
+        impl.max_non_linear_iterations = config.get_uint("/timestepping/implicit/max_non_linear_iterations", 3);
         impl.jacobian_diagnostics = config.get_bool("/timestepping/implicit/jacobian_diagnostics", false);
         impl.ida_callback_trace = config.get_bool("/timestepping/implicit/ida_callback_trace", false);
         impl.ida_callback_trace_min_t = config.get_double("/timestepping/implicit/ida_callback_trace_min_t", 0.0);

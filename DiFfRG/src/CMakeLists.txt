@@ -60,6 +60,7 @@ set(DiFfRG_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/timestepping/implicit_euler.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/timestepping/rk.cc
     # ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/timestepping/sundials_arkode.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/timestepping/ida_driver.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/timestepping/sundials_ida.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/timestepping/sundials_ida_boost_rk.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/DiFfRG/timestepping/sundials_ida_boost_abm.cc
