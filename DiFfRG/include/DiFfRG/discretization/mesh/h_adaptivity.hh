@@ -13,10 +13,14 @@
 
 // standard library
 #include <algorithm>
+#include <array>
+#include <concepts>
 #include <limits>
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <string>
+#include <type_traits>
 #include <vector>
 
 // DiFfRG
@@ -24,30 +28,61 @@
 #include <DiFfRG/common/utils.hh>
 #include <DiFfRG/discretization/common/abstract_adaptor.hh>
 #include <DiFfRG/discretization/common/solution_view.hh>
+#include <DiFfRG/model/model.hh>
 
 namespace DiFfRG
 {
   using namespace dealii;
+
+  namespace internal
+  {
+    /// A stand-in solution type to call the indicator hooks with.
+    struct IndicatorProbe {
+    };
+
+    /// Whether @p Model defines its own cell_indicator or face_indicator instead of inheriting AbstractModel's.
+    template <typename Model> consteval bool defines_refinement_indicator()
+    {
+      // Hooks that cannot be called like AbstractModel's hide them, so they are the model's own as well.
+      return !requires(const Model &model, double &value, std::array<double, 2> &values, const Point<1> &x,
+                       const Tensor<1, 1> &normal, const IndicatorProbe &sol) {
+        { model.cell_indicator(value, x, sol) } -> std::same_as<def::DefaultIndicator>;
+        { model.face_indicator(values, normal, x, sol, sol) } -> std::same_as<def::DefaultIndicator>;
+      };
+    }
+  } // namespace internal
+
   // clang-format off
   /**
-   * @brief Adaptive mesh refinement and coarsening (h-adaptivity) driven by the assembler's refinement indicator.
+   * @brief Adaptive mesh refinement and coarsening (h-adaptivity) driven by a refinement indicator.
    *
-   * At each adaptation, the assembler computes one non-negative indicator \f$\eta_K\f$ per cell \f$K\f$
-   * (Assembler::refinement_indicator, from the model's cell_indicator and face_indicator). The cells are marked by
-   * `marking`:
+   * At each adaptation, one non-negative indicator \f$\eta_K\f$ is computed per cell \f$K\f$, chosen by `indicator`:
+   * - `"model"`: Assembler::refinement_indicator, from the model's cell_indicator and face_indicator.
+   * - `"curvature"`: \f$\eta_K = \max_c h_K^2\, |\partial^2 u_c|_K / s_c\f$, with \f$h_K\f$ the cell diameter,
+   *   \f$|\partial^2 u_c|_K\f$ the size of the second derivative of component \f$c\f$ (FV: of the parabola through
+   *   neighbouring averages, Assembler::cell_curvatures; FEM: deal.II's DerivativeApproximation), and \f$s_c\f$ the
+   *   range \f$\max u_c - \min u_c\f$ over the domain. \f$h_K^2 |\partial^2 u|/8\f$ is the deviation of \f$u\f$ from
+   *   its linear interpolant on the cell, so \f$\eta_K\f$ is about 8 times the relative resolution error. It grows
+   *   wherever a kink, a shock or a narrow extremum forms and drops by 4 with each refinement.
+   * - `"auto"` (default): `"model"` if the model defines cell_indicator or face_indicator, `"curvature"` otherwise.
+   *
+   * The cells are then marked by `marking`:
    * - `"fraction"` (default): with \f$\eta = \sum_K \eta_K\f$, the cells with the largest \f$\eta_K\f$ whose sum
    *   reaches `refine_percent` \f$\cdot\,\eta\f$ are refined, and the cells with the smallest \f$\eta_K\f$ whose sum
    *   stays below `coarsen_percent` \f$\cdot\,\eta\f$ are coarsened (deal.II's
-   *   GridRefinement::refine_and_coarsen_fixed_fraction). This changes the mesh at every adaptation.
-   * - `"threshold"`: cells with \f$\eta_K \geq\f$ `refine_threshold` \f$\cdot \max_K \eta_K\f$ are refined, cells with
-   *   \f$\eta_K <\f$ `coarsen_threshold` \f$\cdot \max_K \eta_K\f$ coarsened. In between nothing changes, so a mesh
-   *   that resolves the solution is kept, and no IDA restart happens.
+   *   GridRefinement::refine_and_coarsen_fixed_fraction). This changes the mesh at every adaptation, also where the
+   *   solution is resolved.
+   * - `"tolerance"`: cells with \f$\eta_K >\f$ `tolerance` are refined, cells with \f$\eta_K <\f$ `coarsen_tolerance`
+   *   coarsened (the equidistribution strategy of time-dependent adaptive FEM). A smooth solution keeps the initial
+   *   mesh; refinement starts where a feature becomes unresolved, and a mesh that resolves the solution is kept, with
+   *   no IDA restart. `coarsen_tolerance` must lie below `tolerance` divided by the factor by which a refinement
+   *   lowers \f$\eta_K\f$ (4 for `"curvature"`), or a coarsened cell is refined again at once.
    *
    * Then
    * - no cell is refined beyond `level`, and no cell is coarsened below the level of the initial mesh;
    * - no cell is coarsened within `coarsen_buffer` layers of neighbours of a cell flagged for refinement, nor if it
    *   was created by one of the last `coarsen_age` adaptations (protects the region right behind a moving front);
-   * - if no cell remains flagged for refinement (`"fraction"`), or none for any change (`"threshold"`), nothing is
+   * - if no cell remains flagged for refinement (`"fraction"`), or none for any change (`"tolerance"`), nothing is
    *   done.
    *
    * The hanging-node constraints are applied to the solution before it is interpolated onto the new mesh, and again
@@ -61,11 +96,12 @@ namespace DiFfRG
    * | `/discretization/adaptivity/start_adapt_at`   | double | 0       | RG time of the first adaptation |
    * | `/discretization/adaptivity/adapt_dt`         | double | 0.1     | minimum RG time between two adaptations |
    * | `/discretization/adaptivity/level`            | uint   | 0       | maximum refinement level of a cell (absolute, counted from the coarse grid); 0 disables adaptivity |
-   * | `/discretization/adaptivity/marking`          | string | "fraction" | "fraction" or "threshold", see above |
+   * | `/discretization/adaptivity/indicator`        | string | "auto"  | "auto", "model" or "curvature", see above |
+   * | `/discretization/adaptivity/marking`          | string | "fraction" | "fraction" or "tolerance", see above |
    * | `/discretization/adaptivity/refine_percent`   | double | 0.1     | "fraction": fraction of the total indicator to refine |
    * | `/discretization/adaptivity/coarsen_percent`  | double | 0.05    | "fraction": fraction of the total indicator to coarsen |
-   * | `/discretization/adaptivity/refine_threshold` | double | 0.3     | "threshold": refine above this times the largest indicator |
-   * | `/discretization/adaptivity/coarsen_threshold`| double | 0.03    | "threshold": coarsen below this times the largest indicator |
+   * | `/discretization/adaptivity/tolerance`        | double | 1e-3    | "tolerance": refine cells with a larger indicator |
+   * | `/discretization/adaptivity/coarsen_tolerance`| double | tolerance / 8 | "tolerance": coarsen cells with a smaller indicator |
    * | `/discretization/adaptivity/coarsen_buffer`   | uint   | 2       | cell layers around refined cells that are not coarsened |
    * | `/discretization/adaptivity/coarsen_age`      | uint   | 2       | cells created by the last that many adaptations are not coarsened |
    *
@@ -73,7 +109,7 @@ namespace DiFfRG
    * `level` \f$> r\f$.
    *
    * @tparam Assembler The assembler; must provide get_discretization(), refinement_indicator(), reinit(),
-   * reinit_vector() and reinit_solution_view().
+   * reinit_vector() and reinit_solution_view(); optionally cell_curvatures() (FV) and prolongation_slopes().
    */
   // clang-format on
   template <typename Assembler>
@@ -103,14 +139,22 @@ namespace DiFfRG
       adapt_level = config.get_uint("/discretization/adaptivity/level", 0);
       adapt_upper = config.get_double("/discretization/adaptivity/refine_percent", 1e-1);
       adapt_lower = config.get_double("/discretization/adaptivity/coarsen_percent", 5e-2);
-      const auto marking = config.get_string("/discretization/adaptivity/marking", "fraction");
-      if (marking != "fraction" && marking != "threshold")
-        throw std::invalid_argument("HAdaptivity: /discretization/adaptivity/marking must be \"fraction\" or "
-                                    "\"threshold\", not \"" +
-                                    marking + "\".");
-      threshold_marking = marking == "threshold";
-      refine_threshold = config.get_double("/discretization/adaptivity/refine_threshold", 0.3);
-      coarsen_threshold = config.get_double("/discretization/adaptivity/coarsen_threshold", 0.03);
+      const auto choice = [&](const std::string &key, const std::string &fallback,
+                              const std::vector<std::string> &options) {
+        const auto value = config.get_string("/discretization/adaptivity/" + key, fallback);
+        if (std::find(options.begin(), options.end(), value) == options.end())
+          throw std::invalid_argument("HAdaptivity: /discretization/adaptivity/" + key + " must be one of \"" +
+                                      options[0] + "\", \"" + options[1] +
+                                      (options.size() > 2 ? "\", \"" + options[2] : "") + "\", not \"" + value + "\".");
+        return value;
+      };
+      const auto indicator = choice("indicator", "auto", {"auto", "model", "curvature"});
+      curvature_indicator =
+          indicator == "curvature" ||
+          (indicator == "auto" && !internal::defines_refinement_indicator<typename Discretization::Model>());
+      tolerance_marking = choice("marking", "fraction", {"fraction", "tolerance"}) == "tolerance";
+      tolerance = config.get_double("/discretization/adaptivity/tolerance", 1e-3);
+      coarsen_tolerance = config.get_double("/discretization/adaptivity/coarsen_tolerance", tolerance / 8.);
       coarsen_buffer = config.get_uint("/discretization/adaptivity/coarsen_buffer", 2);
       coarsen_age = config.get_uint("/discretization/adaptivity/coarsen_age", 2);
       min_level = std::numeric_limits<uint>::max();
@@ -169,7 +213,10 @@ namespace DiFfRG
 
       Vector<double> indicator(triangulation.n_active_cells());
       indicator = 0;
-      assembler.refinement_indicator(indicator, view.get());
+      if (curvature_indicator)
+        compute_curvature_indicator(indicator, view.get());
+      else
+        assembler.refinement_indicator(indicator, view.get());
 
       if constexpr (Discretization::Mesh::is_parallel) {
         // Each rank fills only the entries of the cells it owns, so on a partitioned mesh every
@@ -180,10 +227,9 @@ namespace DiFfRG
         MPI::sum_reduce(triangulation.get_mpi_communicator(), indicator.data(), static_cast<int>(indicator.size()));
       }
 
-      if (threshold_marking) {
-        const double largest = indicator.linfty_norm();
-        GridRefinement::refine(triangulation, indicator, refine_threshold * largest);
-        GridRefinement::coarsen(triangulation, indicator, coarsen_threshold * largest);
+      if (tolerance_marking) {
+        GridRefinement::refine(triangulation, indicator, tolerance);
+        GridRefinement::coarsen(triangulation, indicator, coarsen_tolerance);
       } else
         GridRefinement::refine_and_coarsen_fixed_fraction(triangulation, indicator, adapt_upper, adapt_lower);
 
@@ -194,11 +240,11 @@ namespace DiFfRG
       }
       protect_from_coarsening(triangulation);
       // Drops coarsening flags that cannot be honoured (e.g. not all siblings flagged), so that they do not count.
-      if (threshold_marking) triangulation.prepare_coarsening_and_refinement();
+      if (tolerance_marking) triangulation.prepare_coarsening_and_refinement();
 
       bool any_change = false;
       for (const auto &cell : triangulation.active_cell_iterators())
-        if (cell->refine_flag_set() || (threshold_marking && cell->coarsen_flag_set())) {
+        if (cell->refine_flag_set() || (tolerance_marking && cell->coarsen_flag_set())) {
           any_change = true;
           break;
         }
@@ -264,6 +310,37 @@ namespace DiFfRG
     }
 
   protected:
+    /// The `"curvature"` indicator of the class documentation, for the cells owned by this rank.
+    void compute_curvature_indicator(Vector<double> &indicator, const VectorType &u) const
+    {
+      const auto &dof_handler = discretization.get_dof_handler(0);
+      const uint n_components = dof_handler.get_fe().n_components();
+      Vector<float> curvature(indicator.size());
+      for (uint c = 0; c < n_components; ++c) {
+        ComponentMask mask(n_components, false);
+        mask.set(c, true);
+        double lowest = std::numeric_limits<double>::max(), highest = std::numeric_limits<double>::lowest();
+        for (const auto i : DoFTools::extract_dofs(dof_handler, mask)) {
+          lowest = std::min(lowest, double(u[i]));
+          highest = std::max(highest, double(u[i]));
+        }
+        // extract_dofs gives only this rank's dofs.
+        const auto comm = discretization.get_triangulation().get_mpi_communicator();
+        const double range = Utilities::MPI::max(highest, comm) - Utilities::MPI::min(lowest, comm);
+        if (!(range > 0.)) continue; // a constant component has no features
+        if constexpr (requires { assembler.cell_curvatures(u, c); }) {
+          const auto values = assembler.cell_curvatures(u, c);
+          std::copy(values.begin(), values.end(), curvature.begin());
+        } else
+          DerivativeApproximation::approximate_second_derivative(dof_handler, u, curvature, c);
+        for (const auto &cell : discretization.get_triangulation().active_cell_iterators())
+          if (cell->is_locally_owned()) {
+            const auto k = cell->active_cell_index();
+            indicator[k] = std::max(indicator[k], std::pow(cell->diameter(), 2) * curvature[k] / range);
+          }
+      }
+    }
+
     /// Centre of a cell flagged for refinement and the slopes of the vectors being transferred there.
     struct RefinedCellSlopes {
       Point<dim> center;
@@ -313,7 +390,8 @@ namespace DiFfRG
           const auto shift = cell->center() - found->second.center;
           for (uint i = 0; i < dofs.size(); ++i)
             if (owned.is_element(dofs[i]))
-              v(dofs[i]) += found->second.slopes[k][fe.system_to_component_index(i).first] * shift;
+              // Read and insert: compress(insert) below must not follow an add on distributed vectors.
+              v(dofs[i]) = v(dofs[i]) + found->second.slopes[k][fe.system_to_component_index(i).first] * shift;
         }
         v.compress(VectorOperation::insert);
       }
@@ -362,8 +440,8 @@ namespace DiFfRG
     /// Level of the coarsest active cell at construction.
     uint min_level;
     uint coarsen_buffer, coarsen_age;
-    bool threshold_marking;
-    double refine_threshold, coarsen_threshold;
+    bool curvature_indicator, tolerance_marking;
+    double tolerance, coarsen_tolerance;
     /// Number of adaptations so far, and for each active cell the adaptation that created it (if any did).
     uint n_adaptations = 0;
     std::map<CellId, uint> created_at;

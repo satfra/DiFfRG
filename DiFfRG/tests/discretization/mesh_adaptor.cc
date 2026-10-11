@@ -11,6 +11,7 @@
 #include <cmath>
 #include <set>
 #include <string>
+#include <tuple>
 
 using namespace DiFfRG;
 using namespace dealii;
@@ -61,8 +62,7 @@ namespace
                             {"refine_percent", 0.3},
                             {"coarsen_percent", 0.3},
                             {"marking", marking},
-                            {"refine_threshold", 0.3},
-                            {"coarsen_threshold", 0.03},
+                            {"tolerance", 1e-3},
                             {"coarsen_buffer", coarsen_buffer},
                             {"coarsen_age", coarsen_age}}}}},
                         {"output", {{"verbosity", 0}}}});
@@ -179,46 +179,69 @@ TEST_CASE("HAdaptivity does not coarsen right behind a moving front", "[discreti
   CHECK(fresh_unprotected > 0); // without the protection, the same sweep coarsens fresh cells
 }
 
-TEST_CASE("HAdaptivity with threshold marking keeps a mesh that resolves the solution", "[discretization][adaptivity]")
+namespace
+{
+  /// No refinement indicator of its own: HAdaptivity uses the curvature indicator. u = tanh((x - 0.4) / width).
+  class Smooth : public def::AbstractModel<Smooth, ComponentDescriptor<FEFunctionDescriptor<Scalar<"u">>>>,
+                 public def::Time,
+                 public def::FlowBoundaries<Smooth>,
+                 public def::AD<Smooth>
+  {
+  public:
+    double width = 1.;
+    template <typename Vector> void initial_condition(const Point<1> &x, Vector &values) const
+    {
+      values[0] = std::tanh((x[0] - 0.4) / width);
+    }
+  };
+  static_assert(!DiFfRG::internal::defines_refinement_indicator<Smooth>());
+  static_assert(DiFfRG::internal::defines_refinement_indicator<Model>());
+  static_assert(DiFfRG::internal::defines_refinement_indicator<FrontModel>());
+
+  /// Adapt with tolerance marking and the curvature indicator until the mesh stays; returns (adaptations that
+  /// changed the mesh, finest level near x = 0.4, coarsest level far from it).
+  std::tuple<uint, uint, uint> adapt_until_fixed(const double width)
+  {
+    using Discretization = CG::Discretization<Smooth, RectangularMeshSerial<1>>;
+    using Asm = CG::Assembler<Discretization>;
+    const auto config = make_config(0, 5, 2, 0, "tolerance");
+    Smooth model;
+    model.width = width;
+    RectangularMeshSerial<1> mesh{Config::ConfigurationMesh<1>(config)};
+    Discretization discretization(mesh, config);
+    Asm assembler(discretization, model, config);
+    FE::FlowingVariables<Discretization> state(discretization);
+    state.interpolate(model);
+    typename Discretization::VectorType u(state.spatial_data());
+    HAdaptivity<Asm> adaptor(assembler, config);
+    uint changes = 0;
+    for (uint i = 0; i < 12; ++i)
+      changes += adaptor.adapt(u);
+    REQUIRE(!adaptor.adapt(u));
+    uint finest = 0, coarsest = std::numeric_limits<uint>::max();
+    for (const auto &cell : discretization.get_triangulation().active_cell_iterators()) {
+      if (std::abs(cell->center()[0] - 0.4) < 0.05) finest = std::max(finest, uint(cell->level()));
+      if (std::abs(cell->center()[0] - 0.4) > 0.3) coarsest = std::min(coarsest, uint(cell->level()));
+    }
+    return {changes, finest, coarsest};
+  }
+} // namespace
+
+TEST_CASE("HAdaptivity with tolerance marking refines only where a feature is unresolved",
+          "[discretization][adaptivity]")
 {
   DiFfRG::Init();
-  using Discretization = CG::Discretization<FrontModel, RectangularMeshSerial<1>>;
-  const auto config = make_config(0, 4, 2, 0, "threshold");
-  Testing::PhysicalParameters prm;
-  prm.initial_x0 = {{0.2, 0., 0.}};
-  prm.initial_x1 = {{1., 0., 0.}};
-  FrontModel model(prm);
-  RectangularMeshSerial<1> mesh{Config::ConfigurationMesh<1>(config)};
-  Discretization discretization(mesh, config);
-  CG::Assembler<Discretization> assembler(discretization, model, config);
-  FE::FlowingVariables<Discretization> state(discretization);
-  state.interpolate(model);
-  typename Discretization::VectorType u(state.spatial_data());
-  HAdaptivity<CG::Assembler<Discretization>> adaptor(assembler, config);
-
-  const auto levels = [&]() {
-    uint at_front = 0, far = std::numeric_limits<uint>::max();
-    for (const auto &cell : discretization.get_triangulation().active_cell_iterators()) {
-      if (std::abs(cell->center()[0] - model.front_position) < cell->diameter())
-        at_front = std::max(at_front, uint(cell->level()));
-      if (cell->center()[0] > 0.7) far = std::min(far, uint(cell->level()));
-    }
-    return std::pair{at_front, far};
-  };
-
-  // A fixed front: the mesh is refined at it up to the level, then left alone.
-  uint changes = 0;
-  for (uint i = 0; i < 10; ++i)
-    changes += adaptor.adapt(u);
-  CHECK(changes <= 6); // four levels of refinement, plus coarsening what turned out unnecessary
-  CHECK(!adaptor.adapt(u));
-  CHECK(levels() == std::pair<uint, uint>{4, 0});
-
-  // Moving the front far away coarsens the old refinement, although nothing new needs to be refined.
-  model.front_position = 0.9;
-  for (uint i = 0; i < 10; ++i)
-    adaptor.adapt(u);
-  model.front_position = 0.2;
-  const auto [at_old_front, _] = levels();
-  CHECK(at_old_front == 0);
+  SECTION("a solution the initial mesh resolves keeps it")
+  {
+    const auto [changes, finest, coarsest] = adapt_until_fixed(10.);
+    CHECK(changes == 0);
+    CHECK(finest == 0);
+  }
+  SECTION("a steep front is refined, the smooth rest is not, and the mesh then stays")
+  {
+    const auto [changes, finest, coarsest] = adapt_until_fixed(0.02);
+    CHECK(changes > 0);
+    CHECK(finest >= 3);
+    CHECK(coarsest == 0);
+  }
 }

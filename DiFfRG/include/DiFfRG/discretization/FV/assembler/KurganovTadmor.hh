@@ -229,7 +229,8 @@ namespace DiFfRG
           std::array<dealii::Tensor<1, dim, NumberType>, n_components> H{};
           for (size_t c = 0; c < n_components; ++c)
             for (size_t d = 0; d < dim; ++d)
-              H[c][d] = (F_plus[c][d] + F_minus[c][d]) * 0.5 - a_half[c][d] * normal[d] * (u_plus[c] - u_minus[c]) * 0.5;
+              H[c][d] =
+                  (F_plus[c][d] + F_minus[c][d]) * 0.5 - a_half[c][d] * normal[d] * (u_plus[c] - u_minus[c]) * 0.5;
           return H;
         }
 
@@ -289,14 +290,12 @@ namespace DiFfRG
                 const NumberType delta_ic = (i == c) ? NumberType(1) : NumberType(0);
 
                 // dH_i^d / du_minus_c
-                j_numflux.u[0](i, c)[d] =
-                    NumberType(0.5) * minus.J[d][i][c] +
-                    NumberType(0.5) * normal[d] * (a[i][d] * delta_ic - du_i * da_minus[d][c]);
+                j_numflux.u[0](i, c)[d] = NumberType(0.5) * minus.J[d][i][c] +
+                                          NumberType(0.5) * normal[d] * (a[i][d] * delta_ic - du_i * da_minus[d][c]);
 
                 // dH_i^d / du_plus_c
-                j_numflux.u[1](i, c)[d] =
-                    NumberType(0.5) * plus.J[d][i][c] -
-                    NumberType(0.5) * normal[d] * (a[i][d] * delta_ic + du_i * da_plus[d][c]);
+                j_numflux.u[1](i, c)[d] = NumberType(0.5) * plus.J[d][i][c] -
+                                          NumberType(0.5) * normal[d] * (a[i][d] * delta_ic + du_i * da_plus[d][c]);
               }
             }
           }
@@ -1819,8 +1818,7 @@ namespace DiFfRG
         /// \f$|K| \big[\alpha\, \partial m/\partial(\partial_t u) + \beta\, \partial m/\partial u\big]\f$ per cell; see
         /// AbstractAssembler::jacobian_mass.
         virtual void jacobian_mass(SparseMatrixType &jacobian, const VectorType &solution,
-                                   const VectorType &solution_dot, NumberType alpha = 1.,
-                                   NumberType beta = 1.) override
+                                   const VectorType &solution_dot, NumberType alpha = 1., NumberType beta = 1.) override
         {
           const auto state = this->constrained(solution, solution_dot);
           const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
@@ -1906,7 +1904,8 @@ namespace DiFfRG
          * the bare average. This keeps the average and, where the profile is monotone and the mesh uniform, gives the
          * exact child averages of a quadratic profile.
          */
-        std::vector<internal::GradientType<dim, NumberType, n_components>> prolongation_slopes(const VectorType &v) const
+        std::vector<internal::GradientType<dim, NumberType, n_components>>
+        prolongation_slopes(const VectorType &v) const
         {
           static_assert(supports_mesh_adaptation, "KT mesh adaptation is implemented in 1D only.");
           std::vector<internal::GradientType<dim, NumberType, n_components>> slopes(triangulation.n_active_cells());
@@ -1938,6 +1937,30 @@ namespace DiFfRG
         }
 
         /**
+         * @brief Per active cell, \f$|v_c''|\f$: the second derivative of the parabola through the cell's and its two
+         * neighbours' averages of component @p c of @p v. A cell at the domain boundary gets that of its neighbour, i.e.
+         * of the parabola through itself and the next two cells, so that boundary layers are seen. HAdaptivity's
+         * default refinement indicator.
+         */
+        std::vector<double> cell_curvatures(const VectorType &v, const uint c) const
+        {
+          static_assert(supports_mesh_adaptation, "KT mesh adaptation is implemented in 1D only.");
+          std::vector<double> curvatures(triangulation.n_active_cells(), 0.);
+          for (const auto &cell : dof_handler.active_cell_iterators())
+            curvatures[cell->active_cell_index()] = std::abs(parabola_derivatives(v, cell, c)[1]);
+          for (const auto &cell : dof_handler.active_cell_iterators())
+            for (const uint f : {0u, 1u}) {
+              const uint inner = 1 - f;
+              if (!cell->at_boundary(f) || cell->at_boundary(inner)) continue;
+              auto neighbor = cell->neighbor(inner);
+              while (neighbor->has_children())
+                neighbor = neighbor->child(f); // the child next to the cell
+              curvatures[cell->active_cell_index()] = curvatures[neighbor->active_cell_index()];
+            }
+          return curvatures;
+        }
+
+        /**
          * @brief Refinement indicator for HAdaptivity (1D only): for each owned cell, the model's cell_indicator at the
          * cell centre times the cell width.
          *
@@ -1956,31 +1979,48 @@ namespace DiFfRG
           for (const auto &cell : dof_handler.active_cell_iterators()) {
             if (!cell->is_locally_owned()) continue;
             const auto &stencil = cell_topology_cache[cell->active_cell_index()].stencil;
-            const double x = stencil.cell.x[0];
-            const bool has_left = !cell->at_boundary(0), has_right = !cell->at_boundary(1);
             for (uint c = 0; c < n_components; ++c) {
-              const NumberType u_c = u[stencil.cell.dof_indices[c]];
-              values[c] = u_c;
+              values[c] = u[stencil.cell.dof_indices[c]];
+              const auto [first, second] = parabola_derivatives(u, cell, c);
               gradients[c] = Tensor<1, dim, NumberType>();
               hessians[c] = Tensor<2, dim, NumberType>();
-              if (!has_left && !has_right) continue;
-              const double x_l = has_left ? stencil.neighbors.x[0][0] : x, x_r = has_right ? stencil.neighbors.x[1][0] : x;
-              const NumberType u_l = has_left ? u[stencil.neighbors.dof_indices[0][c]] : u_c;
-              const NumberType u_r = has_right ? u[stencil.neighbors.dof_indices[1][c]] : u_c;
-              gradients[c][0] = (u_r - u_l) / (x_r - x_l);
-              if (has_left && has_right)
-                hessians[c][0][0] = 2. * ((u_r - u_c) / (x_r - x) - (u_c - u_l) / (x - x_l)) / (x_r - x_l);
+              gradients[c][0] = first;
+              hessians[c][0][0] = second;
             }
             NumberType value = 0.;
-            model.cell_indicator(value, cell->center(),
-                                 named_tuple<std::tuple<decltype(values) &, decltype(gradients) &, decltype(hessians) &>,
-                                             StringSet<"fe_functions", "fe_derivatives", "fe_hessians">>(
-                                     std::tie(values, gradients, hessians)));
+            model.cell_indicator(
+                value, cell->center(),
+                named_tuple<std::tuple<decltype(values) &, decltype(gradients) &, decltype(hessians) &>,
+                            StringSet<"fe_functions", "fe_derivatives", "fe_hessians">>(
+                    std::tie(values, gradients, hessians)));
             indicator[cell->active_cell_index()] = value * cell->measure();
           }
         }
 
       private:
+        /**
+         * @brief First and second derivative at the centre of @p cell of the parabola through the averages of
+         * component @p c of @p v in the cell and its two neighbours. At the domain boundary: the one-sided difference
+         * and zero curvature.
+         */
+        template <typename CellIterator>
+        std::array<NumberType, 2> parabola_derivatives(const VectorType &v, const CellIterator &cell,
+                                                       const uint c) const
+        {
+          const auto &stencil = cell_topology_cache[cell->active_cell_index()].stencil;
+          const bool has_left = !cell->at_boundary(0), has_right = !cell->at_boundary(1);
+          if (!has_left && !has_right) return {0., 0.};
+          const double x = stencil.cell.x[0];
+          const double x_l = has_left ? stencil.neighbors.x[0][0] : x, x_r = has_right ? stencil.neighbors.x[1][0] : x;
+          const NumberType u = v[stencil.cell.dof_indices[c]];
+          const NumberType u_l = has_left ? v[stencil.neighbors.dof_indices[0][c]] : u;
+          const NumberType u_r = has_right ? v[stencil.neighbors.dof_indices[1][c]] : u;
+          const NumberType second = has_left && has_right
+                                        ? 2. * ((u_r - u) / (x_r - x) - (u - u_l) / (x - x_l)) / (x_r - x_l)
+                                        : NumberType(0);
+          return {(u_r - u_l) / (x_r - x_l), second};
+        }
+
         template <typename DoFContainer>
         static void append_dofs(std::vector<types::global_dof_index> &target, const DoFContainer &source)
         {

@@ -123,6 +123,10 @@ namespace DiFfRG
     /// Block id for a component that carries no hyperbolic flux. @see AbstractModel::wave_speed_blocks.
     inline constexpr int no_wave_speed = -1;
 
+    /// Return type of AbstractModel's cell_indicator and face_indicator, by which HAdaptivity tells them apart.
+    struct DefaultIndicator {
+    };
+
     /**
      * @brief Base class of every model: declares all hooks an assembler may call, with defaults.
      *
@@ -506,7 +510,9 @@ namespace DiFfRG
       /**
        * @name Adaptivity indicators
        * Used by a mesh adaptor to decide which cells to refine. Each cell's indicator is the integral of
-       * cell_indicator over the cell plus the integrals of face_indicator over its faces. Default: zero.
+       * cell_indicator over the cell plus the integrals of face_indicator over its faces. A model that defines
+       * neither gets HAdaptivity's curvature indicator. The defaults here return DefaultIndicator, by which
+       * HAdaptivity recognizes them; a model's own hooks return void.
        */
       //@{
 
@@ -520,10 +526,12 @@ namespace DiFfRG
        * `"fe_hessians"`; LDG: `"fe_functions"`, `"LDG1"`, ... (values only).
        */
       template <int dim, typename NumberType, typename Solutions_s, typename Solutions_n>
-      void face_indicator([[maybe_unused]] std::array<NumberType, 2> &indicator,
-                          [[maybe_unused]] const Tensor<1, dim> &normal, [[maybe_unused]] const Point<dim> &p,
-                          [[maybe_unused]] const Solutions_s &sol_s, [[maybe_unused]] const Solutions_n &sol_n) const
+      DefaultIndicator face_indicator([[maybe_unused]] std::array<NumberType, 2> &indicator,
+                                      [[maybe_unused]] const Tensor<1, dim> &normal,
+                                      [[maybe_unused]] const Point<dim> &p, [[maybe_unused]] const Solutions_s &sol_s,
+                                      [[maybe_unused]] const Solutions_n &sol_n) const
       {
+        return {};
       }
 
       /**
@@ -534,9 +542,10 @@ namespace DiFfRG
        * @param sol the solution there, as for face_indicator().
        */
       template <int dim, typename NumberType, typename Solution>
-      void cell_indicator([[maybe_unused]] NumberType &indicator, [[maybe_unused]] const Point<dim> &p,
-                          [[maybe_unused]] const Solution &sol) const
+      DefaultIndicator cell_indicator([[maybe_unused]] NumberType &indicator, [[maybe_unused]] const Point<dim> &p,
+                                      [[maybe_unused]] const Solution &sol) const
       {
+        return {};
       }
 
       //@}
