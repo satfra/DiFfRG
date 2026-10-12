@@ -106,6 +106,20 @@ namespace DiFfRG
     virtual void set_time(double t) = 0;
 
     /**
+     * @brief Whether the model asks for a restart of the time integration at the accepted state @p solution at
+     * time @p t (see DiFfRG::HasNeedsRestart). Called once per accepted implicit step. Default: never.
+     *
+     * @param solution A vector in which every dof is readable (a refreshed SolutionView).
+     */
+    virtual bool needs_restart([[maybe_unused]] const double t, [[maybe_unused]] const VectorType &solution) const
+    {
+      return false;
+    }
+
+    /// Whether needs_restart can ever return true, i.e. whether the timestepper has to ask it.
+    virtual bool requests_restarts() const { return false; }
+
+    /**
      * @brief The sparsity pattern of the Jacobian.
      *
      * @return The pattern, of type get_type::SparsityPattern<SparseMatrixType>.

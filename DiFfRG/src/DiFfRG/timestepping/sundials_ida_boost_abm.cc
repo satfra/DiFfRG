@@ -531,6 +531,31 @@ namespace DiFfRG
       }
     };
 
+    // Serve v(t) to IDA. All three modes are independent of IDA's spatial trial state, so repeated
+    // Newton iterations at the same trial endpoint (and retries after rejection) all see
+    // the same v(t) -- which is what keeps Newton convergent when the FEM source reads v.
+    auto serve_variables = [&](VectorType &variable_y, const double t) {
+      if (mode_stagger) {
+        // Keep the explicit grid half a step ahead of the accepted region, then: queries
+        // past the current interval's midpoint fall inside the buffer -> interpolate
+        // (centered); queries still in the first half are served by the forward predictor
+        // (re-anchored at the buffer front).
+        advance_lead_half();
+        refresh_predictor_from_buffer_tail();
+        if (t <= variable_buffer_times.back() || is_close(t, variable_buffer_times.back())) {
+          interpolate_buffer(variable_y, t);
+        } else {
+          eval_predictor(variable_ret, t);
+          eigen_to_dealii(variable_ret, variable_y);
+        }
+      } else if (mode_predict) {
+        serve_lookahead(variable_y, t);
+      } else {
+        eval_predictor(variable_ret, t);
+        eigen_to_dealii(variable_ret, variable_y);
+      }
+    };
+
     // Serve the explicit variables at time t for a speculative IDA call (residual /
     // jacobian). The trial endpoint `frontier` is only committed once IDA confirms its
     // acceptance (signalled by a later request at a strictly larger time, in which case
@@ -595,28 +620,7 @@ namespace DiFfRG
         spatial_hi = spatial_y;
       }
 
-      // Serve v(t) to IDA. All three modes are independent of `spatial_y`, so repeated
-      // Newton iterations at the same trial endpoint (and retries after rejection) all see
-      // the same v(t) -- which is what keeps Newton convergent when the FEM source reads v.
-      if (mode_stagger) {
-        // Keep the explicit grid half a step ahead of the accepted region, then: queries
-        // past the current interval's midpoint fall inside the buffer -> interpolate
-        // (centered); queries still in the first half are served by the forward predictor
-        // (re-anchored at the buffer front).
-        advance_lead_half();
-        refresh_predictor_from_buffer_tail();
-        if (t <= variable_buffer_times.back() || is_close(t, variable_buffer_times.back())) {
-          interpolate_buffer(variable_y, t);
-        } else {
-          eval_predictor(variable_ret, t);
-          eigen_to_dealii(variable_ret, variable_y);
-        }
-      } else if (mode_predict) {
-        serve_lookahead(variable_y, t);
-      } else {
-        eval_predictor(variable_ret, t);
-        eigen_to_dealii(variable_ret, variable_y);
-      }
+      serve_variables(variable_y, t);
       assembler.set_time(t);
     };
 
@@ -674,8 +678,8 @@ namespace DiFfRG
 
     // Replicated views of the state for the assembler and the output path: IDA's vectors hold only this rank's rows,
     // while assembly and output read arbitrary dofs. See SolutionView and the same views in sundials_ida.cc.
-    SolutionView<VectorType> y_state, y_dot_state, sol_view, sol_dot_view, residual_view;
-    for (auto *view : {&y_state, &y_dot_state, &sol_view, &sol_dot_view, &residual_view})
+    SolutionView<VectorType> y_state, y_dot_state, sol_view, sol_dot_view, residual_view, restart_view;
+    for (auto *view : {&y_state, &y_dot_state, &sol_view, &sol_dot_view, &residual_view, &restart_view})
       assembler.reinit_solution_view(*view);
 
     // Per-dof absolute tolerances, if the model sets them (def::HasAbsTolerances); see LocalAbsTolerances.
@@ -702,7 +706,8 @@ namespace DiFfRG
         residual = &residual_placeholder;
         assembler.reinit_matrix(spatial_jacobian);
         jacobian_update.forget();
-        for (auto *view : {&y_state, &y_dot_state, &sol_view, &sol_dot_view, &residual_view, &spatial_eval_view})
+        for (auto *view :
+             {&y_state, &y_dot_state, &sol_view, &sol_dot_view, &residual_view, &spatial_eval_view, &restart_view})
           assembler.reinit_solution_view(*view);
         local_tol.init(sol);
         return true;
@@ -714,6 +719,34 @@ namespace DiFfRG
       }
       return false;
     };
+
+    // A model with a discontinuity in time asks for a restart at an accepted step (see HasNeedsRestart). IDA then
+    // restarts cold, and the explicit side starts over at t as well: the variables are committed at t, the Adams
+    // history, the spatial checkpoints and the predictor slope, all of which would reach across the discontinuity,
+    // are dropped, and the explicit steps begin again with their Runge-Kutta start.
+    if (assembler.requests_restarts())
+      time_stepper.step_needs_restart = [&](const double t, const VectorType &sol, const VectorType &) {
+        // The variables at t as IDA was served them for this step, taken before the model is asked: it may change
+        // its flow in needs_restart, and they belong to the flow up to t.
+        serve_variables(variable_y, t);
+        restart_view.refresh(sol);
+        if (!assembler.needs_restart(t, restart_view.get())) return false;
+        dealii_to_eigen(variable_y, variable_sol);
+        variable_buffer.assign(1, variable_sol);
+        variable_buffer_times.assign(1, t);
+        variable_stepper = decltype(variable_stepper){};
+        spatial_ckpt_times.assign(1, t);
+        spatial_ckpts.assign(1, sol);
+        spatial_lo = spatial_hi = spatial_pending = sol;
+        spatial_lo_time = spatial_hi_time = t;
+        t_committed = t_pending = frontier = t_accepted = t;
+        // The slope after the discontinuity: the model has switched in needs_restart, so this reads the new flow.
+        refresh_dv_committed_from_buffer();
+        have_prev_dv = false;
+        look_valid = false;
+        this->log.info("Restarting the time integration at t = {:.6f} on the model's request", t);
+        return true;
+      };
 
     time_stepper.differential_components = [&]() { return assembler.get_differential_indices(); };
 

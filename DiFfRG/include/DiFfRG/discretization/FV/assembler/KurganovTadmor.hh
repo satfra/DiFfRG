@@ -1893,44 +1893,90 @@ namespace DiFfRG
         static constexpr bool supports_mesh_adaptation = dim == 1;
 
         /**
-         * @brief Per active cell, the slope of the cell averages @p v used to prolongate them to the cell's children.
+         * @brief Per vector in @p vectors and per active cell, the slopes used to prolongate the cell averages to the
+         * cell's children; the limiting is decided on the first vector (the solution) and applied to all of them.
          *
-         * The slope is the derivative at the cell centre of the parabola through the cell's and its two neighbours'
-         * averages (at a domain boundary, the one-sided difference), scaled down where needed so that the children's
-         * values \f$\bar v \pm v'\,\Delta x/4\f$ stay within the range of these averages: no new extrema, which
-         * could put a cell beyond a pole of the flow.
+         * The unlimited slope is the derivative at the cell centre of the parabola through the cell's and its two
+         * neighbours' averages (at a domain boundary, the one-sided difference). HAdaptivity gives the children of a
+         * refined cell \f$\bar v + v'\,(x_{\rm child} - x_{\rm cell})\f$ instead of the bare average, which keeps the
+         * average and, on a uniform mesh, gives the exact child averages of a quadratic profile.
          *
-         * HAdaptivity gives the children of a refined cell \f$\bar v + v'\,(x_{\rm child} - x_{\rm cell})\f$ instead of
-         * the bare average. This keeps the average and, where the profile is monotone and the mesh uniform, gives the
-         * exact child averages of a quadratic profile.
+         * Per cell and component, the slope of the first vector is scaled down by a factor \f$\theta \in [0, 1]\f$ so
+         * that its children stay within the range of the three averages -- no new extrema, which could put a cell
+         * beyond a pole of the flow -- except at a smooth extremum: if the vertex of the parabola lies inside the cell
+         * and the parabolas centred on the cell and on both neighbours curve the same way, the children may reach
+         * \f$|v''_{\rm min}|\,\Delta x^2/8\f$ beyond, with \f$v''_{\rm min}\f$ the smallest of the three curvatures:
+         * the dip of that parabola. A smooth minimum or maximum is then prolongated exactly, while a step next to a
+         * flat region (zero curvature on the flat side) is limited as before. Limited as at the extremum of a
+         * smooth profile, the old slope would put a kink into the derivative there, which a flow that is sensitive to
+         * it turns into a fast transient after the transfer.
+         *
+         * All vectors get the same \f$\theta\f$, so the prolongation is one linear map: a time derivative or a
+         * timestepper's history transferred along stays consistent with the solution.
          */
-        std::vector<internal::GradientType<dim, NumberType, n_components>>
-        prolongation_slopes(const VectorType &v) const
+        std::vector<std::vector<internal::GradientType<dim, NumberType, n_components>>>
+        prolongation_slopes(const std::vector<VectorType> &vectors) const
         {
           static_assert(supports_mesh_adaptation, "KT mesh adaptation is implemented in 1D only.");
-          std::vector<internal::GradientType<dim, NumberType, n_components>> slopes(triangulation.n_active_cells());
+          const auto n_cells = triangulation.n_active_cells();
+          std::vector<std::vector<internal::GradientType<dim, NumberType, n_components>>> slopes(
+              vectors.size(), std::vector<internal::GradientType<dim, NumberType, n_components>>(n_cells));
+          if (vectors.empty()) return slopes;
+          const VectorType &u = vectors[0];
+          // The curvature of the parabola centred on each cell, for the smooth-extremum test of its neighbours.
+          std::vector<std::array<NumberType, n_components>> curvature(n_cells);
+          for (const auto &cell : dof_handler.active_cell_iterators())
+            for (uint c = 0; c < n_components; ++c)
+              curvature[cell->active_cell_index()][c] = parabola_derivatives(u, cell, c)[1];
+          // The neighbour across face f; for a refined neighbour the child next to the cell.
+          const auto neighbor_index = [](const auto &cell, const uint f) {
+            auto neighbor = cell->neighbor(f);
+            while (neighbor->has_children())
+              neighbor = neighbor->child(1 - f);
+            return neighbor->active_cell_index();
+          };
+
           for (const auto &cell : dof_handler.active_cell_iterators()) {
-            const auto &stencil = cell_topology_cache[cell->active_cell_index()].stencil;
-            auto &slope = slopes[cell->active_cell_index()];
+            const auto k = cell->active_cell_index();
+            const auto &stencil = cell_topology_cache[k].stencil;
             const bool has_left = !cell->at_boundary(0), has_right = !cell->at_boundary(1);
             const double dl = has_left ? stencil.cell.x[0] - stencil.neighbors.x[0][0] : 0.;
             const double dr = has_right ? stencil.neighbors.x[1][0] - stencil.cell.x[0] : 0.;
+            const double width = cell->diameter();
+            // The unlimited slope of component c of v.
+            const auto unlimited = [&](const VectorType &v, const uint c) -> NumberType {
+              const NumberType value = v[stencil.cell.dof_indices[c]];
+              const NumberType jump_l = has_left ? value - v[stencil.neighbors.dof_indices[0][c]] : NumberType(0);
+              const NumberType jump_r = has_right ? v[stencil.neighbors.dof_indices[1][c]] - value : NumberType(0);
+              if (has_left && has_right) return (dl * dl * jump_r + dr * dr * jump_l) / (dl * dr * (dl + dr));
+              if (has_left) return jump_l / dl;
+              if (has_right) return jump_r / dr;
+              return NumberType(0);
+            };
             for (uint c = 0; c < n_components; ++c) {
-              const NumberType u = v[stencil.cell.dof_indices[c]];
-              const NumberType jump_l = has_left ? u - v[stencil.neighbors.dof_indices[0][c]] : NumberType(0);
-              const NumberType jump_r = has_right ? v[stencil.neighbors.dof_indices[1][c]] - u : NumberType(0);
-              if (has_left && has_right)
-                slope[c][0] = (dl * dl * jump_r + dr * dr * jump_l) / (dl * dr * (dl + dr));
-              else if (has_left)
-                slope[c][0] = jump_l / dl;
-              else if (has_right)
-                slope[c][0] = jump_r / dr;
-              else
-                slope[c][0] = 0.;
+              const NumberType value = u[stencil.cell.dof_indices[c]];
+              const NumberType left = has_left ? u[stencil.neighbors.dof_indices[0][c]] : value;
+              const NumberType right = has_right ? u[stencil.neighbors.dof_indices[1][c]] : value;
+              const NumberType slope = unlimited(u, c);
               // The children's centres lie a quarter cell width from the parent's.
-              const NumberType lo = std::min({u, u - jump_l, u + jump_r}), hi = std::max({u, u - jump_l, u + jump_r});
-              const NumberType reach = std::abs(slope[c][0]) * cell->diameter() / 4.;
-              if (reach > 0) slope[c][0] *= std::min<NumberType>({1., (hi - u) / reach, (u - lo) / reach});
+              const NumberType reach = std::abs(slope) * width / 4.;
+              NumberType theta = 1.;
+              if (reach > 0) {
+                const NumberType lo = std::min({value, left, right}), hi = std::max({value, left, right});
+                theta = std::min<NumberType>({1., (hi - value) / reach, (value - lo) / reach});
+                const NumberType curv = curvature[k][c];
+                if (has_left && has_right && std::abs(slope) <= std::abs(curv) * width / 2.) {
+                  const NumberType curv_l = curvature[neighbor_index(cell, 0)][c];
+                  const NumberType curv_r = curvature[neighbor_index(cell, 1)][c];
+                  if (curv_l * curv > 0 && curv_r * curv > 0) {
+                    const NumberType dip =
+                        std::min({std::abs(curv_l), std::abs(curv), std::abs(curv_r)}) * width * width / 8.;
+                    theta = std::max(theta, std::min<NumberType>(1., dip / reach));
+                  }
+                }
+              }
+              for (size_t i = 0; i < vectors.size(); ++i)
+                slopes[i][k][c][0] = theta * (i == 0 ? slope : unlimited(vectors[i], c));
             }
           }
           return slopes;

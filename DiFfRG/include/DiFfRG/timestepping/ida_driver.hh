@@ -129,6 +129,14 @@ namespace DiFfRG
     /// Called after every output; returning true (e.g. after remeshing @p sol and @p sol_dot) reinitializes IDA.
     std::function<bool(const double t, VectorType &sol, VectorType &sol_dot)> solver_should_restart;
 
+    /**
+     * @brief Optional: called after every accepted step, with its state; returning true restarts IDA there cold,
+     * i.e. without its step history, as is needed where the DAE itself is discontinuous in time.
+     *
+     * Setting it makes IDA run step by step up to each output time instead of interpolating to it.
+     */
+    std::function<bool(const double t, const VectorType &sol, const VectorType &sol_dot)> step_needs_restart;
+
     /// The differential components; all others are algebraic and excluded from the error test.
     std::function<dealii::IndexSet()> differential_components;
 

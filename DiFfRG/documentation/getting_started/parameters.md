@@ -51,7 +51,7 @@ Only used if `main` passes an `HAdaptivity` to the timestepper (see [Tutorial 7]
 | --- | --- | --- | --- |
 | `start_adapt_at` | double | 0 | RG time of the first adaptation. |
 | `adapt_dt` | double | 0.2 | RG time between adaptations. |
-| `level` | uint | 0 | Maximum refinement level of a cell, counted from the coarse grid (so with `grid/refine` = r, only `level` > r refines); 0 disables adaptation. |
+| `level` | uint | 0 | Maximum refinement level of a cell, counted from the coarse grid (so with `grid/refine` = r, only `level` > r refines); 0 disables adaptation. Cells are coarsened down to the coarse grid, also below `grid/refine`. |
 | `indicator` | string | `"auto"` | `"curvature"`: $h_K^2\,\lvert\partial^2 u\rvert/(\max u - \min u)$ per cell, about 8 times the relative resolution error; `"model"`: the model's `cell_indicator`/`face_indicator`; `"auto"`: the model's if it defines one, else curvature. |
 | `predict` | bool | true | Add each cell's indicator growth since the previous adaptation, so that forming structures are refined one adaptation earlier. |
 | `marking` | string | `"tolerance"` | `"tolerance"`: refine cells above `tolerance`, coarsen below `coarsen_tolerance`; `"fraction"`: refine/coarsen fixed fractions of the total indicator at every adaptation. |

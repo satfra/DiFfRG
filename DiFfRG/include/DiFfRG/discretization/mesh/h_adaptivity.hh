@@ -76,9 +76,9 @@ namespace DiFfRG
    *
    * The cells are then marked by `marking`:
    * - `"tolerance"` (default): cells with \f$\eta_K >\f$ `tolerance` are refined, cells with \f$\eta_K <\f$
-   *   `coarsen_tolerance` coarsened (the equidistribution strategy of time-dependent adaptive FEM). A smooth solution
-   *   keeps the initial mesh; refinement starts where a feature becomes unresolved, and a mesh that resolves the
-   *   solution is kept, with no IDA restart. The tolerance is absolute, so it needs an indicator with a known scale,
+   *   `coarsen_tolerance` coarsened (the equidistribution strategy of time-dependent adaptive FEM). Refinement starts
+   *   where a feature becomes unresolved, coarsening where the solution is smoother than needed, and a mesh that
+   *   resolves the solution is kept, with no IDA restart. The tolerance is absolute, so it needs an indicator with a known scale,
    *   like `"curvature"`. `coarsen_tolerance` must lie below `tolerance` divided by the factor by which a refinement
    *   lowers \f$\eta_K\f$ (4 for `"curvature"`), or a coarsened cell is refined again at once.
    * - `"fraction"`: with \f$\eta = \sum_K \eta_K\f$, the cells with the largest \f$\eta_K\f$ whose sum
@@ -88,7 +88,8 @@ namespace DiFfRG
    *   solution is resolved.
    *
    * Then
-   * - no cell is refined beyond `level`, and no cell is coarsened below the level of the initial mesh;
+   * - no cell is refined beyond `level`, and no cell is coarsened beyond the coarse grid (level 0): a mesh created
+   *   with `/discretization/grid/refine` > 0 can end up coarser than it started where the solution is smooth;
    * - no cell is coarsened within `coarsen_buffer` layers of neighbours of a cell flagged for refinement, nor if it
    *   was created by one of the last `coarsen_age` adaptations that changed the mesh. Coarsening a region that is
    *   refined again soon after is expensive: in fRG flows, e.g., the flat region of a potential has \f$\eta_K
@@ -99,7 +100,8 @@ namespace DiFfRG
    *
    * The hanging-node constraints are applied to the solution before it is interpolated onto the new mesh, and again
    * afterwards. For an assembler that provides `prolongation_slopes` (FV), the children of a refined cell get the
-   * cell average plus its slope times the offset of their centre, instead of the bare average. Discretization and
+   * cell average plus its slope times the offset of their centre, instead of the bare average; the slopes of all
+   * transferred vectors are limited as the solution's, so the transfer is one linear map. Discretization and
    * assembler are reinitialized.
    *
    * ### Parameters
@@ -143,7 +145,7 @@ namespace DiFfRG
                   "This assembler does not support mesh adaptation in this dimension; use NoAdaptivity.");
 
   public:
-    /// Read the parameters (see the class description) and record the level of the initial mesh.
+    /// Read the parameters (see the class description).
     HAdaptivity(Assembler &assembler, const ConfigTree &config)
         : assembler(assembler), discretization(assembler.get_discretization())
     {
@@ -171,9 +173,6 @@ namespace DiFfRG
       predict = config.get_bool("/discretization/adaptivity/predict", true);
       coarsen_buffer = config.get_uint("/discretization/adaptivity/coarsen_buffer", 2);
       coarsen_age = config.get_uint("/discretization/adaptivity/coarsen_age", 10);
-      min_level = std::numeric_limits<uint>::max();
-      for (const auto &cell : discretization.get_triangulation().active_cell_iterators())
-        min_level = std::min(min_level, uint(cell->level()));
     }
 
     /// @copydoc AbstractAdaptor::last_adaptation_time
@@ -268,10 +267,10 @@ namespace DiFfRG
       } else
         GridRefinement::refine_and_coarsen_fixed_fraction(triangulation, indicator, adapt_upper, adapt_lower);
 
-      // Never refine beyond adapt_level, never coarsen below the mesh we started from.
+      // Never refine beyond adapt_level; the cells of the coarse grid have no parent to coarsen to.
       for (const auto &cell : triangulation.active_cell_iterators()) {
         if (uint(cell->level()) >= adapt_level) cell->clear_refine_flag();
-        if (uint(cell->level()) <= min_level) cell->clear_coarsen_flag();
+        if (cell->level() == 0) cell->clear_coarsen_flag();
       }
       protect_from_coarsening(triangulation);
       // Drops coarsening flags that cannot be honoured (e.g. not all siblings flagged), so that they do not count.
@@ -437,16 +436,14 @@ namespace DiFfRG
     };
 
     /**
-     * @brief For an assembler that provides `prolongation_slopes(v)` (the FV assembler): per cell flagged for
-     * refinement, the slopes of each of @p vectors. Empty otherwise.
+     * @brief For an assembler that provides `prolongation_slopes(vectors)` (the FV assembler): per cell flagged for
+     * refinement, the slopes of each of @p vectors, limited as the first one (the solution). Empty otherwise.
      */
     std::map<CellId, RefinedCellSlopes> refined_cell_slopes(const std::vector<VectorType> &vectors) const
     {
       std::map<CellId, RefinedCellSlopes> result;
-      if constexpr (requires { assembler.prolongation_slopes(vectors[0]); }) {
-        std::vector<decltype(assembler.prolongation_slopes(vectors[0]))> per_vector;
-        for (const auto &v : vectors)
-          per_vector.push_back(assembler.prolongation_slopes(v));
+      if constexpr (requires { assembler.prolongation_slopes(vectors); }) {
+        const auto per_vector = assembler.prolongation_slopes(vectors);
         for (const auto &cell : discretization.get_triangulation().active_cell_iterators()) {
           if (!cell->refine_flag_set()) continue;
           auto &entry = result[cell->id()];
@@ -526,8 +523,6 @@ namespace DiFfRG
     double last_adapt = -std::numeric_limits<double>::infinity();
     double adapt_t, adapt_dt, adapt_upper, adapt_lower;
     uint adapt_level;
-    /// Level of the coarsest active cell at construction.
-    uint min_level;
     uint coarsen_buffer, coarsen_age;
     bool curvature_indicator, tolerance_marking;
     double tolerance, coarsen_tolerance;

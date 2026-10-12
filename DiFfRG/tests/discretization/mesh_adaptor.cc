@@ -99,7 +99,7 @@ namespace
   }
 } // namespace
 
-TEST_CASE("HAdaptivity keeps the levels between the initial mesh and adaptivity/level", "[discretization][adaptivity]")
+TEST_CASE("HAdaptivity keeps the levels between the coarse grid and adaptivity/level", "[discretization][adaptivity]")
 {
   DiFfRG::Init();
   SECTION("Unrefined initial mesh")
@@ -108,16 +108,16 @@ TEST_CASE("HAdaptivity keeps the levels between the initial mesh and adaptivity/
     CHECK(lowest == 0);
     CHECK(highest == 2);
   }
-  SECTION("Initial mesh refined beyond adaptivity/level: no refinement, no coarsening below it")
+  SECTION("Initial mesh refined beyond adaptivity/level: \"fraction\" marking without refinement leaves it alone")
   {
     const auto [lowest, highest] = adapt_repeatedly(2, 1, 5);
     CHECK(lowest == 2);
     CHECK(highest == 2);
   }
-  SECTION("Initial mesh refined below adaptivity/level")
+  SECTION("Initial mesh refined below adaptivity/level: coarsened below it where the indicator is small")
   {
     const auto [lowest, highest] = adapt_repeatedly(1, 3, 5);
-    CHECK(lowest == 1);
+    CHECK(lowest == 0);
     CHECK(highest == 3);
   }
 }

@@ -193,6 +193,25 @@ namespace DiFfRG
         return DiFfRG::internal::load_model_state(model, state);
       }
 
+      /// The model's needs_restart at the EoM of @p solution, if it defines one; see DiFfRG::HasNeedsRestart.
+      virtual bool needs_restart([[maybe_unused]] const double t,
+                                 [[maybe_unused]] const VectorType &solution) const override
+      {
+        if constexpr (HasNeedsRestart<Model, dim, NumberType>) {
+          auto cell = EoM_cell;
+          const auto EoM =
+              locate_EoM(
+                  cell, solution, [&](const auto &p, const auto &values) { return model.EoM(p, values); },
+                  [&](const auto &p, const auto &values) { return model.EoM_postprocess(p, values); })
+                  .point;
+          derived().prepare_point_evaluation(solution);
+          return model.template needs_restart<dim, NumberType>(t, EoM, derived().extractor_sample(solution));
+        } else
+          return false;
+      }
+
+      virtual bool requests_restarts() const override { return HasNeedsRestart<Model, dim, NumberType>; }
+
       using AbstractBase::attach_data_output;
       /// The FE functions, their time derivatives and residuals (when given), and the model's readouts.
       virtual void attach_data_output(OutputFrame<dim, VectorType> &data_out, const VectorType &solution,

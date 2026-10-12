@@ -21,6 +21,7 @@ extern "C" int IDAInitialSetup(IDAMem IDA_mem);
 #include <sunnonlinsol/sunnonlinsol_newton.h>
 
 // standard library
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <limits>
@@ -290,17 +291,35 @@ namespace DiFfRG
 
     unsigned int output_number = 0;
     double next_time = prm.initial_time;
-    while (t < prm.final_time) {
-      next_time += prm.output_period;
-      auto yy = make_nvector_view(solution, ctx);
-      auto yp = make_nvector_view(solution_dot, ctx);
-      const int status = IDASolve(ida_mem, next_time, &t, yy, yp, IDA_NORMAL);
-      handle_pending_exception();
+    auto fail_if = [&](const int status) {
       if (status < 0) {
         std::ostringstream message;
         message << std::setprecision(10) << "IDA failed at t = " << t << ": " << IDAGetReturnFlagName(status);
         throw std::runtime_error(message.str());
       }
+    };
+    while (t < prm.final_time) {
+      next_time += prm.output_period;
+      auto yy = make_nvector_view(solution, ctx);
+      auto yp = make_nvector_view(solution_dot, ctx);
+      if (step_needs_restart) {
+        // Step by step up to the output time, so that every accepted step can be shown to step_needs_restart.
+        const double stop = std::min(next_time, prm.final_time);
+        check(IDASetStopTime(ida_mem, stop), "IDASetStopTime");
+        int status = 0;
+        do {
+          status = IDASolve(ida_mem, stop, &t, yy, yp, IDA_ONE_STEP);
+          handle_pending_exception();
+          fail_if(status);
+          if (step_needs_restart(t, solution, solution_dot)) {
+            // The flow is discontinuous at t: IDA starts over without its step history.
+            reset(t, prm.initial_step_size, solution, solution_dot, true);
+            check(IDASetStopTime(ida_mem, stop), "IDASetStopTime");
+          }
+        } while (status != IDA_TSTOP_RETURN && t < stop);
+      } else
+        fail_if(IDASolve(ida_mem, next_time, &t, yy, yp, IDA_NORMAL));
+      handle_pending_exception();
       check(IDAGetLastStep(ida_mem, &h), "IDAGetLastStep");
 
       warm = warm_restart_available && prm.warm_restart;

@@ -1,5 +1,7 @@
 #include <catch2/catch_all.hpp>
 
+#include <deal.II/base/quadrature_lib.h>
+
 #include <DiFfRG/common/init.hh>
 #include <DiFfRG/discretization/FV/assembler/KurganovTadmor.hh>
 #include <DiFfRG/discretization/FV/discretization.hh>
@@ -302,4 +304,94 @@ TEST_CASE("HAdaptivity prolongates 1D KT cell averages without new extrema", "[F
   CHECK(s.u.linfty_norm() <= 2. + 1e-12);
   for (std::size_t i = 0; i < s.u.size(); ++i)
     CHECK(s.u[i] >= 1. - 1e-12);
+}
+
+namespace
+{
+  /// Cell averages of @p f over the cells of @p s, by Gauss quadrature.
+  template <typename F> VectorType cell_averages(Setup &s, const F &f)
+  {
+    VectorType v(s.discretization.get_dof_handler().n_dofs());
+    std::vector<types::global_dof_index> dof(1);
+    const QGauss<1> quadrature(8);
+    for (const auto &cell : s.discretization.get_dof_handler().active_cell_iterators()) {
+      cell->get_dof_indices(dof);
+      const double a = cell->vertex(0)[0], b = cell->vertex(1)[0];
+      double sum = 0.;
+      for (uint q = 0; q < quadrature.size(); ++q)
+        sum += quadrature.weight(q) * f(a + (b - a) * quadrature.point(q)[0]);
+      v[dof[0]] = sum;
+    }
+    return v;
+  }
+} // namespace
+
+TEST_CASE("KT prolongation slopes keep smooth extrema and limit kinks and steps", "[FV][KT][adaptivity]")
+{
+  DiFfRG::Init();
+  Setup s;
+  const double x0 = 0.512; // inside the cell [0.5, 0.55], off its centre
+  std::vector<types::global_dof_index> dof(1);
+  // The children's averages ubar -+ slope * width / 4 of every cell, with the parent's average.
+  const auto children = [&](const VectorType &u, const VectorType &slope_source) {
+    const auto slopes = s.assembler.prolongation_slopes(std::vector<VectorType>{u, slope_source});
+    std::vector<std::tuple<double, double, double, double, double>> result; // a, b, left, right, parent
+    for (const auto &cell : s.discretization.get_dof_handler().active_cell_iterators()) {
+      cell->get_dof_indices(dof);
+      const double a = cell->vertex(0)[0], b = cell->vertex(1)[0];
+      const double shift = slopes[1][cell->active_cell_index()][0][0] * (b - a) / 4.;
+      result.emplace_back(a, b, slope_source[dof[0]] - shift, slope_source[dof[0]] + shift, slope_source[dof[0]]);
+    }
+    return result;
+  };
+
+  SECTION("a smooth minimum is prolongated exactly")
+  {
+    const auto f = [&](const double x) { return 0.3 + std::pow(x - x0, 2); };
+    const auto u = cell_averages(s, f);
+    for (const auto &[a, b, left, right, parent] : children(u, u)) {
+      if (a < 1e-12 || b > 1. - 1e-12) continue; // one-sided slope at the boundary
+      const auto half = [&](const double lo, const double hi) {
+        // exact average of 0.3 + (x - x0)^2 over [lo, hi]
+        return 0.3 + (std::pow(hi - x0, 3) - std::pow(lo - x0, 3)) / (3. * (hi - lo));
+      };
+      CHECK(left == Catch::Approx(half(a, (a + b) / 2.)).epsilon(1e-12));
+      CHECK(right == Catch::Approx(half((a + b) / 2., b)).epsilon(1e-12));
+    }
+  }
+
+  SECTION("a kink's minimum dips no further than the profile")
+  {
+    // |x - x0| curves the same way on both sides of the kink cell, so its children may dip below the averages,
+    // by the smallest of the three curvatures -- toward the exact child averages, never beyond them.
+    const auto f = [&](const double x) { return std::abs(x - x0); };
+    const auto u = cell_averages(s, f);
+    for (const auto &[a, b, left, right, parent] : children(u, u)) {
+      CHECK(left >= 0.);
+      CHECK(right >= 0.);
+      if (a < x0 && x0 < b) {
+        const double m = (a + b) / 2.;
+        const double exact_left = (std::pow(x0 - a, 2) + std::pow(m - x0, 2)) / (2. * (m - a));
+        CHECK(left < parent);
+        CHECK(left > exact_left);
+      }
+    }
+  }
+
+  SECTION("every vector is prolongated with the limiting of the first")
+  {
+    // u is a step at x = 0.5: limited to zero slope in the two cells next to it, unlimited elsewhere (zero slope).
+    const auto u = cell_averages(s, [](const double x) { return x < 0.5 ? 1. : 2.; });
+    const auto v = cell_averages(s, [](const double x) { return 3. * x; });
+    for (const auto &[a, b, left, right, parent] : children(u, v)) {
+      const bool next_to_step = std::abs(a - 0.5) < 1e-12 || std::abs(b - 0.5) < 1e-12;
+      if (next_to_step) {
+        CHECK(left == Catch::Approx(parent).epsilon(1e-14));
+        CHECK(right == Catch::Approx(parent).epsilon(1e-14));
+      } else if (a > 1e-12 && b < 1. - 1e-12) {
+        CHECK(left == Catch::Approx(3. * (3. * a + b) / 4.).epsilon(1e-12));
+        CHECK(right == Catch::Approx(3. * (a + 3. * b) / 4.).epsilon(1e-12));
+      }
+    }
+  }
 }

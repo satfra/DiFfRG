@@ -340,6 +340,13 @@ namespace DiFfRG
       return false;
     };
 
+    // A model with a discontinuity in time asks for a cold restart at an accepted step; see HasNeedsRestart.
+    if (assembler.requests_restarts())
+      time_stepper.step_needs_restart = [&](const double t, const VectorType &sol, const VectorType &) {
+        sol_view.refresh(sol);
+        return assembler.needs_restart(t, sol_view.get());
+      };
+
     // At output_dt intervals this function saves intermediate solutions
     double last_save = -1.;
     time_stepper.output_step = [&](const double t, const VectorType &sol, const VectorType &sol_dot,
@@ -688,6 +695,13 @@ namespace DiFfRG
       }
       return false;
     };
+
+    // A model with a discontinuity in time asks for a cold restart at an accepted step; see HasNeedsRestart.
+    if (assembler.requests_restarts())
+      time_stepper.step_needs_restart = [&](const double t, const BlockVectorType &sol, const BlockVectorType &) {
+        sol_view.refresh(sol.block(0));
+        return assembler.needs_restart(t, sol_view.get());
+      };
 
     // Scratch for the redundant variables computation; see compute_variables_into.
     VectorType vars_scratch;

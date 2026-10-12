@@ -126,6 +126,28 @@ namespace DiFfRG
   };
 
   /**
+   * @brief Whether @p Model can ask the timestepper for a restart.
+   *
+   * A model whose flow has a discontinuity in time (e.g. its extractors switching between two minima at a
+   * first-order transition) implements
+   *
+   * ```cpp
+   * template <int dim, typename NT>
+   * bool needs_restart(double t, const Point<dim> &EoM, const SolutionSample<dim, NT> &sample) const;
+   * ```
+   *
+   * The implicit timesteppers call it once per accepted step, with the accepted state, and on true restart the
+   * integration at @p t without its step history (see AbstractAssembler::needs_restart). Since it only ever sees
+   * accepted states, it is the place to make the decision that causes the discontinuity: the model may change its
+   * state there, and every evaluation after the restart sees the new state.
+   */
+  template <typename Model, int dim, typename NumberType>
+  concept HasNeedsRestart = requires(const Model &model, const double t, const dealii::Point<dim> &EoM,
+                                     const SolutionSample<dim, NumberType> &sample) {
+    { model.template needs_restart<dim, NumberType>(t, EoM, sample) } -> std::convertible_to<bool>;
+  };
+
+  /**
    * @brief Build a SolutionSample over the active cells of @p dof_handler, with values and gradients from @p fill.
    *
    * @param dof_handler Its active cells are the cells of the sample.
