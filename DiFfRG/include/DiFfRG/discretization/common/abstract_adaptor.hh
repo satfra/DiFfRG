@@ -51,6 +51,13 @@ namespace DiFfRG
      * @return true if the mesh changed.
      */
     virtual bool adapt(VectorType &solution) = 0;
+    /**
+     * @brief How often operator() may change the mesh, in RG time; 0 if it never does.
+     *
+     * The IDA steppers ask the adaptor at multiples of this, not only at output times, so that a long output_dt does
+     * not delay adaptations.
+     */
+    virtual double adaptation_period() const { return 0.; }
 
     /**
      * @brief The time of the last adaptation, or NaN if this adaptor keeps no such schedule.

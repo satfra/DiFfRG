@@ -21,6 +21,9 @@ namespace DiFfRG
     double initial_step_size = 1e-4;
     /// solve_dae() calls output_step() at multiples of this in time.
     double output_period = 1e-1;
+    /// solve_dae() also asks solver_should_restart() at multiples of this in time, between output times (e.g. the
+    /// mesh adaptor's AbstractAdaptor::adaptation_period()); 0: only at output times.
+    double restart_check_period = 0.;
     /// Bounds on the step size; 0 means unbounded.
     double minimal_step_size = 0.;
     double maximal_step_size = 0.;
@@ -202,12 +205,13 @@ namespace DiFfRG
     /// The IDADriver settings from the implicit parameters of a timestepper (see abstract_timestepper.hh).
     template <typename ImplicitParameters>
     IDAParameters ida_parameters(const ImplicitParameters &impl, const double t_start, const double t_stop,
-                                 const double output_dt)
+                                 const double output_dt, const double restart_check_period)
     {
       return IDAParameters{.initial_time = t_start,
                            .final_time = t_stop,
                            .initial_step_size = impl.dt,
                            .output_period = output_dt,
+                           .restart_check_period = restart_check_period,
                            .minimal_step_size = impl.minimal_dt,
                            .maximal_step_size = impl.maximal_dt,
                            .maximum_newton_iterations = impl.max_non_linear_iterations,

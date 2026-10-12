@@ -175,6 +175,8 @@ namespace DiFfRG
       coarsen_age = config.get_uint("/discretization/adaptivity/coarsen_age", 10);
     }
 
+    /// @copydoc AbstractAdaptor::adaptation_period
+    virtual double adaptation_period() const override { return adapt_level > 0 ? adapt_dt : 0.; }
     /// @copydoc AbstractAdaptor::last_adaptation_time
     virtual double last_adaptation_time() const override { return last_adapt; }
     /// @copydoc AbstractAdaptor::set_last_adaptation_time

@@ -261,7 +261,7 @@ namespace DiFfRG
         jacobian_diagnostics_enabled ? data_out.diagnostic_port() : DiagnosticPort{};
 
     // Create the IDA integrator
-    IDADriver<VectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt));
+    IDADriver<VectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt, adaptor.adaptation_period()));
 
     // Define some variables for monitoring
     uint stuck = 0;
@@ -618,7 +618,7 @@ namespace DiFfRG
         jacobian_diagnostics_enabled ? data_out.diagnostic_port() : DiagnosticPort{};
 
     // Create the IDA integrator
-    IDADriver<BlockVectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt));
+    IDADriver<BlockVectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt, adaptor.adaptation_period()));
 
     // Define some variables for monitoring
     uint stuck = 0;
@@ -994,7 +994,7 @@ namespace DiFfRG
         jacobian_diagnostics_enabled ? data_out.diagnostic_port() : DiagnosticPort{};
 
     // Create the IDA integrator
-    IDADriver<VectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt));
+    IDADriver<VectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt, adaptor.adaptation_period()));
 
     // Define some variables for monitoring
     uint stuck = 0;

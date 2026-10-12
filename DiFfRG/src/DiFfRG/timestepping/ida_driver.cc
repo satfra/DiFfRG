@@ -133,10 +133,8 @@ namespace DiFfRG
     check(IDASetUserData(ida_mem, this), "IDASetUserData");
 
     if (get_local_tolerances) {
-      // The model's per-dof tolerances are the whole tolerance: it builds them from rel_tol itself, against the scale
-      // that matters for each dof, which IDA's rel_tol |y| would override wherever |y| is the larger one.
       auto abs_tols = make_nvector_view(get_local_tolerances(), ctx);
-      check(IDASVtolerances(ida_mem, 0., abs_tols), "IDASVtolerances");
+      check(IDASVtolerances(ida_mem, prm.relative_tolerance, abs_tols), "IDASVtolerances");
     } else
       check(IDASStolerances(ida_mem, prm.relative_tolerance, prm.absolute_tolerance), "IDASStolerances");
 
@@ -300,13 +298,11 @@ namespace DiFfRG
         throw std::runtime_error(message.str());
       }
     };
-    while (t < prm.final_time) {
-      next_time += prm.output_period;
+    // IDA's state at `stop`; with step_needs_restart, step by step so that every accepted step can be shown to it.
+    auto advance_to = [&](const double stop) {
       auto yy = make_nvector_view(solution, ctx);
       auto yp = make_nvector_view(solution_dot, ctx);
       if (step_needs_restart) {
-        // Step by step up to the output time, so that every accepted step can be shown to step_needs_restart.
-        const double stop = std::min(next_time, prm.final_time);
         check(IDASetStopTime(ida_mem, stop), "IDASetStopTime");
         int status = 0;
         do {
@@ -320,15 +316,37 @@ namespace DiFfRG
           }
         } while (status != IDA_TSTOP_RETURN && t < stop);
       } else
-        fail_if(IDASolve(ida_mem, next_time, &t, yy, yp, IDA_NORMAL));
+        fail_if(IDASolve(ida_mem, stop, &t, yy, yp, IDA_NORMAL));
       handle_pending_exception();
       check(IDAGetLastStep(ida_mem, &h), "IDAGetLastStep");
+    };
+    // The first multiple of restart_check_period (counted from the initial time) after t.
+    auto next_check_after = [&](const double time) {
+      const double period = prm.restart_check_period;
+      const double n = std::floor((time - prm.initial_time) / period + 1e-9);
+      return prm.initial_time + (n + 1.) * period;
+    };
 
-      warm = warm_restart_available && prm.warm_restart;
-      if (warm) capture_history();
-      while (solver_should_restart && solver_should_restart(t, solution, solution_dot))
-        reset(t, h, solution, solution_dot, true);
-      warm = false;
+    while (t < prm.final_time) {
+      next_time += prm.output_period;
+      const double output_time = std::min(next_time, prm.final_time);
+      // Up to the output time, through the restart checks in between.
+      bool at_output = false;
+      while (!at_output) {
+        double stop = output_time;
+        if (prm.restart_check_period > 0.) {
+          const double check_time = next_check_after(t);
+          if (check_time < output_time - 1e-9 * prm.restart_check_period) stop = check_time;
+        }
+        at_output = stop == output_time;
+        advance_to(stop);
+
+        warm = warm_restart_available && prm.warm_restart;
+        if (warm) capture_history();
+        while (solver_should_restart && solver_should_restart(t, solution, solution_dot))
+          reset(t, h, solution, solution_dot, true);
+        warm = false;
+      }
 
       if (output_step) output_step(t, solution, solution_dot, ++output_number);
     }
