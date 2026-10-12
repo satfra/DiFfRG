@@ -353,3 +353,42 @@ TEST_CASE("Test autodiff with Kokkos", "[autodiff][kokkos]")
     }
   }
 }
+TEST_CASE("Negative integer powers of complex numbers", "[complex]")
+{
+  DiFfRG::Init();
+  // powr<-n> takes conj(z)/|z|^2 for complex<double>; compare against std::complex on host and device.
+  const std::vector<complex<double>> zs = {{1.3, -0.7}, {-2e-3, 5e2}, {1e100, 1e99}, {-3e-120, 4e-120}};
+  auto expected = [](const complex<double> &z, int n) {
+    const auto e = std::pow(std::complex<double>(z.real(), z.imag()), -n);
+    return complex<double>(e.real(), e.imag());
+  };
+  // is_close also accepts an absolute deviation of eps, so scale eps with |z^-n|
+  auto check = [](const complex<double> &is, const complex<double> &should) {
+    CHECK(is_close(is, should, 1e-14 * Kokkos::abs(should)));
+  };
+
+  Kokkos::View<complex<double> *[3], GPU_memory> res("res", zs.size());
+  Kokkos::View<complex<double> *, GPU_memory> z_d("z", zs.size());
+  auto z_h = Kokkos::create_mirror_view(z_d);
+  for (size_t i = 0; i < zs.size(); ++i)
+    z_h(i) = zs[i];
+  Kokkos::deep_copy(z_d, z_h);
+  Kokkos::parallel_for(
+      "powr", Kokkos::RangePolicy<GPU_exec>(0, zs.size()), KOKKOS_LAMBDA(const size_t i) {
+        res(i, 0) = powr<-1>(z_d(i));
+        res(i, 1) = powr<-2>(z_d(i));
+        res(i, 2) = powr<-3>(z_d(i));
+      });
+  const auto res_h = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), res);
+
+  for (size_t i = 0; i < zs.size(); ++i) {
+    check(powr<-1>(zs[i]), expected(zs[i], 1));
+    check(res_h(i, 0), expected(zs[i], 1));
+    if (i < 2) { // |z|^2n stays in double range only for the moderate entries
+      check(powr<-2>(zs[i]), expected(zs[i], 2));
+      check(res_h(i, 1), expected(zs[i], 2));
+      check(powr<-3>(zs[i]), expected(zs[i], 3));
+      check(res_h(i, 2), expected(zs[i], 3));
+    }
+  }
+}

@@ -689,29 +689,30 @@ namespace DiFfRG
     static constexpr int order = OPTS::order;
     static_assert(order > 0, "PolynomialExpRegulator: order must be > 0 !");
 
-    template <int c0, int... c>
-    static KOKKOS_INLINE_FUNCTION auto get_f(std::integer_sequence<int, c0, c...>, const auto x)
+    /// \f$f(x) = x\,(1 + x\,(1/2 + x\,(1/3 + \dots)))\f$ in Horner form with compile-time reciprocals.
+    static KOKKOS_INLINE_FUNCTION auto get_f(const auto x)
     {
-      using T = decltype(x);
-      if constexpr (sizeof...(c) == 0)
-        return powr<c0 + 1>(x) / T(c0 + 1);
-      else
-        return powr<c0 + 1>(x) / T(c0 + 1) + get_f(std::integer_sequence<int, c...>{}, x);
+      using T = std::decay_t<decltype(x)>;
+      T acc = T(1. / double(order));
+      for (int m = order - 1; m >= 1; --m)
+        acc = acc * x + T(1. / double(m));
+      return acc * x;
     }
-    template <int c0, int... c>
-    static KOKKOS_INLINE_FUNCTION auto get_df(std::integer_sequence<int, c0, c...>, const auto x)
+    /// \f$f'(x) = \sum_{m=0}^{n-1} x^m\f$ in Horner form.
+    static KOKKOS_INLINE_FUNCTION auto get_df(const auto x)
     {
-      if constexpr (sizeof...(c) == 0)
-        return powr<c0>(x);
-      else
-        return powr<c0>(x) + get_df(std::integer_sequence<int, c...>{}, x);
+      using T = std::decay_t<decltype(x)>;
+      T acc = T(1);
+      for (int m = 1; m < order; ++m)
+        acc = acc * x + T(1);
+      return acc;
     }
     /// \f$R_B\f$ at \f$k^2\f$ = `k2`, \f$q^2\f$ = `q2`.
     template <typename NT1, typename NT2> static KOKKOS_INLINE_FUNCTION auto RB(const NT1 k2, const NT2 q2)
     {
       using Kokkos::exp;
       const auto x = q2 / k2;
-      const auto f = get_f(std::make_integer_sequence<int, order>{}, x);
+      const auto f = get_f(x);
       return k2 * exp(-f);
     }
 
@@ -720,8 +721,8 @@ namespace DiFfRG
     {
       using Kokkos::exp;
       const auto x = q2 / k2;
-      const auto f = get_f(std::make_integer_sequence<int, order>{}, x);
-      const auto df = get_df(std::make_integer_sequence<int, order>{}, x);
+      const auto f = get_f(x);
+      const auto df = get_df(x);
       return 2 * k2 * exp(-f) * (1 + df * x);
     }
 
@@ -730,8 +731,8 @@ namespace DiFfRG
     {
       using Kokkos::exp;
       const auto x = q2 / k2;
-      const auto f = get_f(std::make_integer_sequence<int, order>{}, x);
-      const auto df = get_df(std::make_integer_sequence<int, order>{}, x);
+      const auto f = get_f(x);
+      const auto df = get_df(x);
       return -exp(-f) * df;
     }
 

@@ -44,7 +44,8 @@ namespace DiFfRG
   /**
    * @brief \f$x^n\f$ for an integer exponent \f$n\f$ known at compile time, by repeated squaring.
    *
-   * Negative \f$n\f$ give \f$1/x^{|n|}\f$, and \f$x^0 = 1\f$.
+   * Negative \f$n\f$ give \f$1/x^{|n|}\f$, and \f$x^0 = 1\f$. For `complex<double>` the reciprocal is
+   * \f$\bar z/|z|^2\f$, which over- or underflows for \f$|z| \gtrsim 10^{154}\f$ or \f$|z| \lesssim 10^{-154}\f$.
    *
    * @tparam n the exponent.
    * @tparam NumberType type of the argument, e.g. `double`, complex or autodiff types.
@@ -58,8 +59,15 @@ namespace DiFfRG
   {
     if constexpr (n == 0)
       return NumberType(1.);
-    else if constexpr (n < 0)
-      return NumberType(1.) / powr<-n, NumberType>(x);
+    else if constexpr (n < 0) {
+      if constexpr (std::is_same_v<NumberType, complex<double>>) {
+        // One real division instead of the ~6 of Kokkos' overflow-safe scaled complex division.
+        const NumberType z = powr<-n, NumberType>(x);
+        const double inv = 1. / (z.real() * z.real() + z.imag() * z.imag());
+        return NumberType(z.real() * inv, -z.imag() * inv);
+      } else
+        return NumberType(1.) / powr<-n, NumberType>(x);
+    }
     else if constexpr (n == 1)
       return x;
     else if constexpr (n % 2 == 0)
