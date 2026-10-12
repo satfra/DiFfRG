@@ -83,7 +83,7 @@ namespace on_kt_3D
 
   class LSM_rho_analytic : public def::AbstractModel<LSM_rho_analytic, Components>,
                            public def::fRG,
-                           public def::RhoSymmetricLinearExtrapolationBoundaries<LSM_rho_analytic>,
+                           public def::FVDefaultBoundaries<LSM_rho_analytic>,
                            public def::AD<LSM_rho_analytic>
   {
   public:
@@ -207,7 +207,7 @@ namespace on_kt_3D
   template <typename FlowsType>
   class LSM_rho_integrator_base : public def::AbstractModel<LSM_rho_integrator_base<FlowsType>, Components>,
                                   public def::fRG,
-                                  public def::RhoSymmetricLinearExtrapolationBoundaries<LSM_rho_integrator_base<FlowsType>>,
+                                  public def::FVDefaultBoundaries<LSM_rho_integrator_base<FlowsType>>,
                                   public def::AD<LSM_rho_integrator_base<FlowsType>>
   {
   public:
@@ -289,7 +289,7 @@ namespace on_kt_3D
   template <typename FlowsType>
   class LSM_rho_largeN_base : public def::AbstractModel<LSM_rho_largeN_base<FlowsType>, Components>,
                               public def::fRG,
-                              public def::RhoSymmetricLinearExtrapolationBoundaries<LSM_rho_largeN_base<FlowsType>>,
+                              public def::FVDefaultBoundaries<LSM_rho_largeN_base<FlowsType>>,
                               public def::AD<LSM_rho_largeN_base<FlowsType>>
   {
   public:

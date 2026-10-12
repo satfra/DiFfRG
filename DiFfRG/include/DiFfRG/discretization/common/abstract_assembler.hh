@@ -134,9 +134,9 @@ namespace DiFfRG
     /**
      * @brief Per-dof absolute tolerances for the implicit (IDA) timesteppers.
      *
-     * Instead of the uniform `/timestepping/implicit/abs_tol`, a model can set one absolute tolerance per dof through
-     * the hook `abs_tolerances` (def::HasAbsTolerances), useful when components live on very different scales. The
-     * tolerances may depend on the state; the IDA steppers re-read them when some dof needs a tolerance tighter by more
+     * Instead of the uniform `/timestepping/implicit/abs_tol` and `rel_tol`, a model can set one tolerance per dof
+     * through the hook `abs_tolerances` (def::HasAbsTolerances), useful when components live on very different scales;
+     * IDA then runs with relative tolerance 0, so these are the whole tolerance. They may depend on the state; the IDA steppers re-read them when some dof needs a tolerance tighter by more
      * than the factor `/timestepping/implicit/local_tolerance_refresh`.
      *
      * @param atol Output; sized and filled when the function returns true.

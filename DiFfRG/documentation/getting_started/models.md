@@ -110,7 +110,7 @@ The building blocks; a model picks one per row as needed:
 | Jacobians | `def::AD` (all by AD), `def::FE_AD` (FE part by AD, extractors frozen), `def::NoJacobians` (explicit steppers only) |
 | interior numerical flux (DG, LDG) | `def::LLFFlux` (local Lax–Friedrichs), `def::NoNumFlux` |
 | boundaries (CG, DG, LDG) | `def::FlowBoundaries` |
-| boundaries (finite volume) | `def::FVDefaultBoundaries`, `def::RhoSymmetricLinearExtrapolationBoundaries`, … in {doc}`fv_boundaries.hh </doxygen/DiFfRG/html/fv__boundaries_8hh>` |
+| boundaries (finite volume) | `def::FVDefaultBoundaries`, `def::OriginOddLinearExtrapolationBoundaries`, … in {doc}`fv_boundaries.hh </doxygen/DiFfRG/html/fv__boundaries_8hh>` |
 | pinned dofs | `def::ConstrainOriginBoundaryPointToZero<"u", Model>`, … (see [below](#affine-constraints)) |
 
 Which hooks each discretization needs:

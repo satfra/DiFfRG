@@ -45,7 +45,6 @@
  * | Mixin | dim | Lower boundary: ghosts (inner, outer); boundary cell | Upper |
  * |-------|-----|------------------------------------------------------|-------|
  * | FVDefaultBoundaries | 1, 2 | \f$(2u_P - u_1,\ 3u_P - 2u_1)\f$: affine | affine |
- * | RhoSymmetricLinearExtrapolationBoundaries | 1 | \f$(u_P,\ u_1)\f$: even about the face; \f$u_P\f$ free | affine |
  * | OriginOddLinearExtrapolationBoundaries | 1, 2 | \f$(-u_1,\ -u_2)\f$, \f$u_P \to 0\f$: odd about \f$P\f$ | affine |
  * | OriginShiftedOddLinearExtrapolationBoundaries | 1 | \f$(2b - u_1,\ 2b - u_2)\f$, \f$u_P \to b\f$ | affine |
  */
@@ -168,54 +167,21 @@ namespace DiFfRG
     };
 
     /**
-     * @brief Lower boundary: even reflection about the boundary face, for a solution symmetric under \f$\rho \to
-     * -\rho\f$ with the face at \f$\rho = 0\f$; the boundary cell stays a free unknown. Upper boundary: affine
-     * extrapolation. 1D only.
+     * @brief Deprecated: FVDefaultBoundaries. This used to reflect the lower ghosts evenly about the face at
+     * \f$\rho = 0\f$, which imposes \f$u'(0) = 0\f$; a function of \f$\rho\f$ has no such symmetry (e.g.
+     * \f$u = V'(\rho)\f$ has \f$u'(0) = V''(0)\f$), so the ghosts continue the derivative instead.
      */
-    template <typename Model> class RhoSymmetricLinearExtrapolationBoundaries
-    {
-    public:
-      /// Fill the ghost cells of @p u_stencil and @p x_stencil for the boundary face at @p x_face; always true.
-      template <int dim, typename NumberType, size_t n_components>
-      bool apply_boundary_stencil(BoundaryStencilValues<dim, NumberType, n_components> &u_stencil,
-                                  BoundaryStencilPoints<dim> &x_stencil, const Point<dim> &x_face) const
-      {
-        static_assert(dim == 1,
-                      "RhoSymmetricLinearExtrapolationBoundaries currently supports only 1D FV domains.");
-
-        using namespace BoundaryStencilIndex;
-        const bool lower_boundary = x_face[0] <= x_stencil[physical_cell][0];
-        const double delta = lower_boundary ? (x_stencil[upper_inner][0] - x_stencil[physical_cell][0])
-                                            : (x_stencil[physical_cell][0] - x_stencil[lower_inner][0]);
-
-        if (lower_boundary) {
-          x_stencil[lower_inner][0] = x_stencil[physical_cell][0] - delta;
-          x_stencil[lower_outer][0] = x_stencil[physical_cell][0] - 2.0 * delta;
-          for (size_t c = 0; c < n_components; ++c) {
-            u_stencil[lower_inner][c] = u_stencil[physical_cell][c];
-            u_stencil[lower_outer][c] = u_stencil[upper_inner][c];
-          }
-          return true;
-        }
-
-        x_stencil[upper_inner][0] = x_stencil[physical_cell][0] + delta;
-        x_stencil[upper_outer][0] = x_stencil[physical_cell][0] + 2.0 * delta;
-        for (size_t c = 0; c < n_components; ++c) {
-          u_stencil[upper_inner][c] = NumberType(2.0) * u_stencil[physical_cell][c] - u_stencil[lower_inner][c];
-          u_stencil[upper_outer][c] =
-              NumberType(3.0) * u_stencil[physical_cell][c] - NumberType(2.0) * u_stencil[lower_inner][c];
-        }
-        return true;
-      }
-    };
+    template <typename Model>
+    using RhoSymmetricLinearExtrapolationBoundaries [[deprecated(
+        "RhoSymmetricLinearExtrapolationBoundaries is FVDefaultBoundaries now: rho = 0 is no symmetry plane in rho, "
+        "the ghosts continue the derivative. Use FVDefaultBoundaries.")]] = FVDefaultBoundaries<Model>;
 
     /**
      * @brief Lower boundary: odd reflection about the centre of the boundary cell, which is meant to sit at the
      * origin \f$\sigma = 0\f$; that cell's value is set to 0 in the stencil. Upper boundary: affine extrapolation.
      *
      * 1D: all components are odd. 2D: requires two components, a vector \f$(u_0, u_1)\f$; at a lower face normal to
-     * axis a, component a is odd as above and the other one is reflected evenly about the face (as in
-     * RhoSymmetricLinearExtrapolationBoundaries).
+     * axis a, component a is odd as above and the other one is reflected evenly about the face.
      */
     template <typename Model> class OriginOddLinearExtrapolationBoundaries
     {

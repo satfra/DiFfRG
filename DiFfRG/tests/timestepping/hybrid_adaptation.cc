@@ -90,13 +90,14 @@ namespace
     REQUIRE_THAT(state.variable_data()[0], Catch::Matchers::WithinAbs(v_exact, 1e-5));
   }
 
+  template <typename Assembler> using IDA = TimeStepperSUNDIALS_IDA<Assembler>;
   template <typename Assembler> using IDA_ABM = TimeStepperSUNDIALS_IDA_BoostABM<Assembler>;
   template <typename Assembler> using IDA_RK = TimeStepperSUNDIALS_IDA_BoostRK54<Assembler>;
 } // namespace
 
 TEST_CASE("IDA hybrids survive mesh adaptation", "[timestepping][sundials_ida_boost][adaptivity]")
 {
-  SECTION("IDA, variables implicit") { require_adapted_run_is_accurate<TimeStepperSUNDIALS_IDA>("hybrid_adapt_ida"); }
+  SECTION("IDA, variables implicit") { require_adapted_run_is_accurate<IDA>("hybrid_adapt_ida"); }
   SECTION("IDA + ABM") { require_adapted_run_is_accurate<IDA_ABM>("hybrid_adapt_abm"); }
   SECTION("IDA + RK54") { require_adapted_run_is_accurate<IDA_RK>("hybrid_adapt_rk"); }
 }

@@ -70,7 +70,7 @@ depend on $\partial_\rho u$:
 ```cpp
 class ON_KT : public def::AbstractModel<ON_KT, Components>,
               public ONCommon,
-              public def::RhoSymmetricLinearExtrapolationBoundaries<ON_KT>,
+              public def::FVDefaultBoundaries<ON_KT>,
               public def::AD<ON_KT>
 {
   ...
@@ -90,8 +90,8 @@ class ON_KT : public def::AbstractModel<ON_KT, Components>,
 ```
 
 The Goldstone modes give the advection, the radial mode the diffusion. KT stores one value per cell
-and handles boundaries with ghost cells; `def::RhoSymmetricLinearExtrapolationBoundaries` makes $u$ even in
-$\sigma$ at $\rho = 0$ and extrapolates linearly at the outer boundary.
+and handles boundaries with ghost cells; `def::FVDefaultBoundaries` fills them by continuing the straight line through
+the two outermost cells. At $\rho = 0$ no boundary condition is needed: the diffusion vanishes there like $2\rho$.
 
 Both classes inherit `initial_condition` and `readouts` from two bases, `ONCommon` and `def::AbstractModel`, which
 has defaults for them. The `using ONCommon::...;` lines say which one is meant.

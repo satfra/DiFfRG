@@ -14,7 +14,8 @@
 namespace DiFfRG
 {
   /**
-   * @brief Per-dof absolute tolerances for SUNDIALS IDA, taken from AbstractAssembler::local_abs_tolerances.
+   * @brief Per-dof tolerances for SUNDIALS IDA, taken from AbstractAssembler::local_abs_tolerances. IDA runs with
+   * relative tolerance 0 when they are set, so they are the whole tolerance.
    *
    * IDA reads absolute tolerances only when it is (re)initialised. Model tolerances may depend on the state, so
    * the stepper asks refresh_needed() at every output time, from IDADriver::solver_should_restart: when some

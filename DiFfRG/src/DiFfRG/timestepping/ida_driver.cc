@@ -133,8 +133,10 @@ namespace DiFfRG
     check(IDASetUserData(ida_mem, this), "IDASetUserData");
 
     if (get_local_tolerances) {
+      // The model's per-dof tolerances are the whole tolerance: it builds them from rel_tol itself, against the scale
+      // that matters for each dof, which IDA's rel_tol |y| would override wherever |y| is the larger one.
       auto abs_tols = make_nvector_view(get_local_tolerances(), ctx);
-      check(IDASVtolerances(ida_mem, prm.relative_tolerance, abs_tols), "IDASVtolerances");
+      check(IDASVtolerances(ida_mem, 0., abs_tols), "IDASVtolerances");
     } else
       check(IDASStolerances(ida_mem, prm.relative_tolerance, prm.absolute_tolerance), "IDASStolerances");
 

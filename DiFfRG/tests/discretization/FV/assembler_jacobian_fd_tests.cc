@@ -1280,18 +1280,18 @@ TEST_CASE("KT 2D hessian-dependent source Jacobian matches FD", "[FV][KT][hessia
   REQUIRE(jacobian_matches_fd(assembler, sol, 1e-7, 2e-4, "2D hessian source"));
 }
 
-// A potential-flow-like model on the rho-symmetric boundary: a gradient-free advective flux and a diffusion
+// A potential-flow-like model in rho: a gradient-free advective flux and a diffusion
 // flux that depends on rho and on the gradient, as for a pion loop 1/(1 + u) and a sigma loop
 // 1/(1 + u + 2 rho u'). The flat profile has neighbouring one-sided slopes that differ by ~6e-9, i.e. it sits
 // close to, but not on, a minmod kink -- as a potential does in its convexity-restored region.
 template <bool with_advection, bool with_diffusion, bool flat = false>
-class RhoSymmetricPotentialModel
-    : public def::AbstractModel<RhoSymmetricPotentialModel<with_advection, with_diffusion, flat>,
+class RhoPotentialModel
+    : public def::AbstractModel<RhoPotentialModel<with_advection, with_diffusion, flat>,
                                 ComponentDescriptor<FEFunctionDescriptor<Scalar<"u">>>>,
       public def::Time,
-      public def::RhoSymmetricLinearExtrapolationBoundaries<
-          RhoSymmetricPotentialModel<with_advection, with_diffusion, flat>>,
-      public def::AD<RhoSymmetricPotentialModel<with_advection, with_diffusion, flat>>
+      public def::FVDefaultBoundaries<
+          RhoPotentialModel<with_advection, with_diffusion, flat>>,
+      public def::AD<RhoPotentialModel<with_advection, with_diffusion, flat>>
 {
 public:
   template <typename Vector> void initial_condition(const Point<1> &pos, Vector &values) const
@@ -1324,7 +1324,7 @@ public:
   }
 };
 
-template <typename Model> static bool rho_symmetric_jacobian_matches_fd(const char *label, const double eps = 1.0e-7)
+template <typename Model> static bool rho_potential_jacobian_matches_fd(const char *label, const double eps = 1.0e-7)
 {
   using Discretization = FV::Discretization<Model, RectangularMeshSerial<1>, double>;
   using Assembler = FV::KurganovTadmor::Assembler<Discretization, Model>;
@@ -1368,14 +1368,14 @@ template <typename Model> static bool rho_symmetric_jacobian_matches_fd(const ch
   return pass;
 }
 
-TEST_CASE("KT Jacobian matches FD on the rho-symmetric boundary", "[FV][KT][boundary]")
+TEST_CASE("KT Jacobian matches FD for a potential flow at the rho = 0 boundary", "[FV][KT][boundary]")
 {
-  SECTION("advection") { REQUIRE(rho_symmetric_jacobian_matches_fd<RhoSymmetricPotentialModel<true, false>>("adv")); }
-  SECTION("diffusion") { REQUIRE(rho_symmetric_jacobian_matches_fd<RhoSymmetricPotentialModel<false, true>>("diff")); }
-  SECTION("both") { REQUIRE(rho_symmetric_jacobian_matches_fd<RhoSymmetricPotentialModel<true, true>>("both")); }
+  SECTION("advection") { REQUIRE(rho_potential_jacobian_matches_fd<RhoPotentialModel<true, false>>("adv")); }
+  SECTION("diffusion") { REQUIRE(rho_potential_jacobian_matches_fd<RhoPotentialModel<false, true>>("diff")); }
+  SECTION("both") { REQUIRE(rho_potential_jacobian_matches_fd<RhoPotentialModel<true, true>>("both")); }
   // The difference step must stay below the slope gap, or it straddles the kink itself.
   SECTION("near a limiter kink")
   {
-    REQUIRE(rho_symmetric_jacobian_matches_fd<RhoSymmetricPotentialModel<true, true, true>>("flat", 1.0e-10));
+    REQUIRE(rho_potential_jacobian_matches_fd<RhoPotentialModel<true, true, true>>("flat", 1.0e-10));
   }
 }

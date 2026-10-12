@@ -29,8 +29,8 @@
  *    \ref DiFfRG::def::AD "def::AD" (automatic-differentiation Jacobians). Finite
  *    volume models additionally pick a boundary stencil, e.g.
  *    \ref DiFfRG::def::FVDefaultBoundaries "def::FVDefaultBoundaries" or
- *    \ref DiFfRG::def::RhoSymmetricLinearExtrapolationBoundaries
- *    "def::RhoSymmetricLinearExtrapolationBoundaries". The degrees of freedom are declared with
+ *    \ref DiFfRG::def::OriginOddLinearExtrapolationBoundaries "def::OriginOddLinearExtrapolationBoundaries".
+ *    The degrees of freedom are declared with
  *    \ref DiFfRG::ComponentDescriptor "ComponentDescriptor" /
  *    \ref DiFfRG::FEFunctionDescriptor "FEFunctionDescriptor" and \ref DiFfRG::Scalar "Scalar".
  * -# **Discretization.** The field space is discretized with one of

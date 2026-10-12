@@ -12,9 +12,12 @@ namespace DiFfRG
   namespace def
   {
     /**
-     * @brief Whether a model provides per-component absolute tolerances for the IDA timesteppers.
+     * @brief Whether a model provides per-component tolerances for the IDA timesteppers.
      *
-     * Optional hook, for components that live on very different scales:
+     * Optional hook, for components that live on very different scales, or whose error should be measured against
+     * another scale than their own size. The values are the whole tolerance: IDA then runs with relative tolerance 0,
+     * so a model that wants a relative tolerance builds it in, e.g. \f$\max(\text{abs\_tol},\, \text{rel\_tol}\,|s|)\f$
+     * with \f$s\f$ the scale of the component.
      * @code
      * template <int dim, typename Solution, size_t n>
      * void abs_tolerances(std::array<double, n> &atol, const Point<dim> &x, const Solution &sol, double abs_tol,

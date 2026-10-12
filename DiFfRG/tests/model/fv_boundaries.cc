@@ -28,11 +28,6 @@ namespace
   {
   };
 
-  struct DummyModelRhoSymmetric
-      : public DiFfRG::def::RhoSymmetricLinearExtrapolationBoundaries<DummyModelRhoSymmetric>
-  {
-  };
-
 	  struct DummyModelOriginOddLinearExtrapolation
 	      : public DiFfRG::def::OriginOddLinearExtrapolationBoundaries<DummyModelOriginOddLinearExtrapolation>
 	  {
@@ -275,43 +270,6 @@ namespace
 	    return result;
 	  }
 
-  ReconstructionSummary1D rho_lower_boundary_half_domain_reconstruction(const std::array<double, 3> &physical_values)
-  {
-    DummyModelRhoSymmetric model;
-
-    const DiFfRG::def::BoundaryStencilValues<1, double, 1> raw_u_stencil{
-        {{{0.0}}, {{0.0}}, {{physical_values[0]}}, {{physical_values[1]}}, {{physical_values[2]}}}};
-    const DiFfRG::def::BoundaryStencilPoints<1> raw_x_stencil{
-        {Point<1>(0.0), Point<1>(0.0), Point<1>(0.5), Point<1>(1.5), Point<1>(2.5)}};
-    const std::array<std::array<types::global_dof_index, 1>, 5> dof_stencil{
-        {{{numbers::invalid_dof_index}}, {{numbers::invalid_dof_index}}, {{10}}, {{11}}, {{12}}}};
-
-    auto u_stencil = raw_u_stencil;
-    auto x_stencil = raw_x_stencil;
-    REQUIRE(model.apply_boundary_stencil(u_stencil, x_stencil, Point<1>(0.0)));
-
-    const auto reconstruction = compute_boundary_trace(x_stencil, u_stencil, dof_stencil, Point<1>(0.0));
-
-    ReconstructionSummary1D result;
-    result.u_plus = scalar_value(reconstruction.u_plus);
-    result.u_minus = scalar_value(reconstruction.u_minus);
-    result.grad_u_plus = scalar_value(reconstruction.grad_u_plus);
-    result.grad_u_minus = scalar_value(reconstruction.grad_u_minus);
-
-    for (std::size_t derivative_index = 0; derivative_index < 3; ++derivative_index) {
-      auto tagged_stencil = make_tagged_stencil<1>(raw_u_stencil, dof_stencil, 10 + derivative_index);
-      auto tagged_points = raw_x_stencil;
-      REQUIRE(model.apply_boundary_stencil(tagged_stencil, tagged_points, Point<1>(0.0)));
-      const auto tagged_reconstruction = compute_boundary_trace(tagged_points, tagged_stencil, dof_stencil, Point<1>(0.0));
-      result.du_plus[derivative_index] = derivative(tagged_reconstruction.u_plus);
-      result.du_minus[derivative_index] = derivative(tagged_reconstruction.u_minus);
-      result.dgrad_u_plus[derivative_index] = derivative(tagged_reconstruction.grad_u_plus);
-      result.dgrad_u_minus[derivative_index] = derivative(tagged_reconstruction.grad_u_minus);
-    }
-
-    return result;
-  }
-
   ReconstructionSummary1D origin_full_domain_interior_face_reconstruction(const std::array<double, 3> &physical_values)
   {
     ReconstructionSummary1D result;
@@ -351,69 +309,6 @@ namespace
       const std::array<AD, 1> tagged_center_left{{-tagged_physical[0]}};
       const std::array<std::array<AD, 1>, 2> tagged_neighbors_right{{{{-tagged_physical[0]}}, {{tagged_physical[1]}}}};
       const std::array<std::array<AD, 1>, 2> tagged_neighbors_left{{{{-tagged_physical[1]}}, {{tagged_physical[0]}}}};
-
-      using ReconstructorAD = DiFfRG::def::TVDReconstructor<1, DiFfRG::def::MinModLimiter, AD>;
-      const auto tagged_u_grad_right = ReconstructorAD::compute_gradient<1>(right_center, tagged_center_right,
-                                                                            x_neighbors_right, tagged_neighbors_right);
-      const auto tagged_u_grad_left =
-          ReconstructorAD::compute_gradient<1>(left_center, tagged_center_left, x_neighbors_left, tagged_neighbors_left);
-      const auto tagged_u_grad_minus = ReconstructorAD::compute_gradient_at_point<1>(
-          right_center, x_face, tagged_center_right, x_neighbors_right, tagged_neighbors_right);
-      const auto tagged_u_grad_plus = ReconstructorAD::compute_gradient_at_point<1>(
-          left_center, x_face, tagged_center_left, x_neighbors_left, tagged_neighbors_left);
-      const auto tagged_u_minus =
-          KT::internal::reconstruct_u<1, AD, 1>(tagged_center_right, right_center, x_face, tagged_u_grad_right);
-      const auto tagged_u_plus =
-          KT::internal::reconstruct_u<1, AD, 1>(tagged_center_left, left_center, x_face, tagged_u_grad_left);
-
-      result.du_minus[derivative_index] = derivative(tagged_u_minus[0]);
-      result.du_plus[derivative_index] = derivative(tagged_u_plus[0]);
-      result.dgrad_u_minus[derivative_index] = derivative(tagged_u_grad_minus[0][0]);
-      result.dgrad_u_plus[derivative_index] = derivative(tagged_u_grad_plus[0][0]);
-    }
-
-    return result;
-  }
-
-  ReconstructionSummary1D rho_full_domain_interior_face_reconstruction(const std::array<double, 3> &physical_values)
-  {
-    ReconstructionSummary1D result;
-
-    const Point<1> x_face(0.0);
-    const Point<1> right_center(0.5);
-    const Point<1> left_center(-0.5);
-
-    const std::array<Point<1>, 2> x_neighbors_right{{Point<1>(-0.5), Point<1>(1.5)}};
-    const std::array<Point<1>, 2> x_neighbors_left{{Point<1>(-1.5), Point<1>(0.5)}};
-
-    const std::array<double, 1> u_center_right{{physical_values[0]}};
-    const std::array<double, 1> u_center_left{{physical_values[0]}};
-    const std::array<std::array<double, 1>, 2> u_neighbors_right{{{{physical_values[0]}}, {{physical_values[1]}}}};
-    const std::array<std::array<double, 1>, 2> u_neighbors_left{{{{physical_values[1]}}, {{physical_values[0]}}}};
-
-    const auto u_grad_right = Reconstructor::compute_gradient<1>(right_center, u_center_right, x_neighbors_right,
-                                                                 u_neighbors_right);
-    const auto u_grad_left =
-        Reconstructor::compute_gradient<1>(left_center, u_center_left, x_neighbors_left, u_neighbors_left);
-    const auto u_grad_minus =
-        Reconstructor::compute_gradient_at_point<1>(right_center, x_face, u_center_right, x_neighbors_right, u_neighbors_right);
-    const auto u_grad_plus =
-        Reconstructor::compute_gradient_at_point<1>(left_center, x_face, u_center_left, x_neighbors_left, u_neighbors_left);
-
-    result.u_minus = KT::internal::reconstruct_u<1, double, 1>(u_center_right, right_center, x_face, u_grad_right)[0];
-    result.u_plus = KT::internal::reconstruct_u<1, double, 1>(u_center_left, left_center, x_face, u_grad_left)[0];
-    result.grad_u_minus = u_grad_minus[0][0];
-    result.grad_u_plus = u_grad_plus[0][0];
-
-    for (std::size_t derivative_index = 0; derivative_index < 3; ++derivative_index) {
-      using AD = autodiff::Real<1, double>;
-      std::array<AD, 3> tagged_physical{AD(physical_values[0]), AD(physical_values[1]), AD(physical_values[2])};
-      autodiff::detail::seed<1>(tagged_physical[derivative_index], 1.0);
-
-      const std::array<AD, 1> tagged_center_right{{tagged_physical[0]}};
-      const std::array<AD, 1> tagged_center_left{{tagged_physical[0]}};
-      const std::array<std::array<AD, 1>, 2> tagged_neighbors_right{{{{tagged_physical[0]}}, {{tagged_physical[1]}}}};
-      const std::array<std::array<AD, 1>, 2> tagged_neighbors_left{{{{tagged_physical[1]}}, {{tagged_physical[0]}}}};
 
       using ReconstructorAD = DiFfRG::def::TVDReconstructor<1, DiFfRG::def::MinModLimiter, AD>;
       const auto tagged_u_grad_right = ReconstructorAD::compute_gradient<1>(right_center, tagged_center_right,
@@ -634,122 +529,6 @@ TEST_CASE("FVDefaultBoundaries preserves affine stencil derivatives under AD con
       CHECK_THAT(derivative(tagged_stencil[3][0]), Catch::Matchers::WithinAbs(-1.0, tolerance));
       CHECK_THAT(derivative(tagged_stencil[4][0]), Catch::Matchers::WithinAbs(-2.0, tolerance));
     }
-  }
-}
-
-TEST_CASE("RhoSymmetricLinearExtrapolationBoundaries applies an even lower-boundary stencil",
-          "[Model][FV][Boundaries]")
-{
-  using namespace DiFfRG;
-
-  DummyModelRhoSymmetric model;
-
-  SECTION("lower boundary mirrors ghosts evenly and keeps the physical cell free")
-  {
-    def::BoundaryStencilValues<1, double, 1> u_stencil{{{{11.0}}, {{12.0}}, {{1.0}}, {{2.0}}, {{4.0}}}};
-    def::BoundaryStencilPoints<1> x_stencil{{Point<1>(-2.0), Point<1>(-1.0), Point<1>(0.5), Point<1>(1.5), Point<1>(2.5)}};
-
-    REQUIRE(model.apply_boundary_stencil(u_stencil, x_stencil, Point<1>(0.0)));
-
-    CHECK_THAT(x_stencil[0][0], Catch::Matchers::WithinAbs(-1.5, tolerance));
-    CHECK_THAT(x_stencil[1][0], Catch::Matchers::WithinAbs(-0.5, tolerance));
-    CHECK_THAT(u_stencil[0][0], Catch::Matchers::WithinAbs(2.0, tolerance));
-    CHECK_THAT(u_stencil[1][0], Catch::Matchers::WithinAbs(1.0, tolerance));
-    CHECK_THAT(u_stencil[2][0], Catch::Matchers::WithinAbs(1.0, tolerance));
-  }
-
-  SECTION("upper boundary keeps affine extrapolation")
-  {
-    def::BoundaryStencilValues<1, double, 1> u_stencil{{{{1.0}}, {{3.0}}, {{5.0}}, {{17.0}}, {{19.0}}}};
-    def::BoundaryStencilPoints<1> x_stencil{{Point<1>(7.5), Point<1>(8.5), Point<1>(9.5), Point<1>(20.0), Point<1>(21.0)}};
-
-    REQUIRE(model.apply_boundary_stencil(u_stencil, x_stencil, Point<1>(10.0)));
-
-    CHECK_THAT(x_stencil[3][0], Catch::Matchers::WithinAbs(10.5, tolerance));
-    CHECK_THAT(x_stencil[4][0], Catch::Matchers::WithinAbs(11.5, tolerance));
-    CHECK_THAT(u_stencil[3][0], Catch::Matchers::WithinAbs(7.0, tolerance));
-    CHECK_THAT(u_stencil[4][0], Catch::Matchers::WithinAbs(9.0, tolerance));
-  }
-}
-
-TEST_CASE("RhoSymmetricLinearExtrapolationBoundaries preserves free physical-cell derivatives",
-          "[Model][FV][Boundaries]")
-{
-  using namespace DiFfRG;
-
-  DummyModelRhoSymmetric model;
-
-  SECTION("lower boundary ghosts mirror physical dofs without pinning the zeroth cell")
-  {
-    def::BoundaryStencilValues<1, double, 1> u_stencil{{{{0.0}}, {{0.0}}, {{1.0}}, {{2.0}}, {{4.0}}}};
-    def::BoundaryStencilPoints<1> x_stencil{{Point<1>(0.0), Point<1>(0.0), Point<1>(0.5), Point<1>(1.5), Point<1>(2.5)}};
-    const std::array<std::array<types::global_dof_index, 1>, 5> dof_stencil{
-        {{{numbers::invalid_dof_index}}, {{numbers::invalid_dof_index}}, {{10}}, {{11}}, {{12}}}};
-
-    {
-      auto tagged_stencil = make_tagged_stencil<1>(u_stencil, dof_stencil, 10);
-      auto conditioned_points = x_stencil;
-      REQUIRE(model.apply_boundary_stencil(tagged_stencil, conditioned_points, Point<1>(0.0)));
-      CHECK_THAT(derivative(tagged_stencil[1][0]), Catch::Matchers::WithinAbs(1.0, tolerance));
-      CHECK_THAT(derivative(tagged_stencil[0][0]), Catch::Matchers::WithinAbs(0.0, tolerance));
-      CHECK_THAT(derivative(tagged_stencil[2][0]), Catch::Matchers::WithinAbs(1.0, tolerance));
-    }
-
-    {
-      auto tagged_stencil = make_tagged_stencil<1>(u_stencil, dof_stencil, 11);
-      auto conditioned_points = x_stencil;
-      REQUIRE(model.apply_boundary_stencil(tagged_stencil, conditioned_points, Point<1>(0.0)));
-      CHECK_THAT(derivative(tagged_stencil[1][0]), Catch::Matchers::WithinAbs(0.0, tolerance));
-      CHECK_THAT(derivative(tagged_stencil[0][0]), Catch::Matchers::WithinAbs(1.0, tolerance));
-      CHECK_THAT(derivative(tagged_stencil[2][0]), Catch::Matchers::WithinAbs(0.0, tolerance));
-    }
-  }
-
-  SECTION("upper boundary ghosts keep the affine extrapolation derivatives")
-  {
-    def::BoundaryStencilValues<1, double, 1> u_stencil{{{{1.0}}, {{3.0}}, {{5.0}}, {{0.0}}, {{0.0}}}};
-    def::BoundaryStencilPoints<1> x_stencil{{Point<1>(7.5), Point<1>(8.5), Point<1>(9.5), Point<1>(0.0), Point<1>(0.0)}};
-    const std::array<std::array<types::global_dof_index, 1>, 5> dof_stencil{
-        {{{20}}, {{21}}, {{22}}, {{numbers::invalid_dof_index}}, {{numbers::invalid_dof_index}}}};
-
-    {
-      auto tagged_stencil = make_tagged_stencil<1>(u_stencil, dof_stencil, 22);
-      auto conditioned_points = x_stencil;
-      REQUIRE(model.apply_boundary_stencil(tagged_stencil, conditioned_points, Point<1>(10.0)));
-      CHECK_THAT(derivative(tagged_stencil[3][0]), Catch::Matchers::WithinAbs(2.0, tolerance));
-      CHECK_THAT(derivative(tagged_stencil[4][0]), Catch::Matchers::WithinAbs(3.0, tolerance));
-    }
-
-    {
-      auto tagged_stencil = make_tagged_stencil<1>(u_stencil, dof_stencil, 21);
-      auto conditioned_points = x_stencil;
-      REQUIRE(model.apply_boundary_stencil(tagged_stencil, conditioned_points, Point<1>(10.0)));
-      CHECK_THAT(derivative(tagged_stencil[3][0]), Catch::Matchers::WithinAbs(-1.0, tolerance));
-      CHECK_THAT(derivative(tagged_stencil[4][0]), Catch::Matchers::WithinAbs(-2.0, tolerance));
-    }
-  }
-}
-
-TEST_CASE("Rho symmetric boundary reconstruction matches the mirrored full-domain interior face",
-          "[Model][FV][Boundaries][Reconstruction]")
-{
-  const std::array<double, 3> physical_values{{1.0, 3.0, 5.0}};
-
-  const auto half_domain = rho_lower_boundary_half_domain_reconstruction(physical_values);
-  const auto full_domain = rho_full_domain_interior_face_reconstruction(physical_values);
-
-  INFO("half-domain: " << describe_reconstruction(half_domain));
-  INFO("full-domain: " << describe_reconstruction(full_domain));
-
-  CHECK_THAT(half_domain.u_plus, Catch::Matchers::WithinAbs(full_domain.u_plus, tolerance));
-  CHECK_THAT(half_domain.u_minus, Catch::Matchers::WithinAbs(full_domain.u_minus, tolerance));
-  CHECK_THAT(half_domain.grad_u_plus, Catch::Matchers::WithinAbs(full_domain.grad_u_plus, tolerance));
-  CHECK_THAT(half_domain.grad_u_minus, Catch::Matchers::WithinAbs(full_domain.grad_u_minus, tolerance));
-  for (std::size_t i = 0; i < 3; ++i) {
-    CHECK_THAT(half_domain.du_plus[i], Catch::Matchers::WithinAbs(full_domain.du_plus[i], tolerance));
-    CHECK_THAT(half_domain.du_minus[i], Catch::Matchers::WithinAbs(full_domain.du_minus[i], tolerance));
-    CHECK_THAT(half_domain.dgrad_u_plus[i], Catch::Matchers::WithinAbs(full_domain.dgrad_u_plus[i], tolerance));
-    CHECK_THAT(half_domain.dgrad_u_minus[i], Catch::Matchers::WithinAbs(full_domain.dgrad_u_minus[i], tolerance));
   }
 }
 
