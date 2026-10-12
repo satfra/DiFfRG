@@ -1,104 +1,61 @@
 #pragma once
 
-#include "flows/flows.hh"
-#include <DiFfRG/common/interpolation.hh>
-#include <DiFfRG/common/minimization.hh>
 #include <DiFfRG/model/model.hh>
-#include <cmath>
-#include <spdlog/spdlog.h>
 
-using namespace dealii;
+#include "flows/flows.hh"
+
+#include <cmath>
+
 using namespace DiFfRG;
 
 struct Parameters {
-  Parameters(const ConfigTree &value)
+  Parameters(const ConfigTree &config)
+      : Lambda(config.get_double("/physical/Lambda")), Nc(config.get_double("/physical/Nc")),
+        Nf(config.get_double("/physical/Nf")), T(config.get_double("/physical/T")),
+        muq(config.get_double("/physical/muq")), m2Phi(config.get_double("/physical/m2Phi")),
+        lambdaPhi(config.get_double("/physical/lambdaPhi")), hPhi(config.get_double("/physical/hPhi")),
+        cSigma(config.get_double("/physical/cSigma"))
   {
-    try {
-      Lambda = value.get_double("/physical/Lambda");
-      Nc = value.get_double("/physical/Nc");
-      Nf = value.get_double("/physical/Nf");
-      T = value.get_double("/physical/T");
-      muq = value.get_double("/physical/muq");
-
-      m2Phi = value.get_double("/physical/m2Phi");
-      lambdaPhi = value.get_double("/physical/lambdaPhi");
-      hPhi = value.get_double("/physical/hPhi");
-
-      cSigma = value.get_double("/physical/cSigma");
-    } catch (std::exception &e) {
-      std::cout << "Error while reading parameters: " << e.what() << std::endl;
-      throw;
-    }
   }
   double Lambda, Nc, Nf, T, muq;
   double m2Phi, lambdaPhi, hPhi, cSigma;
 };
 
+// The potential lives on the field-space grid; the meson wave-function renormalization and the Yukawa coupling are
+// plain numbers flowing alongside it; the anomalous dimensions and the potential derivatives at the minimum are
+// read off the FE solution once per evaluation.
 using FEFunctionDesc = FEFunctionDescriptor<Scalar<"u">>;
-using VariableDesc = VariableDescriptor<Scalar<"ZQ">, Scalar<"ZPhi">, Scalar<"hPhi">>;
-using ExtractorDesc = ExtractorDescriptor<Scalar<"etaQ">, Scalar<"etaPhi">, Scalar<"rhoPhi">, Scalar<"d1V">, Scalar<"d2V">, Scalar<"d3V">>;
-using LDG1FunctionDesc = FEFunctionDescriptor<Scalar<"du_r">, Scalar<"du_l">>;
-using LDG2FunctionDesc = FEFunctionDescriptor<Scalar<"ddu_rr">, Scalar<"ddu_ll">, Scalar<"ddu_rl">, Scalar<"ddu_lr">>;
+using VariableDesc = VariableDescriptor<Scalar<"ZPhi">, Scalar<"hPhi">>;
+using ExtractorDesc = ExtractorDescriptor<Scalar<"etaQ">, Scalar<"etaPhi">, Scalar<"rhoPhi">, Scalar<"d1V">,
+                                          Scalar<"d2V">, Scalar<"d3V">>;
 using Components = ComponentDescriptor<FEFunctionDesc, VariableDesc, ExtractorDesc>;
 
 constexpr auto idxf = FEFunctionDesc{};
 constexpr auto idxv = VariableDesc{};
 constexpr auto idxe = ExtractorDesc{};
-constexpr auto idxl = LDG1FunctionDesc{};
-
-template <typename Model> using LDGFluxes = typename def::LDGUpDownFluxes<Model, def::UpDownFlux<def::FlowDirections<0, 0>, def::UpDown<def::from_right, def::from_left>>>;
 
 /**
- * @brief This class implements the numerical model for the quark-meson model at finite temperature and chemical potential.
+ * @brief Quark-meson model in LPA' at finite temperature and quark chemical potential.
+ *
+ * All fields are renormalized, Z = 1, so the wave-function renormalizations enter only through the anomalous
+ * dimensions eta = -d_t Z / Z: in the regulator insertions d_t R - eta R and in the rescaling of u and hPhi. The
+ * only exception is the explicit symmetry breaking, which is fixed for the bare field; ZPhi is carried for it.
+ *
+ * u = dV/drho is an FE function; ZPhi and hPhi are variables; etaQ, etaPhi and the derivatives of V at the minimum
+ * are extractors. The flows come from QM.wl.
  */
 class QuarkMesonLPAprime : public def::AbstractModel<QuarkMesonLPAprime, Components>,
                            public def::fRG,                                // this handles the fRG time
-                           public def::LLFFlux<QuarkMesonLPAprime>,        // use a LLF numflux
-                                                                           //   public LDGFluxes<QuarkMesonLPAprime>,           // use LDG fluxes
                            public def::FlowBoundaries<QuarkMesonLPAprime>, // use Inflow/Outflow boundaries
-                           public def::FE_AD<QuarkMesonLPAprime>           // define all jacobians per AD
+                           public def::FE_AD<QuarkMesonLPAprime> // jacobians per AD, extractors held fixed
 {
-  // ----------------------------------------------------------------------------------------------------
-  // variables and typedefs
-  // ----------------------------------------------------------------------------------------------------
 public:
   static constexpr uint dim = 1;
-  enum { mesonic };
 
-protected:
-  const Parameters prm;
-
-  mutable LPA_QM_flows flow_equations;
-
-  mutable double cSigma;
-
-  // ----------------------------------------------------------------------------------------------------
-  // initialization
-  // ----------------------------------------------------------------------------------------------------
-public:
-  QuarkMesonLPAprime(const ConfigTree &json) : def::fRG(json.get_double("/physical/Lambda")), prm(json), flow_equations(json)
+  QuarkMesonLPAprime(const ConfigTree &config)
+      : def::fRG(config.get_double("/physical/Lambda")), prm(config), flow_equations(config), cSigma(prm.cSigma)
   {
     flow_equations.set_k(Lambda);
-    //flow_equations.print_parameters("log");
-
-    // this->components().add_dependency(1, 0, 0, 0);
-    // this->components().add_dependency(1, 1, 0, 0);
-    // this->components().set_jacobian_constant(1, 0);
-  }
-
-  template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
-  {
-    const auto rhoPhi = pos[mesonic];
-    values[idxf("u")] = prm.m2Phi + prm.lambdaPhi / 2. * rhoPhi;
-  }
-
-  template <typename Vector> void initial_condition_variables(Vector &values) const
-  {
-    values[idxv("ZQ")] = 1.;
-    values[idxv("ZPhi")] = 1.;
-
-    values[idxv("hPhi")] = (prm.hPhi);
-    cSigma = prm.cSigma;
   }
 
   void set_time(double t_)
@@ -108,114 +65,99 @@ public:
     flow_equations.set_k(k);
   }
 
-  template <uint submodel, typename NT, typename Variables>
-  void ldg_flux(std::array<Tensor<1, dim, NT>, Components::count_fe_functions(submodel)> &flux, const Point<dim> & /*pos*/, const Variables &variables) const
+  template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
   {
-    if constexpr (submodel == 1) {
-      flux[idxl("du_r")][mesonic] = variables[idxf("u")]; // du_r = d(u)/d(mesonic)
-      flux[idxl("du_l")][mesonic] = variables[idxf("u")]; // du_r = d(u)/d(mesonic)
-    } else if constexpr (submodel == 2) {
-      flux[idxl("du_r")][mesonic] = variables[idxf("u")]; // du_r = d(u)/d(mesonic)
-      flux[idxl("du_l")][mesonic] = variables[idxf("u")]; // du_r = d(u)/d(mesonic)
-    }
+    values[idxf("u")] = prm.m2Phi + prm.lambdaPhi / 2. * pos[0];
   }
 
-  // ----------------------------------------------------------------------------------------------------
-  // instationary equations
-  // ----------------------------------------------------------------------------------------------------
-
-  template <typename Vector, typename Solution> void dt_variables(Vector &residual, const Solution &sol) const
+  template <typename Vector> void initial_condition_variables(Vector &values) const
   {
-    const auto &variables = get<"variables">(sol);
-    const auto &extractors = get<"extractors">(sol);
-
-    const auto rhoPhi = extractors[idxe("rhoPhi")];
-
-    const auto ZQ = variables[idxv("ZQ")];
-    const auto ZPhi = variables[idxv("ZPhi")];
-
-    const auto etaQ = extractors[idxe("etaQ")];
-    const auto etaPhi = extractors[idxe("etaPhi")];
-
-    const auto hPhi = (variables[idxv("hPhi")]);
-    const auto d1V = extractors[idxe("d1V")];
-    const auto d2V = extractors[idxe("d2V")];
-    const auto d3V = extractors[idxe("d3V")];
-
-    const double p0f = std::max(1e-3, M_PI * prm.T * std::exp(-k / (M_PI * prm.T)));
-    const double zero = 0.0001;
-    const auto arguments = device::tie(k, zero, p0f,prm.Nf, prm.Nc, prm.T, prm.muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
-
-    residual[idxv("ZQ")] = -etaQ * ZQ;
-    residual[idxv("ZPhi")] = -etaPhi * ZPhi;
-
-    flow_equations.hPhi0.get(residual[idxv("hPhi")], arguments);
-
-    cSigma = std::pow(ZPhi, -0.5) * prm.cSigma;
+    values[idxv("ZPhi")] = 1.;
+    values[idxv("hPhi")] = prm.hPhi;
   }
 
-  template <typename NT, typename Solution> void extract(std::array<NT, Components::count_extractors()> &extractors, const Point<dim> &x, const Solution &sol) const
+  /**
+   * @brief Read off the potential at the EoM and solve for the anomalous dimensions there.
+   *
+   * etaQ and etaPhi appear on both sides of their flows (through the regulator insertion d_t R - eta R), so they
+   * are found by fixed-point iteration, starting from the values of the previous evaluation.
+   */
+  template <typename NT, typename Solution>
+  void extract(std::array<NT, Components::count_extractors()> &extractors, const Point<dim> &x,
+               const Solution &sol) const
   {
-    const auto rhoPhi = x[mesonic];
-
     const auto &fe_functions = get<"fe_functions">(sol);
     const auto &fe_derivatives = get<"fe_derivatives">(sol);
     const auto &fe_hessians = get<"fe_hessians">(sol);
     const auto &variables = get<"variables">(sol);
 
-    auto etaQ = extractors[idxe("etaQ")];
-    auto etaPhi = extractors[idxe("etaPhi")];
-
+    const double rhoPhi = x[0];
     const double hPhi = variables[idxv("hPhi")];
-    const double d1V = fe_functions[idxf("u")] < 0 ? 0. : fe_functions[idxf("u")];
-    const double d2V = fe_derivatives[idxf("u")][mesonic];
-    const double d3V = fe_hessians[idxf("u")][mesonic][mesonic];
+    // Clipped at zero: a negative pion mass would put a pole into the meson propagators of the eta loops.
+    const double d1V = std::max(0., double(fe_functions[idxf("u")]));
+    const double d2V = fe_derivatives[idxf("u")][0];
+    const double d3V = fe_hessians[idxf("u")][0][0];
 
     extractors[idxe("rhoPhi")] = rhoPhi;
     extractors[idxe("d1V")] = d1V;
     extractors[idxe("d2V")] = d2V;
     extractors[idxe("d3V")] = d3V;
 
-    const double p0f = std::max(1e-3, M_PI * prm.T * std::exp(-k / (M_PI * prm.T)));
+    const double p0f = fermionic_p0();
+    double etaQ = extractors[idxe("etaQ")];
+    double etaPhi = extractors[idxe("etaPhi")];
+    const auto arguments = device::tie(k, p_ext, p0f, prm.Nf, prm.Nc, prm.T, prm.muq, etaQ, etaPhi, hPhi, d1V,
+                                       d2V, d3V, rhoPhi);
+    double eps = 0.;
+    uint it = 0;
+    do {
+      double new_etaQ = 0., new_etaPhi = 0.;
+      flow_equations.etaQ.get(new_etaQ, arguments);
+      flow_equations.etaPhi.get(new_etaPhi, arguments);
 
-    const double zero = 0.0001;
+      eps = std::max(std::abs((new_etaQ - etaQ) / new_etaQ), std::abs((new_etaPhi - etaPhi) / new_etaPhi));
+      etaQ = new_etaQ;
+      etaPhi = new_etaPhi;
+    } while (eps > 1e-5 && ++it < 8);
 
-    const auto arguments = device::tie(k, zero, p0f,prm.Nf, prm.Nc, prm.T, prm.muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
-
-    // iterate the etas until convergence
-    {
-      double eps = 0.;
-      uint it = 0;
-      do {
-        // etaA
-        double new_etaQ = 0.;
-        double new_etaPhi = 0.;
-
-        flow_equations.etaQ.get(new_etaQ, arguments);
-        flow_equations.etaPhi.get(new_etaPhi, arguments);
-
-        eps = 0.0;
-        eps = std::max(eps, std::abs(double((new_etaQ - etaQ) / new_etaQ)));
-        eps = std::max(eps, std::abs(double((new_etaPhi - etaPhi) / new_etaPhi)));
-
-        etaQ = new_etaQ;
-        etaPhi = new_etaPhi;
-
-        it++;
-      } while (eps > 1e-5 && it < 8);
-
-      if (etaPhi > 4.)
-        etaPhi = 4.;
-
-      extractors[idxe("etaQ")] = etaQ;
-      extractors[idxe("etaPhi")] = etaPhi;
-    }
+    extractors[idxe("etaQ")] = etaQ;
+    // A safety cap: keeps a runaway of the fixed-point iteration from propagating into the flow.
+    extractors[idxe("etaPhi")] = std::min(etaPhi, 4.);
   }
 
-  template <typename NT, typename Solution> void flux(std::array<Tensor<1, dim, NT>, Components::count_fe_functions(0)> &flux, const Point<dim> &x, const Solution &sol) const
+  /// The flows of the variables: d_t ZPhi = -etaPhi ZPhi, and the Yukawa coupling, including its rescaling.
+  template <typename Vector, typename Solution> void dt_variables(Vector &residual, const Solution &sol) const
   {
-    const auto rhoPhi = x[mesonic];
+    const auto &variables = get<"variables">(sol);
+    const auto &extractors = get<"extractors">(sol);
 
+    const auto ZPhi = variables[idxv("ZPhi")];
+    const auto etaQ = extractors[idxe("etaQ")];
+    const auto etaPhi = extractors[idxe("etaPhi")];
+
+    const double hPhi = variables[idxv("hPhi")];
+    const double d1V = extractors[idxe("d1V")];
+    const double d2V = extractors[idxe("d2V")];
+    const double d3V = extractors[idxe("d3V")];
+    const double rhoPhi = extractors[idxe("rhoPhi")];
+    const double p0f = fermionic_p0();
+    const auto arguments = device::tie(k, p_ext, p0f, prm.Nf, prm.Nc, prm.T, prm.muq, etaQ, etaPhi, hPhi, d1V, d2V,
+                                       d3V, rhoPhi);
+
+    // Residual convention: d_t v = -residual.
+    residual[idxv("ZPhi")] = -etaPhi * ZPhi;
+    flow_equations.hPhi0.get(residual[idxv("hPhi")], arguments);
+
+    // The explicit symmetry breaking c sigma is fixed for the bare field; for the renormalized field used here
+    // it scales with ZPhi^(-1/2).
+    cSigma = std::pow(ZPhi, -0.5) * prm.cSigma;
+  }
+
+  /// The flow of u = dV/drho; the anomalous dimensions enter through the regulator insertions.
+  template <typename NT, typename Solution>
+  void flux(std::array<Tensor<1, dim, NT>, Components::count_fe_functions(0)> &flux, const Point<dim> &x,
+            const Solution &sol) const
+  {
     const auto &fe_functions = get<"fe_functions">(sol);
     const auto &fe_derivatives = get<"fe_derivatives">(sol);
     const auto &fe_hessians = get<"fe_hessians">(sol);
@@ -224,161 +166,97 @@ public:
 
     const auto etaQ = extractors[idxe("etaQ")];
     const auto etaPhi = extractors[idxe("etaPhi")];
-
-    const auto hPhi = (variables[idxv("hPhi")]);
+    const auto hPhi = variables[idxv("hPhi")];
     const auto d1V = fe_functions[idxf("u")];
     const auto d2V = fe_derivatives[idxf("u")][0];
     const auto d3V = fe_hessians[idxf("u")][0][0];
-
-    const double p0f = std::max(1e-3, M_PI * prm.T * std::exp(-k / (M_PI * prm.T)));
-    const double zero = 0.0001;
-
-    const auto arguments = device::tie(k, zero, p0f,prm.Nf, prm.Nc, prm.T, prm.muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
-
-    flow_equations.V.get(flux[idxf("u")][mesonic], arguments);
-
-    if (!std::isfinite((double)flux[idxf("u")][mesonic])) {
-      spdlog::error("flux is not finite");
-      spdlog::error("k = {}", k);
-      spdlog::error("p0f = {}", p0f);
-      spdlog::error("etaQ = {}", etaQ);
-      spdlog::error("etaPhi = {}", etaPhi);
-      spdlog::error("hPhi = {}", hPhi);
-      spdlog::error("d1V = {}",(double) d1V);
-      spdlog::error("d2V = {}",(double) d2V);
-      spdlog::error("d3V = {}",(double) d3V);
-      spdlog::error("rhoPhi = {}", rhoPhi);
-    }
+    const double rhoPhi = x[0];
+    const double p0f = fermionic_p0();
+    const auto arguments =
+        device::tie(k, p_ext, p0f, prm.Nf, prm.Nc, prm.T, prm.muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
+    flow_equations.V.get(flux[idxf("u")][0], arguments);
   }
 
-  template <int dim, typename NT, typename Solutions, size_t n_fe_functions> void source(std::array<NT, n_fe_functions> &s_i, const Point<dim> &x, const Solutions &sol) const
+  /// The rescaling of u = dV/drho with the renormalized field: etaPhi (u + rho du/drho).
+  template <typename NT, typename Solution>
+  void source(std::array<NT, Components::count_fe_functions(0)> &s_i, const Point<dim> &x, const Solution &sol) const
   {
-    const auto rhoPhi = x[mesonic];
-
-    const auto &fe_functions = get<"fe_functions">(sol);
-    const auto &fe_derivatives = get<"fe_derivatives">(sol);
-    const auto &extractors = get<"extractors">(sol);
-
-    const auto etaPhi = extractors[idxe("etaPhi")];
-    const auto d1V = fe_functions[idxf("u")];
-    const auto d2V = fe_derivatives[idxf("u")][0];
-
-    s_i[idxf("u")] = etaPhi * (d1V + d2V * rhoPhi);
+    const auto u = get<"fe_functions">(sol)[idxf("u")];
+    const auto du = get<"fe_derivatives">(sol)[idxf("u")][0];
+    const auto etaPhi = get<"extractors">(sol)[idxe("etaPhi")];
+    s_i[idxf("u")] = etaPhi * (u + du * x[0]);
   }
 
-  template <int dim, typename NumberType, typename Vector, typename Vector_dot>
-  void mass(std::array<NumberType, Components::count_fe_functions(0)> &m_i, const Point<dim> &, const Vector &u_i, const Vector_dot &dt_u_i) const
+  /// The EoM with explicit symmetry breaking: the minimum of V(rho) - cSigma sigma, i.e. dV/drho = cSigma / sigma.
+  template <int dim_, typename Vector> std::array<double, 1> EoM(const Point<dim_> &x, const Vector &u_i) const
   {
-    m_i[idxf("u")] = dt_u_i[idxf("u")];
+    const double sigma = std::sqrt(2. * x[0]);
+    return {{u_i[idxf("u")] - cSigma / (sigma + 1e-14)}};
   }
 
-  template <int dim, typename Vector> std::array<double, 1> EoM(const Point<dim> &x, const Vector &u_i) const
-  {
-    const double sigma = std::sqrt(2. * x[mesonic]);
-    const auto d1V = u_i[idxf("u")];
-    return {{d1V - cSigma / (sigma + 1e-14)}};
-  }
-
-  template <int dim, typename Vector>
-  std::array<double, 1> raw_potential_gradient(const Point<dim> &, const Vector &u_i) const
+  /// The potential is reconstructed from u alone, without the symmetry-breaking term.
+  template <int dim_, typename Vector>
+  std::array<double, 1> raw_potential_gradient(const Point<dim_> &, const Vector &u_i) const
   {
     return {{u_i[idxf("u")]}};
   }
 
-  mutable double last_EoM = 0.;
-  mutable bool lock_EoM = false;
-
-  // The EoM lock above is history: once set, it stays set, and nothing in the state or the RG time
-  // says whether it was. These two let a flow restarted from a snapshot (/restart/file) continue
-  // with the lock as it was. cSigma is recomputed in dt_variables, but only once the first residual
-  // of the restarted run has been assembled, so it travels along as well.
+  /// cSigma follows ZPhi, but the EoM cannot see the variables: carry it across a restart from a snapshot.
   void save_state(DiFfRG::ModelState &state) const
   {
-    state.set("last_EoM", last_EoM);
-    state.set("lock_EoM", lock_EoM);
     state.set("cSigma", cSigma);
   }
 
   void load_state(const DiFfRG::ModelState &state)
   {
-    last_EoM = state.get<double>("last_EoM");
-    lock_EoM = state.get<bool>("lock_EoM");
     cSigma = state.get<double>("cSigma");
   }
 
-  template <int dim, typename Vector> Point<dim> EoM_postprocess(const Point<dim> &EoM, const Vector &) const
-  {
-    //std::cout << "EoM change: " << last_EoM - EoM[0] << std::endl;
-    if (lock_EoM || last_EoM - EoM[0] > 5e-4) {
-      lock_EoM = true;
-      return Point<dim>(last_EoM);
-    }
-    else
-      last_EoM = EoM[0];
-    return EoM;
-  }
-
-  template <int dim, typename DataOut, typename Solutions> void readouts(DataOut &output, const Point<dim> &x, const Solutions &sol, const std::string filename, const int) const
+  template <int dim_, typename DataOut, typename Solutions>
+  void readouts(DataOut &output, const Point<dim_> &x, const Solutions &sol, const std::string &filename) const
   {
     const auto &fe_functions = get<"fe_functions">(sol);
     const auto &fe_derivatives = get<"fe_derivatives">(sol);
     const auto &variables = get<"variables">(sol);
     const auto &extractors = get<"extractors">(sol);
 
-    const double rhoPhi = x[mesonic];
+    const double rhoPhi = x[0];
     const double sigma = std::sqrt(2. * rhoPhi);
+    const double hPhi = variables[idxv("hPhi")];
+    const double m2Pion = fe_functions[idxf("u")];
+    const double m2Sigma = m2Pion + 2. * rhoPhi * fe_derivatives[idxf("u")][0];
 
-    const double ZQ = variables[idxv("ZQ")];
-    const double ZPhi = variables[idxv("ZPhi")];
-
-    const double etaQ = extractors[idxe("etaQ")];
-    const double etaPhi = extractors[idxe("etaPhi")];
-
-    const auto hPhi = (variables[idxv("hPhi")]);
-    const auto d2V = fe_derivatives[idxf("u")][mesonic];
-    const auto m2Pion = fe_functions[idxf("u")];
-    const auto m2Sigma = m2Pion + 2. * rhoPhi * d2V;
-
-    const double mQuark = (sigma * hPhi / std::sqrt(2. * 2.));
-    const double mPion = m2Pion > 0. ? std::sqrt(m2Pion) : 0.;
-    const double mSigma = m2Sigma > 0. ? std::sqrt(m2Sigma) : 0.;
-
-    auto out_file = output.table(filename);
-    out_file.set_Lambda(Lambda);
-
-    out_file.value("sigma [GeV]", sigma);
-
-    out_file.value("ZQ", ZQ);
-    out_file.value("ZPhi", ZPhi);
-
-    out_file.value("etaQ", etaQ);
-    out_file.value("etaPhi", etaPhi);
-
-    out_file.value("hPhi", hPhi);
-
-    out_file.value("m_{pi} [GeV]", mPion);
-    out_file.value("m_{sigma} [GeV]", mSigma);
-    out_file.value("m_q [GeV]", mQuark);
+    auto table = output.table(filename);
+    table.value("sigma [GeV]", sigma);
+    table.value("ZPhi", variables[idxv("ZPhi")]);
+    table.value("etaQ", extractors[idxe("etaQ")]);
+    table.value("etaPhi", extractors[idxe("etaPhi")]);
+    table.value("hPhi", hPhi);
+    table.value("m_pi [GeV]", std::sqrt(std::max(0., m2Pion)));
+    table.value("m_sigma [GeV]", std::sqrt(std::max(0., m2Sigma)));
+    table.value("m_q [GeV]", sigma * hPhi / std::sqrt(2. * prm.Nf));
   }
 
+  /// Two readouts: at the minimum of V itself (the chiral limit) and at the EoM with explicit symmetry breaking.
   template <typename FUN, typename DataOut> void readouts_multiple(FUN &helper, DataOut &) const
   {
-    // chiral EoM
     helper(
-        "chiral",
-        [&](const auto &, const auto &u_i) {
-          const auto d1V = u_i[idxf("u")];
-          return std::array<double, 1>{{d1V}};
-        },
-        [&](auto &output, const auto &x, const auto &sol) { this->readouts(output, x, sol, "data_chiral.csv", 0); });
-    // physical EoM
+        "chiral", [&](const auto &, const auto &u_i) { return std::array<double, 1>{{u_i[idxf("u")]}}; },
+        [&](auto &output, const auto &x, const auto &sol) { readouts(output, x, sol, "data_chiral.csv"); });
     helper(
-        "physical",
-        [&](const auto &x, const auto &u_i) {
-          const auto sigma = std::sqrt(2. * x[mesonic]);
-          const auto d1V = u_i[idxf("u")];
-          return std::array<double, 1>{{d1V - cSigma / (sigma + 1e-14)}};
-        },
-        [&](auto &output, const auto &x, const auto &sol) { this->readouts(output, x, sol, "data_running_EoM.csv", 1); });
+        "physical", [&](const auto &x, const auto &u_i) { return EoM(x, u_i); },
+        [&](auto &output, const auto &x, const auto &sol) { readouts(output, x, sol, "data.csv"); });
   }
+
+private:
+  const Parameters prm;
+  // mutable: the integrators' get() is not const, while the model's callbacks are.
+  mutable LPA_QM_flows flow_equations;
+  mutable double cSigma;
+
+  /// External spatial momentum of the eta projections, (g(p) - g(0)) / p^2: small but finite.
+  static constexpr double p_ext = 1e-4;
+
+  /// Lowest fermionic Matsubara frequency pi T, smoothly cut off at small T where the sum becomes an integral.
+  double fermionic_p0() const { return std::max(1e-3, M_PI * prm.T * std::exp(-k / (M_PI * prm.T))); }
 };

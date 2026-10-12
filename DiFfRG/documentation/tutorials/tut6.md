@@ -265,7 +265,7 @@ jacobian (33 calls), ms per call: extract 0.001, gather 0.015, evaluate 0.199, s
 ```
 
 The model evaluation dominates, as it should. On this small 1D problem the three backends are close: per point
-and batched on the CPU take the same time per call, and the GPU (a laptop RTX 4070, double precision) is about
+and batched on the CPU take the same time per call, and a consumer laptop GPU in double precision is about
 1.5 times slower -- there are only a few hundred points per call. `Examples/ONfiniteT/bench_batched` measures
 single calls on larger meshes.
 

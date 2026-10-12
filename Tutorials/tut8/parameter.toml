@@ -1,0 +1,58 @@
+# Tutorial 8: quark-meson model in LPA'. Dimensionful quantities in GeV.
+
+[physical]
+Lambda = 0.65
+Nc = 3.0
+Nf = 2.0
+T = 0.1
+muq = 0.1
+# initial condition V'(rho) = m2Phi + lambdaPhi / 2 * rho
+m2Phi = 0.1
+lambdaPhi = 70.0
+# initial Yukawa coupling
+hPhi = 6.5
+# explicit chiral symmetry breaking, V -> V - cSigma sigma
+cSigma = 0.0025
+
+[integration]
+x_order = 32
+cos1_order = 8
+x_extent_tolerance = 1e-4
+jacobian_quadrature_factor = 0.5
+min_matsubara_size = 8
+max_matsubara_size = 128
+
+[discretization]
+fe_order = 2
+output_subdivisions = 4
+EoM_abs_tol = 1e-10
+EoM_max_iter = 200
+
+[discretization.grid]
+x_grid = "0:1e-4:7e-3, 7e-3:5e-4:9e-3, 9e-3:5e-4:1.4e-2"
+refine = 0
+
+[timestepping]
+final_time = 4.0
+output_dt = 1e-2
+
+# IDA, for the potential
+[timestepping.implicit]
+dt = 1e-4
+minimal_dt = 1e-6
+maximal_dt = 1e-1
+abs_tol = 1e-13
+rel_tol = 1e-7
+
+# Adams-Bashforth-Moulton, for ZPhi and hPhi
+[timestepping.explicit]
+dt = 5e-3
+minimal_dt = 1e-6
+maximal_dt = 5e-2
+abs_tol = 1e-10
+rel_tol = 1e-5
+
+[output]
+verbosity = 1
+folder = "./"
+name = "output"

@@ -34,7 +34,7 @@ namespace DiFfRG
     double host_fill_threshold();
 
     /// Evaluations per worker the host backend needs to amortize a parallel_for spawn. A judgement,
-    /// not a measurement -- see the note in documentation/multi_gpu.md.
+    /// not a measurement -- see the note in docs/dev/multi_gpu_handover.md.
     inline constexpr double host_grain = 1024.;
 
     /**

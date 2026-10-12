@@ -2,7 +2,11 @@
 
 #include "../etaQ.hh"
 
- void etaQ_integrator::get(autodiff::real& dest, const double& k, const double& p, const double& p0f, const double& Nf, const double& Nc, const double& T, const double& muq, const autodiff::real& etaQ, const autodiff::real& etaPhi, const autodiff::real& hPhi, const autodiff::real& d1V, const autodiff::real& d2V, const autodiff::real& d3V, const double& rhoPhi)
+void etaQ_integrator::get(autodiff::real& dest, const double& k, const double& p, const double& p0f, const double& Nf, const double& Nc, const double& T, const double& muq, const autodiff::real& etaQ, const autodiff::real& etaPhi, const autodiff::real& hPhi, const autodiff::real& d1V, const autodiff::real& d2V, const autodiff::real& d3V, const double& rhoPhi)
 {
-integrator_AD.get(dest,  k, p, p0f, Nf, Nc, T, muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
+  integrator_AD.get(dest,  k, p, p0f, Nf, Nc, T, muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
+}
+void etaQ_integrator::get(autodiff::Real<2, double>& dest, const double& k, const double& p, const double& p0f, const double& Nf, const double& Nc, const double& T, const double& muq, const autodiff::Real<2, double>& etaQ, const autodiff::Real<2, double>& etaPhi, const autodiff::Real<2, double>& hPhi, const autodiff::Real<2, double>& d1V, const autodiff::Real<2, double>& d2V, const autodiff::Real<2, double>& d3V, const double& rhoPhi)
+{
+  integrator_AD2.get(dest,  k, p, p0f, Nf, Nc, T, muq, etaQ, etaPhi, hPhi, d1V, d2V, d3V, rhoPhi);
 }

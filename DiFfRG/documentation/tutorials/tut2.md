@@ -6,7 +6,7 @@ You can find the full code as described here also in `Tutorials/tut2`.
 
 ## General structure
 
-Setting up the application is analogeous to [Tutorial 1](tut1.md), i.e. you create all files and their contents just as there, renaming all instances of `tut1` to `tut2`.
+Setting up the application is analogous to [Tutorial 1](tut1.md), i.e. you create all files and their contents just as there, renaming all instances of `tut1` to `tut2`.
 
 What actually changes is only the system of equations in `model.hh`, i.e. the numerical model.
 
@@ -16,7 +16,6 @@ This section assumes the reader is already familiar with the model. If not, [thi
 Consider the effective action for a Quark-Meson model in LPA, given by
 
 ```{math}
-\large
   \Gamma_k[\bar q, q, \phi] = \int_x \bigg( \bar q (\partial_\mu\gamma_\mu + i \mu_q \gamma_0)q + \frac{1}{2}(\partial_\mu\phi)^2 + V(\rho) \bigg)\,,
 ```
 
@@ -205,11 +204,11 @@ Secondly, we need to choose an appropriate field space size. For the above param
       ...
 ```
 
-We now set up the build by
+We now set up the build as in Tutorial 1,
 ```bash
 $ mkdir build
 $ cd build
-$ cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS='-O3 -march=native -ffast-math -fno-finite-math-only' ..
+$ cmake -DCMAKE_BUILD_TYPE=Release ..
 ```
 
 At this point, we can build and run the program.
@@ -222,14 +221,18 @@ Again, you can investigate this in paraview:
 ```bash
 $ paraview output.pvd
 ```
-![The end result at t = 5, i.e. k = 0.004](images/paraview_tut2_0.png){html: width=80%, latex: width=5cm}
+```{figure} images/paraview_tut2_0.png
+:width: 80%
+:alt: ParaView plot of the pion mass as a function of rho
 
-## Drawing a phase diagram
+The pion mass $m_\pi^2(\rho_\phi)$ at $t = 5$, i.e. $k \approx 0.004$.
+```
 
-Of course, we can now start to modify parameters. Either you can just edit `parameter.json`, write a new JSON or TOML file, or you can use the overwriting syntax.
-As an example, consider you want to run a simulation at muq = 0.25, T = 0.1, Nc = 4 and name it `simulation4`. This can be achieved by the command
+## Scanning parameters
+
+Every parameter can be changed without editing a file, through the command-line overrides of Tutorial 1. For example, a run at $\mu_q = 0.25$, $T = 0.1$ and $N_c = 4$, written to files named `simulation4`:
 ```bash
 $ ./tut2 -sd /physical/muq=0.25 -sd /physical/T=0.1 -sd /physical/Nc=4.0 -ss /output/name=simulation4
 ```
 
-Of course, scanning the phase diagram of the Quark-Meson model like this is too tedious. For automating the task, we suggest to use the `adapative` python package.
+For a phase diagram, the Python package drives such runs: `DiFfRG.phasediagram.run_point(exe, [["/physical/T", 0.1], ["/physical/muq", 0.25]], folder="pd/")` runs one point and names its output after the parameters, and `DiFfRG.phasediagram.get_all_sims("pd/")` reads all finished runs back. A scan needs observables to compare, e.g. the condensate at the minimum of the potential; a model provides them through its `readouts` method, which this model does not have yet. Tutorial 3 adds one, and `Examples/QuarkMesonLPAprime/phasediagram.ipynb` is a complete scan of a quark-meson model. When many points share the same UV flow, [snapshots](../getting_started/snapshots.md) let each of them start from a common intermediate scale.

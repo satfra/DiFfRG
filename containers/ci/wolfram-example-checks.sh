@@ -12,7 +12,7 @@ timeout_seconds="${WOLFRAM_TIMEOUT:-1800}"
 
 examples=(
   "ONfiniteT:Examples/ONfiniteT:ON.wl"
-  "QuarkMesonLPAprime:Examples/QuarkMesonLPAprime:QuarkMesonLPAprime.nb"
+  "QuarkMesonLPAprime:Examples/QuarkMesonLPAprime:QM.wl"
   "YangMills_SP:Examples/YangMills/SP:Yang-Mills.nb"
   "YangMills_Full:Examples/YangMills/Full:Yang-Mills.nb"
   "FourFermi:Examples/FourFermi:Four-Fermion.nb"

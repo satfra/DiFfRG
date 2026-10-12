@@ -49,7 +49,7 @@ mutable SplineInterpolator1D<double, Coordinates1D> ZA4, ZAcbc, ZA3;
 
 ## Generating grid kernels with FunKit
 
-The Mathematica side is the same `MakeKernel` / `UpdateFlows` pipeline as [Tutorial 3](tut3.md), with three additional options that turn a scalar kernel into a **grid** kernel. The gluon-propagator kernel is generated (verified from `Tutorials/tut4/Yang-Mills.nb`) as:
+The Mathematica side is the same `MakeKernel` / `UpdateFlows` pipeline as [Tutorial 3](tut3.md), with three additional options that turn a scalar kernel into a **grid** kernel. The gluon-propagator kernel is generated in `Tutorials/tut4/Yang-Mills.nb` as:
 
 ```mathematica
 MakeKernel[ FlowAA / p^2,
@@ -165,7 +165,7 @@ using TimeStepper = TimeStepperBoostABM<Assembler>;
 int main(int argc, char *argv[])
 {
   const auto config_helper = DiFfRG::Init(argc, argv).get_configuration_helper();
-  const auto json = config_helper.get_json();
+  const auto json = config_helper.get_config();
 
   OutputSession<Assembler> output(json);
   Model model(json);

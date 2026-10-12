@@ -5,15 +5,15 @@ To compile and run this project, there are very few requirements which you can e
 - [git](https://git-scm.com/) for external requirements and to clone this repository.
 - [CMake](https://www.cmake.org/) for the build systems of DiFfRG, deal.ii and other libraries.
 - [GNU Make](https://www.gnu.org/software/make/) or another generator of your choice.
-- A compiler supporting at least the C++20 standard. This project is only tested using the [GCC](https://gcc.gnu.org/) compiler suite, as well as with `AppleClang`, but in principle, ICC or standard Clang should also work.
+- A compiler supporting at least the C++20 standard: [Clang](https://clang.llvm.org/), [GCC](https://gcc.gnu.org/) or `AppleClang`.
 - LAPACK and BLAS in some form, e.g. [OpenBlas](https://www.openblas.net/).
 - The GNU Scientific Library [GSL](https://www.gnu.org/software/gsl/). If not found by DiFfRG, it will try to install it by itself.
 - [Python](https://www.python.org/) is required by the Boost build system and used for visualization.
-- [Doxygen](https://www.doxygen.org/) and [graphviz](https://www.graphviz.org/download/) to build the documentation.
+- Only to build this documentation: [Doxygen](https://www.doxygen.org/), [graphviz](https://www.graphviz.org/download/) and Python 3.9–3.12 with the packages in `DiFfRG/documentation/requirements.txt`.
 
 The following requirements are optional:
 - [ParaView](https://www.paraview.org/), a program to visualize and post-process the vtk data saved by DiFfRG when treating FEM discretizations.
-- A GPU backend for the momentum integration routines, which gives a large speedup for fully momentum-dependent flow equations (10 - 100x). DiFfRG uses [Kokkos](https://kokkos.org/) to abstract the parallel backend, so GPU support is enabled through Kokkos' CUDA (NVIDIA) or HIP (AMD) backends. For the CUDA backend you need a working [CUDA toolkit](https://developer.nvidia.com/cuda-toolkit) together with a host compiler compatible with your `nvcc` version (e.g. `g++` <= 13.2 for CUDA 12.5). GPU support is controlled by the `-DGPU` CMake option (see below).
+- A GPU backend for the momentum integration routines, which gives a large speedup for fully momentum-dependent flow equations (10 - 100x). DiFfRG uses [Kokkos](https://kokkos.org/) to abstract the parallel backend, so GPU support is enabled through Kokkos' CUDA (NVIDIA) or HIP (AMD) backends. For the CUDA backend you need a working [CUDA toolkit](https://developer.nvidia.com/cuda-toolkit) together with a host compiler your CUDA version supports (see NVIDIA's installation guide for the list). GPU support is controlled by the `-DGPU` CMake option (see below).
 
 All other requirements are bundled and automatically built with DiFfRG.
 
@@ -25,12 +25,7 @@ The framework has been tested with the following systems:
 ```bash
 $ pacman -S git cmake gcc gcc-fortran blas-openblas paraview python doxygen graphviz gsl
 ```
-In case you want to run with CUDA, as of January 2025 you have to have very specific versions of CUDA and gcc installed. Currently, the gcc13 compiler in the Arch package repository is incompatible with CUDA. To configure a system with a compatible CUDA+gcc configuration, them install directly from the Arch package archive
-```bash
-$ pacman -U https://archive.archlinux.org/packages/g/gcc12/gcc12-12.3.0-6-x86_64.pkg.tar.zst \
-            https://archive.archlinux.org/packages/g/gcc12-libs/gcc12-libs-12.3.0-6-x86_64.pkg.tar.zst \
-            https://archive.archlinux.org/packages/c/cuda/cuda-12.3.2-1-x86_64.pkg.tar.zst
-```
+For CUDA, install the `cuda` package. Arch's newest GCC is often ahead of what CUDA supports; in that case use Clang as the host compiler or install an older `gccNN` package.
 
 ### Rocky Linux
 ```bash
@@ -120,7 +115,7 @@ The most important options to pass to the top-level `cmake` invocation are:
 - `-DGPU=ON/OFF` — GPU support via the Kokkos CUDA/HIP backend (default `ON`).
 - `-DMPI=ON/OFF` — MPI support (default `OFF`; a library build configured from `DiFfRG/` against an existing bundle defaults to what the bundle was built with). This is a single switch for the whole superbuild: deal.II, SUNDIALS, PETSc and DiFfRG must all agree about MPI, so it cannot be enabled for DiFfRG alone afterwards.
 - `-DNATIVE=ON/OFF` — optimize for the build machine's CPU (`-march=native`). Disable for portable binaries (default `ON`).
-- `-DDiFfRG_CUDA_ARCH=<list>` — the GPU compute capabilities to compile for, e.g. `90` or `80;90` (also accepted in dotted form, `9.0`). Defaults to the GPUs found on the build machine via `nvidia-smi`; `bundled` keeps whatever the dependency bundle was built for. See [Choosing the GPU architecture](#choosing-the-gpu-architecture).
+- `-DDiFfRG_CUDA_ARCH=<list>` — the GPU compute capabilities to compile for, e.g. `90` or `80;90` (also accepted in dotted form, `9.0`). Defaults to the GPUs found on the build machine via `nvidia-smi`; `bundled` keeps whatever the dependency bundle was built for. See {ref}`choosing-the-gpu-architecture`.
 - `-DDIFFRG_TEST=ON` — build the test suite (default `OFF`).
 - `-DDIFFRG_DOCS=ON` — build this documentation (default `ON`).
 - `-DDIFFRG_DOCS_ONLY=ON` — when configuring `DiFfRG/` directly, set up only the documentation target and skip the library (default `OFF`).
@@ -149,6 +144,7 @@ The most important options to pass to the top-level `cmake` invocation are:
 deal.II detects what PETSc was actually built with and exports `DEAL_II_PETSC_WITH_HYPRE` /
 `DEAL_II_PETSC_WITH_MUMPS`, which is what DiFfRG's solver wrappers gate on.
 
+(choosing-the-gpu-architecture)=
 #### Choosing the GPU architecture
 
 CUDA code is compiled for a specific *compute capability*. If the compiled architecture does not match the GPU, one of two things happens: an architecture **above** the device aborts at startup (Kokkos refuses to run), and one **below** it still runs, but only because the driver JIT-compiles the embedded PTX every time a module is loaded. DiFfRG's generated flow kernels are far too large for that second case to be acceptable — they overflow the driver's 256 MB JIT cache (`~/.nv/ComputeCache`), so the compilation is repeated on every run.
@@ -211,7 +207,7 @@ Boost, TBB, HDF5 and SUNDIALS are taken from the system when a viable version is
 
 The minimum supported versions are Boost ≥ 1.81, oneTBB ≥ 2021, HDF5 ≥ 1.12 and SUNDIALS ≥ 5.4.
 
-The bundled Boost is built from the source archive tracked at `dependencies/boost/boost_1_81_0-diffrg-slim.tar.xz` (the upstream 1.81.0 release with documentation, tests and examples removed), so no network access is needed for it. It is unpacked into the build tree, which costs ~19 500 file writes per build tree. On a slow filesystem, do that once and reuse the result:
+The bundled Boost ships with the repository, so no network access is needed for it. Unpacking it writes many small files into every build tree; on a slow filesystem, build it once and reuse the result:
 
 ```bash
 # once per machine

@@ -1,0 +1,46 @@
+# Tutorial 7: the O(N) model in LPA (d = 3, Litim regulator) on CG, DG or KT.
+
+[tutorial]
+# cg, dg or kt
+discretization = "cg"
+
+[physical]
+Lambda = 1.0
+N = 4.0
+# initial condition V'(rho) = m2 + lambda / 2 * rho
+m2 = -0.12
+lambda = 2.0
+
+[discretization]
+# CG and DG: polynomial degree. KT ignores it (one value per cell).
+fe_order = 2
+EoM_abs_tol = 1e-12
+EoM_max_iter = 100
+
+[discretization.grid]
+x_grid = "0:1e-3:0.15"
+refine = 0
+
+[discretization.adaptivity]
+# 0 switches adaptivity off; n allows up to n refinements of the initial cells.
+level = 0
+start_adapt_at = 0.0
+adapt_dt = 0.2
+# refine cells whose estimated relative resolution error exceeds this; coarsen below tolerance / 8
+tolerance = 3e-4
+
+[timestepping]
+final_time = 6.0
+output_dt = 0.1
+
+[timestepping.implicit]
+dt = 1e-4
+minimal_dt = 1e-10
+maximal_dt = 0.1
+abs_tol = 1e-12
+rel_tol = 1e-8
+
+[output]
+verbosity = 1
+folder = "./"
+name = "output"

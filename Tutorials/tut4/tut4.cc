@@ -15,7 +15,7 @@ int main(int argc, char *argv[])
 
   // Initialize DiFfRG (MPI + Kokkos) and read the parameter file / CLI overrides
   const auto config_helper = DiFfRG::Init(argc, argv).get_configuration_helper();
-  const auto json = config_helper.get_json();
+  const auto json = config_helper.get_config();
 
   // Define the objects needed to run the simulation
   Model model(json);
