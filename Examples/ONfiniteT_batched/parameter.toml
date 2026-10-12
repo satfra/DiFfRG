@@ -31,7 +31,7 @@ output_dt = 0.1
 
 [timestepping.implicit]
 dt = 1e-3
-minimal_dt = 1e-4
+minimal_dt = 1e-8
 maximal_dt = 0.1
 abs_tol = 1e-13
 rel_tol = 1e-7

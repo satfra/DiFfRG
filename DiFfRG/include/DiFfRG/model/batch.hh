@@ -35,7 +35,7 @@
  * template <typename Out, typename Batch> void evaluate_batch(Out &out, const Batch &batch) const
  * {
  *   // one integral per point; arguments as declared by the generated integrator (here k and u),
- *   // cf. Examples/ONfiniteT/model_batched.hh
+ *   // cf. Examples/ONfiniteT_batched/model_batched.hh
  *   if (out.requested(Term::flux)) integrator.map_points(out.flux(idx("u"), 0), k, batch.values(idx("u")));
  *   if (out.requested(Term::source))
  *     for (size_t i = 0; i < batch.size(); ++i)

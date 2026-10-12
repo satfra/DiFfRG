@@ -1,6 +1,6 @@
 #pragma once
 
-// The KT headers come before DiFfRG.hh, see KT.cc.
+// The KT headers come before DiFfRG.hh, see ../ONfiniteT/KT.cc.
 #include <DiFfRG/discretization/FV/assembler/KurganovTadmor.hh>
 #include <DiFfRG/discretization/FV/discretization.hh>
 #include <DiFfRG/discretization/FV/limiter/minmod_limiter.hh>
@@ -10,12 +10,12 @@
 #include <DiFfRG/DiFfRG.hh>
 using namespace DiFfRG;
 
-#include "flows_batched/flows.hh"
+#include "flows/flows.hh"
 
 #include <vector>
 
 /**
- * The O(N) model of model.hh with a batched flux: the flux at all points of a batch (the quadrature points of the
+ * The O(N) model of ../ONfiniteT/model.hh with a batched flux: the flux at all points of a batch (the quadrature points of the
  * CG or DG assembler) is one map_points() call of the V integrator, on the backend chosen at compile time. Physics
  * and parameters are those of model.hh.
  */
@@ -148,7 +148,7 @@ namespace ON_batched
   template <typename M> using LDGFluxes = def::LDGUpDownFluxes<M, def::UpDownFlux<def::FlowDirections<0>, def::UpDown<def::from_right>>>;
 
   /**
-   * The model of model_LDG.hh with a batched flux: m2' is the LDG level 1, built from m2 by an upwind flux, and
+   * The model of ../ONfiniteT/model_LDG.hh with a batched flux: m2' is the LDG level 1, built from m2 by an upwind flux, and
    * the main flux at all quadrature points is one map_points() call. Same template parameters as Model.
    */
   template <Backend backend = Backend::TBB, bool batched = true>
@@ -254,17 +254,8 @@ namespace ON_batched
     }
   };
 
-  struct KTParameters {
-    KTParameters(const ConfigTree &config)
-        : Lambda(config.get_double("/physical/Lambda")), N(config.get_double("/physical/N")), T(config.get_double("/physical/T")), m2(config.get_double("/physical/m2")),
-          lambda(config.get_double("/physical/lambda"))
-    {
-    }
-    double Lambda, N, T, m2, lambda;
-  };
-
   /**
-   * The model of model_KT.hh (parameter_KT.toml) with a batched flux: the advection flux (pion loop) and the
+   * The model of ../ONfiniteT/model_KT.hh (parameter_KT.toml) with a batched flux: the advection flux (pion loop) and the
    * diffusion flux (sigma loop) at all face traces of the KT assembler are one map_points() call each. Same
    * template parameters as Model; the GPU backends run both integrals in double.
    */
@@ -278,7 +269,7 @@ namespace ON_batched
     static constexpr uint dim = 1;
 
   protected:
-    const KTParameters prm;
+    const Parameters prm;
     mutable ONFiniteTBatchedFlows flow_equations;
 
   public:
@@ -288,7 +279,11 @@ namespace ON_batched
       flow_equations.set_T(prm.T);
     }
 
-    template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const { values[idxf("m2")] = prm.m2 + prm.lambda / 2. * pos[0]; }
+    template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
+    {
+      const auto &rho = pos[0];
+      values[idxf("m2")] = prm.lambda2 + prm.lambda4 * rho + prm.lambda6 * powr<2>(rho);
+    }
 
     void set_time(double t_)
     {

@@ -4,7 +4,7 @@ using namespace DiFfRG;
 #include "model_batched.hh"
 
 /**
- * CG.cc / DG.cc / LDG.cc / KT.cc with a batched flux. /batched/assembler is cg, dg, ldg or kt (the latter with
+ * The CG, DG, LDG and KT runs of ../ONfiniteT with a batched flux. /batched/assembler is cg, dg, ldg or kt (the latter with
  * parameter_KT.toml); /batched/backend selects how the model evaluates the flux:
  *   per_point -- per-point flux with the TBB integrator (AbstractModel's default evaluate_batch)
  *   tbb       -- one map_points call with the TBB integrator
