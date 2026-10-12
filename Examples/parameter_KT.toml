@@ -1,0 +1,67 @@
+[physical]
+[integration]
+x_order = 32
+cos1_order = 8
+cos2_order = 8
+phi_order = 8
+x_extent_tolerance = 1e-05
+jacobian_quadrature_factor = 0.8
+vacuum_quad_size = 64
+matsubara_precision_factor = 1
+min_matsubara_size = 8
+max_matsubara_size = 128
+
+[discretization]
+fe_order = 3
+threads = 0
+overintegration = 0
+output_subdivisions = 1
+EoM_abs_tol = 1e-12
+EoM_max_iter = 100
+EoM_smoothing_length = -1.0
+EoM_bound_tolerance = 1e-12
+EoM_armijo_coefficient = 0.0001
+EoM_max_backtracks = 20
+raw_potential_order = 2
+raw_potential_recover_mass_hessian = false
+raw_potential_mass_hessian_jump_threshold = -1.0
+
+[discretization.grid]
+x_grid = "0:0.1:1"
+y_grid = "0:0.1:1"
+z_grid = "0:0.1:1"
+refine = 0
+
+[discretization.adaptivity]
+start_adapt_at = 0.0
+adapt_dt = 0.1
+level = 0
+refine_percent = 0.1
+coarsen_percent = 0.05
+
+[timestepping]
+final_time = 1.0
+output_dt = 0.1
+
+[timestepping.explicit]
+dt = 0.01
+minimal_dt = 1e-16
+maximal_dt = 1e+16
+abs_tol = 0.001
+rel_tol = 0.001
+coupling_mode = 1
+
+[timestepping.implicit]
+dt = 0.0001
+minimal_dt = 1e-08
+maximal_dt = 1.0
+abs_tol = 1e-13
+rel_tol = 1e-07
+
+[output]
+verbosity = 0
+folder = "./"
+name = "output"
+max_pending_frames = 2
+
+

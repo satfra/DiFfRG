@@ -25,8 +25,101 @@
 #include <string>
 #include <vector>
 
+// clang-format off
+/**
+ * @file abstract_timestepper.hh
+ * @brief Common base of all timesteppers, the parameters they read, and how to choose one.
+ *
+ * ### What is solved
+ * The discretized flow consists of the FE/FV unknowns \f$u\f$ (one value per degree of freedom) and, optionally,
+ * a few extra scalar *variables* \f$v\f$ (Model::dt_variables). The assembler provides
+ * - the mass term \f$m(u, \dot u)\f$ (Model::mass), which for an ordinary flow is \f$M\dot u\f$ with the mass matrix
+ *   \f$M\f$,
+ * - the spatial residual \f$R(u, v)\f$, i.e. the flux and source terms of the model integrated against the test
+ *   functions,
+ * - the right-hand side of the variables, \f$D(v, u)\f$ = Model::dt_variables. Note the residual convention:
+ *   `dt_variables` returns \f$-\partial_t v\f$.
+ *
+ * All timesteppers evolve the RG time \f$t\f$ (with \f$k = \Lambda e^{-t}\f$) according to
+ * \f[
+ *   m(u, \dot u) + R(u, v) = 0\,, \qquad \dot v + D(v, u) = 0\,.
+ * \f]
+ * Implicit steppers solve this in residual form, \f$F(t, y, \dot y) = 0\f$ with \f$y = (u, v)\f$. Explicit steppers
+ * use \f$\dot u = -M^{-1} R(u, v)\f$, which requires a mass term linear in \f$\dot u\f$.
+ *
+ * ### Choosing a timestepper
+ * All of them take the Assembler as template argument, e.g. `TimeStepperSUNDIALS_IDA<Assembler>`, and are run through
+ * AbstractTimestepper::run.
+ *
+ * | Timestepper                          | Method                                         | Integrates             | Step size        | Mesh adaptor | MPI |
+ * |--------------------------------------|------------------------------------------------|------------------------|------------------|--------------|-----|
+ * | TimeStepperSUNDIALS_IDA              | implicit BDF, order 1 to 5 (SUNDIALS IDA)      | \f$u\f$, \f$u+v\f$, \f$v\f$ | adaptive         | yes          | yes |
+ * | TimeStepperSUNDIALS_IDA_BoostABM     | IDA for \f$u\f$, explicit Adams method for \f$v\f$ | \f$u+v\f$               | adaptive         | yes          | yes |
+ * | TimeStepperSUNDIALS_IDA_BoostRK54/78 | IDA for \f$u\f$, explicit Runge-Kutta for \f$v\f$  | \f$u+v\f$               | adaptive         | yes          | yes |
+ * | TimeStepperBoostRK54/78              | explicit Runge-Kutta, 5th / 8th order          | \f$u\f$, \f$u+v\f$, \f$v\f$ | adaptive         | no           | no  |
+ * | TimeStepperBoostABM                  | explicit 8-step Adams-Bashforth-Moulton        | \f$u\f$, \f$u+v\f$, \f$v\f$ | adaptive or fixed | no          | no  |
+ * | TimeStepperRK                        | explicit Runge-Kutta (deal.II), see set_method | \f$v\f$ only            | fixed            | no           | no  |
+ * | TimeStepperExplicitEuler             | forward Euler                                  | \f$u\f$ only            | fixed            | yes          | no  |
+ * | TimeStepperImplicitEuler             | backward Euler                                 | \f$u\f$ only            | adaptive         | yes          | no  |
+ * | TimeStepperTRBDF2                    | TR-BDF2 (trapezoidal + BDF2 stage)             | \f$u\f$ only            | adaptive         | yes          | no  |
+ *
+ * Steppers that integrate only \f$u\f$ throw if the flow has variables \f$v\f$; steppers without mesh adaptation throw
+ * when constructed with an adaptor other than NoAdaptivity. IDA is the default choice: it handles stiff flows,
+ * algebraic constraints (\f$m\f$ independent of \f$\dot u\f$ for some components) and distributed runs.
+ *
+ * ### Parameters
+ * Read from the ConfigTree on construction. A stepper reads the `implicit` section if it is implicit, the `explicit`
+ * section if it is explicit, and both if it is a hybrid. Keys marked "warns" print a warning if missing.
+ *
+ * | Key                                              | Type   | Default | Used by |
+ * |--------------------------------------------------|--------|---------|---------|
+ * | `/timestepping/output_dt`                        | double | 0.1     | all: output every `output_dt` in \f$t\f$ |
+ * | `/timestepping/implicit/dt`                      | double | 1e-4    | initial step of the implicit steppers |
+ * | `/timestepping/implicit/minimal_dt`              | double | 1e-14   | smallest step. IDA steppers: bound on IDA's step size, which fails rather than step below it, and time resolution of the stuck check; ImplicitEuler, TRBDF2: at it steps are accepted regardless of error estimate and Newton convergence. |
+ * | `/timestepping/implicit/maximal_dt`              | double | 1       | largest step |
+ * | `/timestepping/implicit/abs_tol`                 | double | 1e-13 (warns) | local error test (all implicit steppers); ImplicitEuler, TRBDF2: also Newton convergence |
+ * | `/timestepping/implicit/rel_tol`                 | double | 1e-7 (warns)  | as abs_tol |
+ * | `/timestepping/implicit/max_non_linear_iterations` | uint | 3       | IDA steppers: Newton iterations per step attempt; see IDADriver |
+ * | `/timestepping/implicit/local_tolerance_refresh` | double | 4       | IDA without variables and the IDA hybrids, for models with per-dof tolerances; see LocalAbsTolerances |
+ * | `/timestepping/implicit/iterative_refinement`    | bool   | true    | UMFPack: refine every direct solve |
+ * | `/timestepping/implicit/reuse_jacobian`          | bool   | true    | IDA steppers: when IDA changes its step size or order, only add the change of \f$\alpha\,\partial F/\partial\dot u\f$ to the last Jacobian instead of reassembling it; see IDADriver |
+ * | `/timestepping/implicit/warm_restart`            | bool   | true    | IDA steppers: after a mesh adaptation continue at the same order and step size, the step history transferred to the new mesh (needs the dependency bundle's IDA internal headers; else, and with false, IDA restarts cold) |
+ * | `/timestepping/implicit/jacobian_diagnostics`    | bool   | false   | implicit steppers: write `<run>_jacobian_diagnostics.csv` |
+ * | `/timestepping/implicit/ida_callback_trace`      | bool   | false   | TimeStepperSUNDIALS_IDA: print every failed callback, at `/output/verbosity` >= 5 |
+ * | `/timestepping/implicit/ida_callback_trace_min_t` | double | 0      | only trace from this \f$t\f$ on |
+ * | `/timestepping/implicit/ida_callback_trace_max_lines` | uint | 200  | cap on traced successful calls |
+ * | `/timestepping/implicit/ida_callback_trace_successes` | bool | false | also trace successful calls |
+ * | `/timestepping/implicit/ida_error_dof_diagnostics` | bool | false    | TimeStepperSUNDIALS_IDA (without variables, or variables only): on rejected steps, report the dofs with the largest local error |
+ * | `/timestepping/implicit/ida_error_dof_diagnostics_top_n` | uint | 8 | number of dofs reported |
+ * | `/timestepping/explicit/dt`                      | double | 1e-2 (warns) | fixed-step steppers: the step; adaptive ones: the initial (BoostRK) or largest (ABM) step |
+ * | `/timestepping/explicit/minimal_dt`              | double | 1e-16   | ABM error control: smallest step; also the time resolution of the stuck check (BoostRK, BoostABM) |
+ * | `/timestepping/explicit/maximal_dt`              | double | 1e16    | BoostRK (variables only) and the IDA hybrids: largest explicit step |
+ * | `/timestepping/explicit/abs_tol`                 | double | 1e-3 (warns) | BoostRK, BoostABM, IDA hybrids: local error test of the explicit steps |
+ * | `/timestepping/explicit/rel_tol`                 | double | 1e-3 (warns) | as abs_tol |
+ * | `/timestepping/explicit/detect_stuck`            | bool   | true    | BoostRK: abort when the step size collapses |
+ * | `/timestepping/explicit/error_control`           | bool   | true    | BoostABM, IDA_BoostABM: adapt the step to abs_tol/rel_tol; false: fixed step `explicit/dt` |
+ * | `/timestepping/explicit/coupling_mode`           | int    | 1       | IDA_BoostABM, see TimeStepperSUNDIALS_IDA_BoostABM_impl |
+ *
+ * The explicit error test of BoostRK and the ABM steppers requires, per component \f$i\f$,
+ * \f$|e_i| \le \mathrm{abs\_tol} + \mathrm{rel\_tol}\,|y_i|\f$ for the estimated local error \f$e_i\f$ (BoostRK adds
+ * \f$\Delta t\,|\dot y_i|\f$ to \f$|y_i|\f$). IDA uses the weighted RMS norm of SUNDIALS with the same two
+ * tolerances; dofs whose equation has no time derivative are excluded from its error test.
+ *
+ * Snapshots and restarts (optional; see AbstractTimestepper::run and documentation/getting_started/snapshots.md):
+ * - `/timestepping/snapshots/k`, `/timestepping/snapshots/t`: lists of RG scales (needs `/physical/Lambda`) or RG
+ *   times at which to write a snapshot.
+ * - `/timestepping/snapshots/snap_to_output_grid` (default true): move snapshot times onto the output grid.
+ * - `/timestepping/snapshots/stop_after_last` (default false): end the run after its last snapshot.
+ * - `/restart/file`: a snapshot to continue the flow from (set by the `--restart` command line flag).
+ *
+ * `/output/verbosity` controls the progress output: 0 none, 1 residual work, 2 adds Jacobian, linear solver and
+ * solver statistics, 3 adds factorization and output work; up to 4 the reports are aggregated, 5 prints every event.
+ */
+// clang-format on
+
 namespace DiFfRG
 {
+  /// One dof in an IDAErrorDofDiagnostics report.
   struct IDAErrorDofRecord {
     types::global_dof_index dof = dealii::numbers::invalid_dof_index;
     double value = 0.;
@@ -55,6 +148,8 @@ namespace DiFfRG
     }
   };
 
+  /// Report of /timestepping/implicit/ida_error_dof_diagnostics after IDA rejected steps; see
+  /// TimeStepperSUNDIALS_IDA_impl::set_ida_error_dof_callback.
   struct IDAErrorDofDiagnostics {
     double t = 0.;
     double k = std::numeric_limits<double>::quiet_NaN();
@@ -68,6 +163,7 @@ namespace DiFfRG
     std::vector<IDAErrorDofRecord> top_dofs;
   };
 
+  /// IDA's step statistics, attached to progress reports.
   struct IDAProgressDiagnostics {
     long int ida_steps = 0;
     long int ida_error_test_failures = 0;
@@ -88,6 +184,7 @@ namespace DiFfRG
     }
   };
 
+  /// Counts of failed residual, Jacobian and linear-solver callbacks, attached to progress reports.
   struct SolverCallbackDiagnostics {
     size_t nonfinite_solution_failures = 0;
     size_t nonfinite_residual_failures = 0;
@@ -110,6 +207,7 @@ namespace DiFfRG
     }
   };
 
+  /// Everything a timestepper attaches to a progress report.
   struct TimesteppingDiagnostics {
     std::optional<IDAProgressDiagnostics> ida;
     SolverCallbackDiagnostics callbacks;
@@ -123,57 +221,14 @@ namespace DiFfRG
   };
 
   /**
-   * @brief The abstract base class for all timestepping algorithms.
-   * It provides a standard constructor which populates typical timestepping parameters from a given ConfigTree object,
-   * such as the timestep sizes, tolerances, verbosity, etc. that are used in the timestepping algorithms.
+   * @brief Base class of all timesteppers.
    *
-   * In the ConfigTree object, a /timestepping/ section must be present with the following parameters:
-   * - /timestepping/output_dt: The output timestep size.
-   * - /timestepping/implicit/dt: The timestep size for an implicit timestepping algorithm.
-   * - /timestepping/implicit/minimal_dt: The minimal timestep size for an implicit timestepping algorithm.
-   * - /timestepping/implicit/maximal_dt: The maximal timestep size for an implicit timestepping algorithm.
-   * - /timestepping/implicit/abs_tol: The absolute tolerance for an implicit timestepping algorithm.
-   * - /timestepping/implicit/rel_tol: The relative tolerance for an implicit timestepping algorithm.
-   * - /timestepping/implicit/local_tolerance_refresh: For models with per-dof absolute tolerances
-   *   (def::HasAbsTolerances), restart IDA with fresh tolerances once some dof needs one tighter by this factor
-   *   (default 4; <= 1 keeps the initial set).
-   * - /timestepping/implicit/iterative_refinement: Whether UMFPACK refines its direct solves (default true).
-   * - /timestepping/implicit/max_steps: The maximal number of internal SUNDIALS steps between outputs.
-   * - /timestepping/implicit/max_non_linear_iterations: The maximal number of nonlinear IDA iterations.
-   * - /timestepping/implicit/jacobian_diagnostics: Whether the Jacobian diagnostics tables are written (default false).
-   * - /timestepping/explicit/dt: The timestep size for an explicit timestepping algorithm.
-   * - /timestepping/explicit/minimal_dt: The minimal timestep size for an explicit timestepping algorithm.
-   * - /timestepping/explicit/maximal_dt: The maximal timestep size for an explicit timestepping algorithm.
-   * - /timestepping/explicit/abs_tol: The absolute tolerance for an explicit timestepping algorithm.
-   * - /timestepping/explicit/rel_tol: The relative tolerance for an explicit timestepping algorithm.
-   * - /timestepping/explicit/detect_stuck: Whether repeated-time callback detection is enabled.
-   * - /timestepping/explicit/error_control: Adams-Bashforth-Moulton steppers only. Control the local error of the
-   *   explicit steps with explicit/abs_tol and rel_tol, estimated by the predictor-corrector difference: a step that
-   *   fails it is retaken at half the step size (down to explicit/minimal_dt), and the step size grows back to
-   *   explicit/dt once the error stays small (default true; false: fixed step explicit/dt). The estimate is reported
-   *   at /output/verbosity >= 2 either way.
+   * Reads the /timestepping parameters (see abstract_timestepper.hh for the list), and implements run(), which
+   * handles snapshots and restarts around the stepper's run_segment().
    *
-   * Flow snapshots and restarts (all optional; see run() and documentation/getting_started/snapshots.md):
-   * - /timestepping/snapshots/k: list of RG scales at which to write a snapshot (needs /physical/Lambda).
-   * - /timestepping/snapshots/t: list of RG times at which to write a snapshot.
-   * - /timestepping/snapshots/snap_to_output_grid: move snapshot times onto the output grid (default true).
-   * - /timestepping/snapshots/stop_after_last: end the run after its last snapshot (default false).
-   * - /restart/file: a snapshot to continue the flow from, instead of starting at t_start.
-   *
-   * Additionally, the following parameters are being used:
-   * - /output/verbosity: At 0 no progress is printed; 1 reports residual work; 2 adds Jacobian, linear-solver, and
-   * solver diagnostics; 3 adds factorization and output work. Levels 1--4 are aggregated by the run reporter.
-   * Level 5 prints every progress event and is intended only for debugging.
-   *
-   * Output settings, including the optional RG scale, are obtained from the typed ReportPort owned by the
-   * OutputSession. Timesteppers submit ProgressEvents directly; they never write to a stream.
-   *
-   * @tparam VectorType_ The type of the vector used in the timestepping algorithm. Must satisfy
-   * SupportedVectorType: dealii::Vector<double> and dealii::BlockVector<double>, plus the PETSc MPI
-   * vectors in an MPI build.
-   * @tparam SparseMatrixType_ The type of the sparse matrix used in the timestepping algorithm. This depends on the
-   * assembler used in the computation.
-   * @tparam dim_ The dimensionality of the spatial discretization.
+   * @tparam VectorType_ vector type of the assembler: dealii::Vector<double>, or a PETSc MPI vector in an MPI build.
+   * @tparam SparseMatrixType_ sparse matrix type of the assembler.
+   * @tparam dim_ spatial dimension; 0 for a pure-variables system.
    */
   template <typename VectorType_, typename SparseMatrixType_, uint dim_> class AbstractTimestepper
   {
@@ -194,15 +249,13 @@ namespace DiFfRG
 
   public:
     /**
-     * @brief Construct a new Abstract Timestepper object
+     * @brief Construct without mesh adaptation.
      *
-     * @param config The ConfigTree object must contain a /timestepping/ section with all necessary parameters.
-     * @param assembler The assembler object is used to assemble the system matrices and vectors for the timestepping
-     * algorithm.
-     * @param data_out The data output object is used to write the output data to disk.
-     * @param adaptor The adaptor object is used to adapt the mesh and the solution vector to the new mesh. The
-     * overload without it uses NoAdaptivity, i.e. no mesh adaptation.
-     * @param implicit_stepper, explicit_stepper which /timestepping/ sections this stepper reads.
+     * @param config parameters; see abstract_timestepper.hh.
+     * @param assembler assembles residuals and Jacobians.
+     * @param data_out where the output frames go.
+     * @param implicit_stepper whether to read /timestepping/implicit.
+     * @param explicit_stepper whether to read /timestepping/explicit.
      */
     AbstractTimestepper(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                         OutputSession_impl<dim, VectorType> &data_out, const bool implicit_stepper,
@@ -213,6 +266,10 @@ namespace DiFfRG
       read_parameters();
     }
 
+    /**
+     * @brief Construct with a mesh adaptor, which is called between steps (where the stepper supports it, see
+     * abstract_timestepper.hh).
+     */
     AbstractTimestepper(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                         OutputSession_impl<dim, VectorType> &data_out, AbstractAdaptor<VectorType> &adaptor,
                         const bool implicit_stepper, const bool explicit_stepper)
@@ -233,13 +290,14 @@ namespace DiFfRG
         impl.rel_tol = config.get_double_or_warn("/timestepping/implicit/rel_tol", 1e-7);
         impl.local_tolerance_refresh = config.get_double("/timestepping/implicit/local_tolerance_refresh", 4.);
         impl.iterative_refinement = config.get_bool("/timestepping/implicit/iterative_refinement", true);
+        impl.warm_restart = config.get_bool("/timestepping/implicit/warm_restart", true);
+        impl.reuse_jacobian = config.get_bool("/timestepping/implicit/reuse_jacobian", true);
 
         // Stuff you can set, but defaults are reasonable
         impl.dt = config.get_double("/timestepping/implicit/dt", 1e-4);
-        impl.minimal_dt = config.get_double("/timestepping/implicit/minimal_dt", 1e-8);
+        impl.minimal_dt = config.get_double("/timestepping/implicit/minimal_dt", 1e-14);
         impl.maximal_dt = config.get_double("/timestepping/implicit/maximal_dt", 1.);
-        impl.max_steps = config.get_uint("/timestepping/implicit/max_steps", 1e6);
-        impl.max_non_linear_iterations = config.get_uint("/timestepping/implicit/max_non_linear_iterations", 10);
+        impl.max_non_linear_iterations = config.get_uint("/timestepping/implicit/max_non_linear_iterations", 3);
         impl.jacobian_diagnostics = config.get_bool("/timestepping/implicit/jacobian_diagnostics", false);
         impl.ida_callback_trace = config.get_bool("/timestepping/implicit/ida_callback_trace", false);
         impl.ida_callback_trace_min_t = config.get_double("/timestepping/implicit/ida_callback_trace_min_t", 0.0);
@@ -337,10 +395,8 @@ namespace DiFfRG
      *
      * - **Snapshots.** At every time of /timestepping/snapshots (see SnapshotSchedule) the flow is
      *   split into segments, and the state at each boundary is written to
-     *   `<run name>_snapshot_<nnn>.h5` next to the run's other output. Splitting, rather than
-     *   sampling at an output step, is what makes the snapshot exact for every stepper: at an output
-     *   step the hybrid steppers only hold interpolated variables, while every stepper returns its
-     *   accepted state at the end of a segment. The price is one solver restart per snapshot.
+     *   `<run name>_snapshot_<nnn>.h5` next to the run's other output. The stepper is restarted at
+     *   each snapshot, which costs one solver restart per snapshot.
      * - **Restart.** If /restart/file names a snapshot, the first call to run() restores the mesh,
      *   the state, the model's history-dependent state and the adaptation schedule from it, logs
      *   every configuration entry that differs from the snapshot's, and starts at the snapshot's
@@ -381,14 +437,13 @@ namespace DiFfRG
                                  "/output/folder, or remove the old snapshots.");
       }
 
-      // A failed flow (a FlowAbort from the model, a non-finite residual, a stuck step) leaves the
+      // A failed flow (an exception from the model, a non-finite residual, a stuck step) leaves the
       // stepper without draining, but callers routinely read the run's files right after catching
       // it -- e.g. to find where the flow diverged. Drain here, once for every stepper: this pushes
       // rank 0's pending frames to disk (its async writer must not race a reader in the same
       // process; HDF5 is not thread safe in this build) and holds the other ranks until it has.
-      // No extra frame is written: the steppers output every accepted step already, and the state
-      // at the failure is often non-finite. The barrier assumes the failure is collective, which
-      // flow-driven failures are, since every rank computes a bitwise identical flow.
+      // No extra frame is written: the state at the failure is often non-finite. The barrier assumes the failure is
+      // collective, which flow-driven failures are, since every rank computes a bitwise identical flow.
       try {
         double t = t_start;
         for (const double t_snapshot : snapshot_times) {
@@ -408,15 +463,33 @@ namespace DiFfRG
       }
     }
 
+    /// Whether this stepper reads /timestepping/implicit.
     bool is_implicit() const { return m_is_implicit; }
+    /// Whether this stepper reads /timestepping/explicit.
     bool is_explicit() const { return m_is_explicit; }
 
   protected:
+    /// Throw unless the mesh adaptor is NoAdaptivity; for steppers that cannot adapt the mesh.
+    void require_no_adaptor(const std::string &stepper) const
+    {
+      if (dynamic_cast<const NoAdaptivity<VectorType> *>(&adaptor) == nullptr)
+        throw std::invalid_argument(stepper + " does not support mesh adaptation; construct it without an adaptor.");
+    }
+
+    /// Throw if the flow has variables; for steppers that integrate only the FE/FV unknowns.
+    void require_no_variables(const AbstractFlowingVariables<NumberType, VectorType> &state,
+                              const std::string &stepper) const
+    {
+      if (state.data().n_blocks() > 1 && state.variable_data().size() != 0)
+        throw std::invalid_argument(stepper + " does not integrate variables; use a SUNDIALS IDA stepper (with or "
+                                              "without an explicit part) instead.");
+    }
+
     /**
      * @brief Any derived class must implement this method to run the timestepping algorithm.
      *
-     * It must return the accepted state at exactly @p t_stop in @p initial_condition, because
-     * run() writes snapshots from it. Called once per segment, i.e. possibly several times per
+     * It must return the state at @p t_stop in @p initial_condition, because run() writes snapshots
+     * from it. Called once per segment, i.e. possibly several times per
      * run() with consecutive intervals.
      *
      * @param initial_condition The flowing variables object that contains the initial condition.
@@ -443,7 +516,7 @@ namespace DiFfRG
       assembler.reinit_solution_view(spatial_view);
       spatial_view.refresh(state.spatial_data());
       if (has_variables) {
-        reinit_variables_view(variables_view, data.block(1).size(), assembler.get_communicator());
+        internal::reinit_variables_view(variables_view, data.block(1).size(), assembler.get_communicator());
         variables_view.refresh(data.block(1));
       }
 
@@ -468,6 +541,7 @@ namespace DiFfRG
           }
           assembler.save_model_state(snapshot.model);
           snapshot.last_adaptation_time = adaptor.last_adaptation_time();
+          adaptor.save_state(snapshot.adaptor);
           snapshot.config_json = json::serialize(static_cast<json::value>(config));
           DiFfRG::write_snapshot(path, snapshot);
           log.info("Wrote the snapshot at t = {} (k = {}) to '{}'.", t, snapshot.k, path.string());
@@ -548,6 +622,7 @@ namespace DiFfRG
       data.collect_sizes();
 
       if (std::isfinite(snapshot.last_adaptation_time)) adaptor.set_last_adaptation_time(snapshot.last_adaptation_time);
+      adaptor.load_state(snapshot.adaptor);
       return snapshot.t;
     }
 
@@ -578,7 +653,10 @@ namespace DiFfRG
        * inside IDA the Newton iteration corrects the solve's error anyway (2D O(2) KT flow, 80^2: 16.3 -> 12.8 s),
        * but a badly scaled system then only gets ~1e-7 relative accuracy per solve. */
       bool iterative_refinement;
-      uint max_steps;
+      /// IDA steppers: continue IDA at its order and step size after a mesh adaptation (see IDADriver).
+      bool warm_restart;
+      /// IDA steppers: when only IDA's step size or order changed, adapt the Jacobian instead of reassembling it.
+      bool reuse_jacobian;
       uint max_non_linear_iterations;
       /** Enables the `<run>_jacobian_diagnostics.csv` tables. Off by default because the records
        * are not free: each one costs a full sweep over the assembled Jacobian and, for factorizing

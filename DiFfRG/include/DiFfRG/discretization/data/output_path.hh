@@ -9,16 +9,33 @@
 
 namespace DiFfRG
 {
+  /// Whether a temporary output folder is deleted when the last OutputPath referring to it is destroyed.
   enum class TemporaryRetention { remove_on_destruction, keep };
 
-  /** Shared immutable owner and validated filesystem layout for one output run. */
+  /**
+   * @brief Where a run writes its files: a root folder, a run name, and a fields subfolder.
+   *
+   * Files are named `<root>/<run_name>...`; the per-frame VTK files go to `<root>/<field_directory>/`.
+   */
   class OutputPath
   {
   public:
     OutputPath() = delete;
+    /**
+     * @brief Paths from explicit values.
+     *
+     * @param root Output folder (made absolute).
+     * @param run_name Prefix of all files; a single path component.
+     * @param field_directory Folder of the VTK frames, relative to @p root, without "..".
+     */
     OutputPath(std::filesystem::path root, std::string run_name, std::filesystem::path field_directory = "output");
+    /**
+     * @brief Paths from the parameters: `/output/folder` (default "./"), `/output/name` (default "output") and
+     * `/output/field_directory` (default: the run name).
+     */
     explicit OutputPath(const ConfigTree &config);
 
+    /// A new, uniquely named folder in the system's temporary directory.
     static OutputPath temporary(TemporaryRetention retention = TemporaryRetention::remove_on_destruction,
                                 std::string run_name = "output", std::filesystem::path field_directory = "output");
 
@@ -27,19 +44,26 @@ namespace DiFfRG
     OutputPath(OutputPath &&) noexcept = default;
     OutputPath &operator=(OutputPath &&) noexcept = default;
 
+    /// The absolute output folder.
     const std::filesystem::path &root() const noexcept { return root_path; }
+    /// The run name.
     const std::string &run_name() const noexcept { return output_name; }
+    /// The folder of the VTK frames, relative to root().
     const std::filesystem::path &field_directory() const noexcept { return fields_path; }
 
+    /// `root() / relative`; throws if @p relative is absolute or contains "..".
     std::filesystem::path resolve(std::filesystem::path relative) const;
+    /// `root() / (run_name() + extension)`, e.g. run_file(".h5").
     std::filesystem::path run_file(std::string_view extension) const;
-    /** Companion of run_file carrying an extra suffix: <run name><name_suffix><extension>. */
+    /// `root() / (run_name() + name_suffix + extension)`.
     std::filesystem::path run_file(std::string_view name_suffix, std::string_view extension) const;
+    /// Paths for another run in the subfolder @p directory of root(), sharing this one's lifetime.
     OutputPath child(std::filesystem::path directory, std::string run_name,
                      std::filesystem::path field_directory = "output") const;
-    /** Collective over MPI_COMM_WORLD: rank 0 copies, every rank returns once the copy is done and throws if it failed. */
+    /// Copy the folder tree @p source into root(). Collective: rank 0 copies, all ranks throw if it failed.
     void copy_tree_from(const std::filesystem::path &source) const;
 
+    /// @p path, normalized; throws if it is empty, absolute or contains "..".
     static std::filesystem::path checked_relative(std::filesystem::path path, std::string_view kind = "output path");
 
   private:

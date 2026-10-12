@@ -7,53 +7,39 @@
 #include <deal.II/lac/petsc_vector.h>
 #endif
 
+/**
+ * @file eigen.hh
+ * @brief Copy vectors between deal.II and Eigen (`Eigen::VectorXd`), entry by entry.
+ */
+
 namespace DiFfRG
 {
-  /**
-   * @brief Converts a dealii vector to an Eigen vector
-   *
-   * @param dealii a dealii vector
-   * @param eigen an Eigen vector
-   */
+  /// Copy `dealii` into `eigen`, resizing `eigen` if needed.
   void dealii_to_eigen(const dealii::Vector<double> &dealii, Eigen::VectorXd &eigen);
 
-  /**
-   * @brief Converts a dealii block vector to an Eigen vector
-   *
-   * @param dealii a dealii block vector
-   * @param eigen an Eigen vector
-   */
+  /// Copy the concatenated blocks of `dealii` into `eigen`, resizing `eigen` if needed.
   void dealii_to_eigen(const dealii::BlockVector<double> &dealii, Eigen::VectorXd &eigen);
 
-  /**
-   * @brief Converts an Eigen vector to a dealii vector
-   *
-   * @param eigen an Eigen vector
-   * @param dealii a dealii vector
-   */
+  /// Copy `eigen` into `dealii`, resizing `dealii` if needed.
   void eigen_to_dealii(const Eigen::VectorXd &eigen, dealii::Vector<double> &dealii);
 
-  /**
-   * @brief Converts an Eigen vector to a dealii block vector
-   *
-   * @param eigen an Eigen vector
-   * @param dealii a dealii block vector
-   */
+  /// Copy `eigen` into the blocks of `dealii`; throws if the total sizes differ (blocks are not resized).
   void eigen_to_dealii(const Eigen::VectorXd &eigen, dealii::BlockVector<double> &dealii);
 
 #ifdef DEAL_II_WITH_PETSC
   /**
-   * @brief Converts a process-local PETSc vector to an Eigen vector
+   * @brief Copy a process-local PETSc vector into `eigen`.
    *
-   * Only for vectors that hold every entry on this rank (MPI_COMM_SELF, a complete index set), such as
-   * the replicated extra variables of the hybrid steppers; throws for a partitioned vector.
+   * Only for vectors living on a single rank (a one-process communicator such as MPI_COMM_SELF), e.g. the
+   * replicated variables of the hybrid steppers; throws for a vector distributed over several ranks.
    */
   void dealii_to_eigen(const dealii::PETScWrappers::MPI::Vector &dealii, Eigen::VectorXd &eigen);
 
   /**
-   * @brief Converts an Eigen vector to a process-local PETSc vector
+   * @brief Copy `eigen` into a process-local PETSc vector.
    *
-   * Same restriction as the reverse direction. An unsized vector is created on MPI_COMM_SELF.
+   * If the sizes differ, `dealii` is re-created on MPI_COMM_SELF with the size of `eigen`, replacing its previous
+   * layout. Throws if `dealii` already has the right size but is distributed over several ranks.
    */
   void eigen_to_dealii(const Eigen::VectorXd &eigen, dealii::PETScWrappers::MPI::Vector &dealii);
 #endif

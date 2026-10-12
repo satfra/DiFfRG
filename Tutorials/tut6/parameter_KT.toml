@@ -33,7 +33,6 @@ minimal_dt = 1e-4
 maximal_dt = 0.1
 abs_tol = 1e-13
 rel_tol = 1e-7
-max_steps = 5e6
 
 [output]
 vtk = false

@@ -66,7 +66,7 @@ bool run(const ConfigTree &config, const OutputPath &output_path,
   HDF5Input hdf5_input(output_path.run_file(".h5").string());
   const auto m2A = hdf5_input.load_scalar<double>("m2A").back();
   std::vector<double> Zc(p_grid_size);
-  hdf5_input.load_map("Zc", Zc.data());
+  hdf5_input.load_map("Zc", Zc);
 
   // Predicate for the m2A search. Two modes, selected by /tuning/m2A/zc_target:
   //   target = 0: reject only the diverged (past-critical) side, so the search boundary is the

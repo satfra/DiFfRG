@@ -18,6 +18,7 @@ namespace DiFfRG
 
     namespace internal
     {
+      /// Split @p str at commas.
       inline std::vector<std::string> string_to_substrings_array(const std::string str)
       {
         std::vector<std::string> array;
@@ -27,6 +28,7 @@ namespace DiFfRG
           array.push_back(buf);
         return array;
       }
+      /// Parse "min:step:max"; throws if there are not exactly three numbers.
       inline std::array<double, 3> string_to_range(const std::string str)
       {
         std::vector<double> vec;
@@ -42,12 +44,19 @@ namespace DiFfRG
       }
     } // namespace internal
 
+    /**
+     * @brief One subrange [min, max] of a grid axis, divided into cells of width at most step.
+     *
+     * Requires min < max and 0 < step ≤ max - min (throws otherwise).
+     */
     class GridAxis
     {
     public:
       GridAxis() = delete;
+      /// From the three numbers.
       GridAxis(double min_, double step_, double max_) : min(min_), max(max_), step(step_) { validate(); };
 
+      /// From a string "min:step:max", e.g. "0:0.1:1".
       GridAxis(std::string json_string)
       {
         auto subrange = internal::string_to_range(json_string);
@@ -58,22 +67,33 @@ namespace DiFfRG
         validate();
       };
 
+      /// The axis string used for a missing axis and written by ConfigurationMesh::get_defaults().
       static std::string get_default_range() { return "0:1e-4:7e-3,7e-3:5e-4:9e-3,9e-3:1e-3:1.1e-2"; }
 
+      /// Lower end.
       double min;
+      /// Upper end.
       double max;
+      /// Maximal cell width.
       double step;
 
+      [[deprecated("Use get_step_widths")]] std::vector<double> get_stepwiths(const bool origin_cell_centered = false,
+                                                                          const uint refinement = 0) const
+      {
+        return get_step_widths(origin_cell_centered, refinement);
+      }
+
       /**
-       * Return a vector of uniform step widths covering [min, max].
-       * If the configured step fits the interval (within is_close) it is used;
-       * otherwise the count is increased by one and the width is adjusted.
+       * @brief The cell widths of this subrange: \f$n\f$ equal widths \f$h\f$.
        *
-       * If @p origin_cell_centered is true, choose the smallest cell count whose adjusted width is less than the
-       * configured width and which permits the first final cell to be centered on the origin after @p refinement
-       * levels of global refinement. The range must start at zero in that case.
+       * Normally \f$n = \lfloor (max - min)/step \rfloor\f$ and \f$h = step\f$ if \f$min + n\,step = max\f$
+       * (up to rounding); otherwise \f$n\f$ is increased by one and \f$h = (max - min)/n < step\f$.
+       *
+       * If @p origin_cell_centered (requires min = 0, throws otherwise): the smallest \f$n\f$ with
+       * \f$h = max / (n - 2^{-r-1}) < step\f$, \f$r\f$ = @p refinement. The cells then cover
+       * \f$[-h\,2^{-r-1}, max]\f$, so that after \f$r\f$ global refinements the first cell is centered on 0.
        */
-      std::vector<double> get_stepwiths(const bool origin_cell_centered = false, const uint refinement = 0) const
+      std::vector<double> get_step_widths(const bool origin_cell_centered = false, const uint refinement = 0) const
       {
         if (origin_cell_centered) {
           if (!is_close(min, 0.0))
@@ -112,6 +132,7 @@ namespace DiFfRG
     };
     namespace internal
     {
+      /// Throw unless each subrange starts where the previous one ends.
       inline void check_ranges_consistency(const std::vector<GridAxis> &ranges)
       {
         for (uint i = 1; i < ranges.size(); ++i)
@@ -119,6 +140,7 @@ namespace DiFfRG
             throw std::runtime_error("Your range definition is inconsistent!");
       }
 
+      /// Append all elements of @p range to @p to_append.
       template <typename T, typename J> void append_range(T &to_append, const J &range)
       {
         for (const auto &element : range) {
@@ -127,17 +149,43 @@ namespace DiFfRG
       }
     } // namespace internal
 
+    // clang-format off
+    /**
+     * @brief A rectangular grid in field space, each axis a sequence of subranges with their own cell width.
+     *
+     * Each axis is a string of comma-separated subranges `min:step:max`, which must be contiguous (each `min` equals
+     * the previous `max`). Each subrange is divided into equal cells of width at most `step`, see
+     * GridAxis::get_step_widths. Example: `"0:0.01:0.1,0.1:0.05:1"`.
+     *
+     * | Key                                  | Type   | Default (if missing) | Meaning |
+     * |--------------------------------------|--------|----------------------|---------|
+     * | `/discretization/grid/x_grid`        | string | see below (warns)    | first axis |
+     * | `/discretization/grid/y_grid`        | string | see below (warns)    | second axis (dim ≥ 2) |
+     * | `/discretization/grid/z_grid`        | string | see below (warns)    | third axis (dim = 3) |
+     * | `/discretization/grid/refine`        | uint   | 0                    | number of global refinements of the mesh (each halves all cells) |
+     *
+     * A missing axis is GridAxis::get_default_range(), "0:1e-4:7e-3,7e-3:5e-4:9e-3,9e-3:1e-3:1.1e-2", as written by
+     * get_defaults().
+     *
+     * @tparam dim Field-space dimension, 1 to 3.
+     */
+    // clang-format on
     template <int dim> class ConfigurationMesh
     {
     public:
+      /// What a mesh needs to build the coarse grid.
       struct TriangulationData {
+        /// Lower corner of the domain.
         dealii::Point<dim, double> lower_left;
+        /// Upper corner of the domain.
         dealii::Point<dim, double> upper_right;
+        /// Per axis, the widths of the coarse cells in order.
         std::vector<std::vector<double>> step_sizes = std::vector<std::vector<double>>(dim);
       };
 
       ConfigurationMesh() = delete;
 
+      /// From explicit axes: @p refinement and one std::vector<GridAxis> per dimension.
       template <typename... Grids> ConfigurationMesh(unsigned int refinement, Grids... grids_args) : refine(refinement)
       {
         static_assert(sizeof...(Grids) == dim, "Number of grids must match dimension");
@@ -146,6 +194,7 @@ namespace DiFfRG
         grids = {grids_args...};
       }
 
+      /// Read the keys of the table above; throws if a subrange is invalid or the subranges are not contiguous.
       ConfigurationMesh(const DiFfRG::ConfigTree &config)
       {
         static_assert(dim >= 1 && dim <= 3, "ConfigurationMesh only supports dim = 1, 2, 3");
@@ -154,7 +203,7 @@ namespace DiFfRG
                                                        "/discretization/grid/z_grid"};
 
         for (int i = 0; i < dim; ++i) {
-          auto subranges = internal::string_to_substrings_array(config.get_string_or_warn(grid_names[i], "0:0.1:1"));
+          auto subranges = internal::string_to_substrings_array(config.get_string_or_warn(grid_names[i], GridAxis::get_default_range()));
           for (const auto &subrange_str : subranges)
             grids[i].emplace_back(subrange_str);
           internal::check_ranges_consistency(grids[i]);
@@ -163,6 +212,7 @@ namespace DiFfRG
         refine = config.get_uint("/discretization/grid/refine", 0);
       }
 
+      /// A JSON parameter-file fragment with all keys (axes set to GridAxis::get_default_range()).
       static std::string get_defaults()
       {
         std::string json_str = R"({
@@ -195,10 +245,11 @@ namespace DiFfRG
       }
 
       /**
-       * Return mutually consistent bounds and step widths for triangulation construction.
+       * @brief Domain corners and coarse cell widths.
        *
-       * If @p origin_cell_centered is true, the first final cell is centered on the origin along every axis.
-       * All configured axes must start at zero in that case.
+       * If @p origin_cell_centered (all axes must start at 0): the first cell of every axis is chosen such that after
+       * `refine` refinements the first cell is centered on 0, and lower_left is shifted below 0 accordingly; see
+       * GridAxis::get_step_widths.
        */
       inline TriangulationData get_triangulation_data(const bool origin_cell_centered = false) const
       {
@@ -208,7 +259,7 @@ namespace DiFfRG
           data.upper_right[i] = grids[i].back().max;
           for (std::size_t subrange = 0; subrange < grids[i].size(); ++subrange) {
             const bool center_first_subrange = origin_cell_centered && subrange == 0;
-            internal::append_range(data.step_sizes[i], grids[i][subrange].get_stepwiths(center_first_subrange, refine));
+            internal::append_range(data.step_sizes[i], grids[i][subrange].get_step_widths(center_first_subrange, refine));
           }
         }
 
@@ -222,16 +273,26 @@ namespace DiFfRG
         return data;
       }
 
-      inline std::vector<std::vector<double>> get_step_withs_for_triangulation() const
+      /// The coarse cell widths per axis (not origin-centered).
+      inline std::vector<std::vector<double>> get_step_widths_for_triangulation() const
       {
         return get_triangulation_data().step_sizes;
       }
+      [[deprecated("Use get_step_widths_for_triangulation")]] std::vector<std::vector<double>>
+      get_step_withs_for_triangulation() const
+      {
+        return get_step_widths_for_triangulation();
+      }
 
+      /// Lower corner of the domain (not origin-centered).
       inline dealii::Point<dim, double> get_lower_left() const { return get_triangulation_data().lower_left; }
 
+      /// Upper corner of the domain.
       inline dealii::Point<dim, double> get_upper_right() const { return get_triangulation_data().upper_right; }
 
+      /// The subranges of each axis.
       std::array<std::vector<GridAxis>, dim> grids;
+      /// Number of global refinements (`/discretization/grid/refine`).
       uint refine;
     };
 

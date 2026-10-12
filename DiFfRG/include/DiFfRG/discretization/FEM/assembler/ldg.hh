@@ -1,9 +1,12 @@
 #pragma once
 
 // standard library
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 
 // external libraries
 #include <deal.II/base/quadrature_lib.h>
@@ -41,24 +44,61 @@ namespace DiFfRG
     using namespace dealii;
     using std::array, std::vector, std::unique_ptr;
 
+    // clang-format off
     /**
-     * @brief The LDG assembler: the FE functions (level 0) plus up to three LDG levels, level k built from
-     * level k - 1 by the model's ldg_flux / ldg_source and a mass-matrix solve.
+     * @brief Assembles the local discontinuous Galerkin discretization (LDG::Discretization): DG for the FE functions
+     * \f$u\f$, whose flux and source may read up to three auxiliary levels \f$L_1, L_2, L_3\f$ computed from \f$u\f$.
      *
+     * ### Levels
+     * With \f$L_0 = u\f$, level \f$k \ge 1\f$ (FE subsystem \f$k\f$) is the DG approximation of
+     * \f$\nabla\cdot F^{(k)}(L_{k-1}) + s^{(k)}(L_{k-1})\f$: for every test function \f$\phi\f$ of subsystem \f$k\f$,
+     * \f[
+     *   \int_\Omega \phi\, L_k = \sum_K \int_K \Big[ -\nabla\phi \cdot F^{(k)} + \phi\, s^{(k)} \Big]
+     *     + \sum_{f \subset \partial\Omega} \int_f \phi\, \hat F_b^{(k)} \cdot n
+     *     + \sum_{f\ \mathrm{interior}} \int_f [\![\phi]\!]\, \hat F^{(k)} \cdot n\,,
+     * \f]
+     * with the notation of DG::Assembler. This is solved for \f$L_k\f$ with the exact inverse of the (cell-local)
+     * mass matrix. In one dimension, \f$F^{(1)} = u\f$, \f$s^{(1)} = 0\f$ gives \f$L_1 \approx \partial_x u\f$.
+     * The levels are not time-evolved; they are rebuilt from \f$u\f$ for every residual and jacobian.
+     *
+     * ### Residual
+     * The residual of the FE functions is that of DG::Assembler, with flux and source evaluated on all levels: the
+     * per-point hooks see "fe_functions" (\f$u\f$) and "LDG1", "LDG2", "LDG3" (as many as there are levels), but no
+     * derivatives or hessians.
+     *
+     * ### Model hooks
+     * Those of DG::Assembler (mass, flux, source or evaluate_batch, boundary_numflux, numflux, the indicators, the
+     * extractor and readout hooks), plus per level \f$k\f$: ldg_flux<k> and ldg_source<k> (or ldg_evaluate_batch<k>),
+     * ldg_numflux<k> (e.g. def::LDGUpDownFluxes: per component, the flux of the trace on a chosen side) and
+     * ldg_boundary_numflux<k> (def::FlowBoundaries: the level's own flux). The ComponentDescriptor declares which
+     * components of level \f$k\f$ read which of level \f$k - 1\f$ (add_dependency), and may declare a level linear
+     * and homogeneous in the one below (set_jacobian_constant): its matrix is then built once and reused.
+     *
+     * ### Jacobian
+     * \f$J = w \big( J_{uu} + \sum_k J_{uL_k}\, \partial L_k/\partial u \big)\f$ + mass terms, where
+     * \f$\partial L_k / \partial u\f$ is chained through the levels below.
+     *
+     * ### Parameters
+     * | Key                                          | Type | Default              | Meaning |
+     * |----------------------------------------------|------|----------------------|---------|
+     * | `/discretization/overintegration`            | uint | 0                    | quadrature QGauss(\f$p + 1 +\f$ overintegration) on cells and faces |
+     * | `/discretization/batched/max_stacked_points` | uint | 256 MiB / point size | points per automatic-differentiation evaluation of a jacobian |
+     *
+     * ### Implementation
      * Each level, and the main level, is assembled in three phases, as in CG::Assembler:
      *  1. gather: the values of the previous level (main level: of all levels) at every quadrature point of the
      *     cells, boundary faces and interior faces (both traces), into a batch;
      *  2. evaluate: ldg_evaluate_batch<k> (main level: evaluate_batch) and the numerical fluxes over the whole
-     *     batch, or their seed-stacked AD jacobians, see model/batch.hh; each interior face once;
+     *     batch, or their jacobians (see model/batch.hh); each interior face once;
      *  3. scatter: every cell contracts its cell term and its share of each of its faces into its own rows
      *     (internal::ColoredCells).
      *
-     * The jacobian is J = weight (J_uu + sum_k J_ug[k] J_gu[k]) + mass terms, with J_gu[k] = d(level k)/du built from
-     * the level jacobians by the chain rule and cached while the model declares them constant.
+     * Serial only, see LDG::Discretization.
      *
-     * Config: /discretization/batched/max_stacked_points bounds the size of one AD evaluation of the
-     * jacobian (default: 256 MB of AD inputs and outputs), see DiFfRG::internal::seed_stacked_jacobian.
+     * @tparam Discretization_ An LDG::Discretization.
+     * @tparam Model_ The model; by default that of the discretization.
      */
+    // clang-format on
     template <typename Discretization_,
               typename Model_ = typename DiFfRG::internal::assembler_model_of<Discretization_>::type>
     class Assembler
@@ -107,7 +147,7 @@ namespace DiFfRG
                                                            "fe_hessians", "extractors", "variables", "potential",
                                                            "potential_gradient", "potential_hessian">>(t);
         else
-          throw std::runtime_error("Only <= 3 LDG subsystems are supported.");
+          throw std::runtime_error("LDG supports 2 to 4 FE subsystems, i.e. 1 to 3 levels.");
       }
 
       template <typename... T> auto ref_conv(std::tuple<T &...> &t) const
@@ -119,10 +159,12 @@ namespace DiFfRG
         else if constexpr (stencil == 4)
           return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "LDG1", "LDG2", "LDG3">>(t);
         else
-          throw std::runtime_error("Only <= 3 LDG subsystems are supported.");
+          throw std::runtime_error("LDG supports 2 to 4 FE subsystems, i.e. 1 to 3 levels.");
       }
 
     public:
+      /// Set up quadrature, the mass matrices and the sparsity patterns of all levels; @p discretization and
+      /// @p model must outlive the assembler.
       Assembler(Discretization &discretization, Model &model, const ConfigTree &config)
           : Base(discretization, model, config, "LDG"),
             quadrature(fe.degree + 1 + config.get_uint("/discretization/overintegration", 0)),
@@ -208,6 +250,7 @@ namespace DiFfRG
         }
       }
 
+      /// Rebuild constraints, mass matrices, sparsity patterns and cell lists after the mesh changed.
       virtual void reinit() override
       {
         const auto init_mass = [&](uint i) {
@@ -239,6 +282,7 @@ namespace DiFfRG
             sol_vector[i].reinit(dofs_per_component);
             sol_vector_tmp[i].reinit(dofs_per_component);
             ldg_matrix_built[i] = false;
+            level_jacobian_built[i] = false;
           }
         };
 
@@ -284,6 +328,7 @@ namespace DiFfRG
         timings_reinit.push_back(timer.wall_time());
       }
 
+      /// Rebuild the jacobian sparsity of the FE functions, e.g. when the dofs the extractors read have changed.
       void rebuild_jacobian_sparsity()
       {
         build_ldg_sparsity(sparsity_pattern_jacobian, *(dof_handler_list[0]), *(dof_handler_list[0]), stencil, true);
@@ -292,14 +337,13 @@ namespace DiFfRG
       }
 
       /**
-       * @brief The model's cell_indicator integrated over each cell, plus its face_indicator integrated over each
-       * interior face, added to the two cells of the face; every level's values at the points.
-       *
-       * Each interior face is evaluated once; then every owned cell adds its own integral and its shares of its faces
-       * into its own entry.
+       * @brief As DG::Assembler::refinement_indicator (cell_indicator plus face_indicator, with the same factor 2 for
+       * cells touching the boundary), but the indicators see the values of every level instead of derivatives.
        */
-      void refinement_indicator(Vector<double> &indicator, const VectorType &solution_global)
+      void refinement_indicator(Vector<double> &indicator, const VectorType &solution)
       {
+        const auto state = this->constrained(solution);
+        const VectorType &solution_global = state.u();
         constexpr uint n_sub = Components::count_fe_subsystems();
         struct IndicatorScratch {
           IndicatorScratch(const Mapping<dim> &mapping, const vector<const DoFHandler<dim> *> &dofh,
@@ -380,15 +424,18 @@ namespace DiFfRG
       }
 
       /**
-       * @brief Construct the mass
+       * @brief \f$w_m \int \phi_i\, m(u, \partial_t u)\f$ for the FE functions, see AbstractAssembler::mass.
        *
-       * @param residual The result is stored here.
-       * @param solution_global The current global solution.
-       * @param weight A factor to multiply the whole residual with.
+       * @param residual The mass is added here.
+       * @param solution The FE functions \f$u\f$.
+       * @param solution_dot Their time derivative \f$\partial_t u\f$.
+       * @param weight The mass weight \f$w_m\f$.
        */
-      virtual void mass(VectorType &residual, const VectorType &solution_global, const VectorType &solution_global_dot,
+      virtual void mass(VectorType &residual, const VectorType &solution, const VectorType &solution_dot,
                         NumberType weight) override
       {
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         scatter_residual(residual, [&](const size_t, Scratch &s, Vector<NumberType> &r) {
           const auto &fe_v = *s.fe_v[0];
           fe_v.get_function_values(solution_global, s.values[0]);
@@ -403,16 +450,23 @@ namespace DiFfRG
       }
 
       /**
-       * @brief Construct the system residual, i.e. Res = grad(flux) - source
+       * @brief The residual \f$w_m \int \phi_i\, m + w \big[ -\int \nabla\phi_i \cdot F + \int \phi_i\, s + \f$ face
+       * terms\f$\big]\f$, i.e. the weak form of \f$w_m m + w(\nabla\cdot F + s)\f$, with the levels rebuilt from
+       * @p solution_global first. See AbstractAssembler::residual.
        *
-       * @param residual The result is stored here.
-       * @param solution_global The current global solution.
-       * @param weight A factor to multiply the whole residual with.
+       * @param residual The residual is added here.
+       * @param solution The FE functions \f$u\f$.
+       * @param weight The residual weight \f$w\f$.
+       * @param solution_dot The time derivative \f$\partial_t u\f$.
+       * @param weight_mass The mass weight \f$w_m\f$.
+       * @param variables The variables \f$v\f$, if any.
        */
-      virtual void residual(VectorType &residual, const VectorType &solution_global, NumberType weight,
-                            const VectorType &solution_global_dot, NumberType weight_mass,
+      virtual void residual(VectorType &residual, const VectorType &solution, NumberType weight,
+                            const VectorType &solution_dot, NumberType weight_mass,
                             const VectorType &variables = VectorType()) override
       {
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         DiFfRG::internal::PhaseTimer phase(residual_times);
         // Find the EoM and extract whatever data is needed for the model; extract() builds the LDG levels.
         Extractors extracted_data{{}};
@@ -428,9 +482,9 @@ namespace DiFfRG
           cell_result.reinit(cell_batch.size(), Term::flux | Term::source);
           model.evaluate_batch(cell_result, cell_batch);
           boundary_result.reinit(boundary_batch.size(), Term::flux);
-          evaluate_boundary_numflux(model, boundary_result, boundary_normals, boundary_batch);
+          internal::evaluate_boundary_numflux(model, boundary_result, boundary_normals, boundary_batch);
           face_result.reinit(face_batch[0].size(), Term::flux);
-          evaluate_numflux(model, face_result, face_normals, face_batch[0], face_batch[1]);
+          internal::evaluate_numflux(model, face_result, face_normals, face_batch[0], face_batch[1]);
         }
         phase.lap(&PhaseTimes::evaluate);
         scatter_residual(residual, [&](const size_t k, Scratch &s, Vector<NumberType> &r) {
@@ -458,10 +512,14 @@ namespace DiFfRG
         timings_residual.push_back(phase.finish());
       }
 
-      virtual void jacobian_mass(BlockSparseMatrix<NumberType> &jacobian, const VectorType &solution_global,
-                                 const VectorType &solution_global_dot, NumberType alpha = 1.,
+      /// \f$\alpha\, \partial m/\partial(\partial_t u) + \beta\, \partial m / \partial u\f$, contracted with the shape
+      /// functions; see AbstractAssembler::jacobian_mass.
+      virtual void jacobian_mass(BlockSparseMatrix<NumberType> &jacobian, const VectorType &solution,
+                                 const VectorType &solution_dot, NumberType alpha = 1.,
                                  NumberType beta = 1.) override
       {
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         Timer timer;
         scatter_jacobian(jacobian, false, [&](const size_t, Scratch &s, LocalData &out) {
           add_mass_jacobian(s, out.blocks[0][0], solution_global, solution_global_dot, alpha, beta);
@@ -470,16 +528,24 @@ namespace DiFfRG
       }
 
       /**
-       * @brief Construct the system jacobian, i.e. dRes/du
+       * @brief \f$\partial R/\partial u\f$, including the dependence through the levels and the extractors, plus
+       * \f$\alpha\, \partial m/\partial(\partial_t u) + \beta\, \partial m/\partial u\f$. See
+       * AbstractAssembler::jacobian.
        *
-       * @param jacobian The result is stored here.
-       * @param solution_global The current global solution.
-       * @param weight A factor to multiply the whole jacobian with.
+       * @param jacobian The jacobian is added here.
+       * @param solution The FE functions \f$u\f$.
+       * @param weight The residual weight \f$w\f$.
+       * @param solution_dot The time derivative \f$\partial_t u\f$.
+       * @param alpha The weight of \f$\partial m/\partial(\partial_t u)\f$.
+       * @param beta The weight of \f$\partial m/\partial u\f$.
+       * @param variables The variables \f$v\f$, if any.
        */
-      virtual void jacobian(BlockSparseMatrix<NumberType> &jacobian, const VectorType &solution_global,
-                            NumberType weight, const VectorType &solution_global_dot, NumberType alpha, NumberType beta,
+      virtual void jacobian(BlockSparseMatrix<NumberType> &jacobian, const VectorType &solution,
+                            NumberType weight, const VectorType &solution_dot, NumberType alpha, NumberType beta,
                             const VectorType &variables = VectorType()) override
       {
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         DiFfRG::internal::PhaseTimer phase(jacobian_times);
         // Find the EoM and extract whatever data is needed for the model; extract() builds the LDG levels.
         Extractors extracted_data{{}};
@@ -489,7 +555,7 @@ namespace DiFfRG
           rebuild_ldg_vectors(solution_global);
         // The levels are current now, so the jacobians built from them are, too.
         constexpr_for<1, n_levels, 1>([&](auto k) {
-          if (!ldg_matrix_built[k] || !model.get_components().jacobians_constant(k, k - 1))
+          if (!ldg_matrix_built[k] || !model.get_components().jacobians_constant(k, 0))
             rebuild_ldg_jacobian<k>(solution_global);
         });
         phase.lap(&PhaseTimes::extract);
@@ -497,11 +563,12 @@ namespace DiFfRG
         phase.lap(&PhaseTimes::gather);
         {
           const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
-          evaluate_flux_source_jacobian(model, cell_jacobians, cell_batch, max_stacked_points, cell_workspace);
-          evaluate_boundary_numflux_jacobian(model, boundary_jacobians, boundary_normals, boundary_batch,
-                                             max_stacked_points, boundary_workspace);
-          evaluate_numflux_jacobian(model, face_jacobians, face_normals, face_batch[0], face_batch[1],
-                                    max_stacked_points, face_workspace);
+          internal::evaluate_flux_source_jacobian(model, cell_jacobians, cell_batch, max_stacked_points,
+                                                  cell_workspace);
+          internal::evaluate_boundary_numflux_jacobian(model, boundary_jacobians, boundary_normals, boundary_batch,
+                                                       max_stacked_points, boundary_workspace);
+          internal::evaluate_numflux_jacobian(model, face_jacobians, face_normals, face_batch[0], face_batch[1],
+                                              max_stacked_points, face_workspace);
         }
         require_finite(cell_jacobians);
         require_finite(boundary_jacobians);
@@ -596,9 +663,10 @@ namespace DiFfRG
       mutable array<BlockSparseMatrix<NumberType>, Components::count_fe_subsystems()> j_wg;
       mutable array<BlockSparseMatrix<NumberType>, Components::count_fe_subsystems()> j_wg_tmp;
 
-      /// Whether j_gu[k] has been built; it is rebuilt on every jacobian unless the model declares level k's
-      /// jacobian constant.
+      /// Whether j_gu[k] has been built; it is rebuilt on every jacobian unless level k is a fixed linear map of u.
       mutable array<bool, Components::count_fe_subsystems()> ldg_matrix_built{};
+      /// Whether j_wg[k] has been built; it is rebuilt with j_gu[k] unless level k is constant in level k - 1.
+      mutable array<bool, Components::count_fe_subsystems()> level_jacobian_built{};
 
       using Base::extractor_dof_indices;
       using Base::jacobian_times;
@@ -1045,26 +1113,54 @@ namespace DiFfRG
                 w * s.shape_values[side][0][i] * scalar_product(Jq.j_extr_flux(s.comp[0][i], e), normal);
       }
 
+      /// Throw if the level @p k computed by its declared-constant map differs from the assembled one.
+      template <typename V> static void require_linear_level(const uint k, const V &assembled, V mapped)
+      {
+        const double scale = assembled.linfty_norm();
+        mapped -= assembled;
+        if (mapped.linfty_norm() > 1e-8 * std::max(scale, 1e-300))
+          throw std::runtime_error("LDG level " + std::to_string(k) +
+                                   " was declared constant (set_jacobian_constant), but it is not a fixed linear map "
+                                   "of the level below: check ldg_flux, ldg_source and the boundary fluxes for "
+                                   "nonlinear or constant terms.");
+      }
+
+      /**
+       * @brief The LDG levels at @p sol. A level that is a fixed linear map of u (every level up to it declared
+       * constant, see ComponentDescriptor::set_jacobian_constant) is j_gu[k] u, the others are assembled.
+       */
       void rebuild_ldg_vectors(const VectorType &sol) const
       {
         constexpr_for<1, Components::count_fe_subsystems(), 1>([&](auto k) {
-          if (!model.get_components().jacobians_constant(k, k - 1)) {
+          const auto assemble = [&](auto &target, auto &tmp) {
             if constexpr (k == 1)
-              build_ldg_vector<k - 1, k>(sol, sol_vector[k], sol_vector_tmp[k]);
+              build_ldg_vector<k - 1, k>(sol, target, tmp);
             else
-              build_ldg_vector<k - 1, k>(sol_vector[k - 1], sol_vector[k], sol_vector_tmp[k]);
-          } else {
-            if (!ldg_matrix_built[k]) rebuild_ldg_jacobian<k>(sol);
-
-            // sol is a plain Vector; BlockSparseMatrix::vmult(BlockVector, Vector) only uses column block 0,
-            // i.e. FE component 0. Copy into the (component-wise) block structure so all couplings act.
-            sol_block = sol;
-            j_gu[k].vmult(sol_vector[k], sol_block);
+              build_ldg_vector<k - 1, k>(sol_vector[k - 1], target, tmp);
+          };
+          if (!model.get_components().jacobians_constant(k, 0)) {
+            assemble(sol_vector[k], sol_vector_tmp[k]);
+            return;
+          }
+          const bool first_use = !ldg_matrix_built[k];
+          if (first_use) rebuild_ldg_jacobian<k>(sol);
+          // sol is a plain Vector; BlockSparseMatrix::vmult(BlockVector, Vector) only uses column block 0,
+          // i.e. FE component 0. Copy into the (component-wise) block structure so all couplings act.
+          sol_block = sol;
+          j_gu[k].vmult(sol_vector[k], sol_block);
+          // A level declared constant that is not linear and homogeneous would be silently wrong from here on.
+          if (first_use) {
+            auto assembled = sol_vector[k];
+            assemble(assembled, sol_vector_tmp[k]);
+            require_linear_level(k, assembled, sol_vector[k]);
           }
         });
       }
 
-      /// j_gu[k] = d(level k)/du at the current levels: level k's own jacobian, chained through j_gu[k - 1].
+      /**
+       * @brief j_gu[k] = d(level k)/du at the current levels: level k's own jacobian j_wg[k], chained through
+       * j_gu[k - 1]. j_wg[k] is reused if level k was declared constant with respect to level k - 1.
+       */
       template <int k> void rebuild_ldg_jacobian(const VectorType &sol) const
       {
         static_assert(k > 0);
@@ -1073,7 +1169,18 @@ namespace DiFfRG
           build_ldg_jacobian<0, 1>(sol, j_gu[1], j_wg_tmp[1]);
         else {
           if (!ldg_matrix_built[k - 1]) rebuild_ldg_jacobian<k - 1>(sol);
-          build_ldg_jacobian<k - 1, k>(sol_vector[k - 1], j_wg[k], j_wg_tmp[k]);
+          if (!level_jacobian_built[k] || !model.get_components().jacobians_constant(k, k - 1)) {
+            build_ldg_jacobian<k - 1, k>(sol_vector[k - 1], j_wg[k], j_wg_tmp[k]);
+            // Reused from now on: check that it reproduces the assembled level. (If all levels up to k are constant,
+            // rebuild_ldg_vectors checks the whole chain instead, and level k is not assembled yet here.)
+            if (!level_jacobian_built[k] && model.get_components().jacobians_constant(k, k - 1) &&
+                !model.get_components().jacobians_constant(k, 0)) {
+              auto mapped = sol_vector[k];
+              j_wg[k].vmult(mapped, sol_vector[k - 1]);
+              require_linear_level(k, sol_vector[k], mapped);
+            }
+            level_jacobian_built[k] = true;
+          }
           // mmult adds into its target, which therefore has to start from zero.
           j_gu[k] = 0;
           for (const auto &c : model.get_components().ldg_couplings(k, 0))
@@ -1102,11 +1209,11 @@ namespace DiFfRG
         const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
         BatchOutput<dim, NumberType, n_to> cell_out, boundary_out, face_out;
         cell_out.reinit(cells_b.size(), Term::flux | Term::source);
-        evaluate_ldg_level<to>(model, cell_out, cells_b);
+        internal::evaluate_ldg_level<to>(model, cell_out, cells_b);
         boundary_out.reinit(boundary_b.size(), Term::flux);
-        evaluate_ldg_boundary_numflux<to>(model, boundary_out, boundary_normals, boundary_b);
+        internal::evaluate_ldg_boundary_numflux<to>(model, boundary_out, boundary_normals, boundary_b);
         face_out.reinit(faces_b[0].size(), Term::flux);
-        evaluate_ldg_numflux<to>(model, face_out, face_normals, faces_b[0], faces_b[1]);
+        internal::evaluate_ldg_numflux<to>(model, face_out, face_normals, faces_b[0], faces_b[1]);
 
         const auto &constraints = discretization.get_constraints(to);
         ldg_vector_tmp = 0;
@@ -1156,16 +1263,16 @@ namespace DiFfRG
         std::array<LevelBatch<from>, 2> faces_b;
         self.template gather_level<from>(cells_b, boundary_b, faces_b, source);
 
-        std::vector<PointJacobian<dim, n_to, n_from, 0>> J_cells, J_boundary;
-        std::vector<FaceJacobian<dim, n_to, n_from, 0>> J_faces;
-        SeedStackWorkspace<LevelBatch<from>, n_to> workspace;
-        SeedStackWorkspace<LevelBatch<from>, n_to, 2> face_workspace;
+        std::vector<internal::PointJacobian<dim, n_to, n_from, 0>> J_cells, J_boundary;
+        std::vector<internal::FaceJacobian<dim, n_to, n_from, 0>> J_faces;
+        internal::SeedStackWorkspace<LevelBatch<from>, n_to> workspace;
+        internal::SeedStackWorkspace<LevelBatch<from>, n_to, 2> face_workspace;
         const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
-        evaluate_ldg_level_jacobian<to>(model, J_cells, cells_b, max_stacked_points, workspace);
-        evaluate_ldg_boundary_numflux_jacobian<to>(model, J_boundary, boundary_normals, boundary_b, max_stacked_points,
-                                                   workspace);
-        evaluate_ldg_numflux_jacobian<to>(model, J_faces, face_normals, faces_b[0], faces_b[1], max_stacked_points,
-                                          face_workspace);
+        internal::evaluate_ldg_level_jacobian<to>(model, J_cells, cells_b, max_stacked_points, workspace);
+        internal::evaluate_ldg_boundary_numflux_jacobian<to>(model, J_boundary, boundary_normals, boundary_b,
+                                                             max_stacked_points, workspace);
+        internal::evaluate_ldg_numflux_jacobian<to>(model, J_faces, face_normals, faces_b[0], faces_b[1],
+                                                    max_stacked_points, face_workspace);
         require_finite(J_cells);
         require_finite(J_boundary);
         require_finite(J_faces);
@@ -1382,10 +1489,10 @@ namespace DiFfRG
       std::array<MainBatch, 2> face_batch;
       std::vector<Tensor<1, dim>> boundary_normals, face_normals;
       BatchOutput<dim, NumberType, n_fe> cell_result, boundary_result, face_result;
-      std::vector<PointJacobian<dim, n_fe, n_all, n_extr>> cell_jacobians, boundary_jacobians;
-      std::vector<FaceJacobian<dim, n_fe, n_all, n_extr>> face_jacobians;
-      SeedStackWorkspace<MainBatch, n_fe> cell_workspace, boundary_workspace;
-      SeedStackWorkspace<MainBatch, n_fe, 2> face_workspace;
+      std::vector<internal::PointJacobian<dim, n_fe, n_all, n_extr>> cell_jacobians, boundary_jacobians;
+      std::vector<internal::FaceJacobian<dim, n_fe, n_all, n_extr>> face_jacobians;
+      internal::SeedStackWorkspace<MainBatch, n_fe> cell_workspace, boundary_workspace;
+      internal::SeedStackWorkspace<MainBatch, n_fe, 2> face_workspace;
 
       // The point evaluation of the extractors and readouts; see DiFfRG::internal::AssemblerCore.
       /// The extractors see the levels in the tuple slots of the derivatives.

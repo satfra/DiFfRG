@@ -53,6 +53,14 @@ bool run(std::string test_name, double expected_precision, const std::string &re
   p_prm.initial_x1[0] = 1.;
   p_prm.initial_x2[0] = 0.5;
 
+  // ImplicitEuler and TRBDF2 control their step by a local error estimate, so the IDA-tight tolerances below would
+  // pin them to minimal_dt; give them tolerances that match the precision the test checks.
+  constexpr bool own_error_control = requires { &TimeStepper::get_error; };
+  const double implicit_rel_tol = own_error_control ? expected_precision / 100. : 1e-12;
+  const double implicit_abs_tol = own_error_control ? implicit_rel_tol * 1e-3 : 1e-16;
+  // IDA fails rather than step below minimal_dt, and these tolerances need small steps at the start.
+  const double implicit_minimal_dt = own_error_control ? 1e-6 : 1e-14;
+
   ConfigTree config = json::value(
       {{"physical", {{"Lambda", 1.}}},
        {"integration",
@@ -88,10 +96,10 @@ bool run(std::string test_name, double expected_precision, const std::string &re
           {{"dt", 1e-4}, {"minimal_dt", 1e-6}, {"maximal_dt", 1e-1}, {"abs_tol", 1e-16}, {"rel_tol", 1e-12}}},
          {"implicit",
           {{"dt", 1e-4},
-           {"minimal_dt", 1e-6},
+           {"minimal_dt", implicit_minimal_dt},
            {"maximal_dt", 1e-1},
-           {"abs_tol", 1e-16},
-           {"rel_tol", 1e-12},
+           {"abs_tol", implicit_abs_tol},
+           {"rel_tol", implicit_rel_tol},
            {"jacobian_diagnostics", jacobian_diagnostics}}}}},
        {"output", {{"verbosity", 0}, {"vtk", false}}}});
 
@@ -237,9 +245,10 @@ bool run(std::string test_name, double expected_precision, const std::string &re
             valid &= values[beta_index] == 1.;
             valid &= is_close(values[residual_weight_index] / values[current_h_index], gamma / 2., 1.e-5);
           } else if (stage == ImplicitTimestepperStage::bdf2) {
-            valid &= is_close(values[alpha_index], 2. - gamma, 1.e-5);
-            valid &= is_close(values[beta_index], 2. - gamma, 1.e-5);
-            valid &= is_close(values[residual_weight_index] / values[current_h_index], 1. - gamma, 1.e-5);
+            // The BDF2 stage is scaled to share the trapezoidal stage's Jacobian.
+            valid &= values[alpha_index] == 1.;
+            valid &= values[beta_index] == 1.;
+            valid &= is_close(values[residual_weight_index] / values[current_h_index], gamma / 2., 1.e-5);
           }
         }
       } while (std::getline(table, data_line));

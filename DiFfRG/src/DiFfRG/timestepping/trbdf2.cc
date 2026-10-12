@@ -1,6 +1,11 @@
 // external libraries
 #include <deal.II/lac/block_vector.h>
 
+// standard library
+#include <limits>
+#include <string>
+#include <utility>
+
 // DiFfRG
 #include <DiFfRG/common/eigen.hh>
 #include <DiFfRG/common/types.hh>
@@ -11,6 +16,8 @@
 #include <DiFfRG/timestepping/linear_solver/UMFPack.hh>
 #include <DiFfRG/timestepping/solver/kinsol.hh>
 #include <DiFfRG/timestepping/solver/newton.hh>
+#include <DiFfRG/timestepping/timestep_control/local_error.hh>
+#include <DiFfRG/timestepping/timestep_control/output_grid.hh>
 #include <DiFfRG/timestepping/timestep_control/pi.hh>
 #include <DiFfRG/timestepping/trbdf2.hh>
 
@@ -23,11 +30,6 @@ namespace DiFfRG
   }
 
   template <typename VectorType, typename SparseMatrixType, uint dim, template <typename...> typename LinearSolver>
-  double TimeStepperTRBDF2_impl<VectorType, SparseMatrixType, dim, LinearSolver>::get_error()
-  {
-    return std::sqrt(powr<2>(ptr_newton_TR->get_error()) + powr<2>(ptr_newton_BDF2->get_error()));
-  }
-  template <typename VectorType, typename SparseMatrixType, uint dim, template <typename...> typename LinearSolver>
   void TimeStepperTRBDF2_impl<VectorType, SparseMatrixType, dim, LinearSolver>::set_ignore_nonconv(bool x)
   {
     ptr_newton_TR->set_ignore_nonconv(x);
@@ -38,6 +40,7 @@ namespace DiFfRG
   void TimeStepperTRBDF2_impl<VectorType, SparseMatrixType, dim, LinearSolver>::run_segment(
       AbstractFlowingVariables<NumberType, VectorType> &initial_condition, double start, double stop)
   {
+    this->require_no_variables(initial_condition, "TimeStepperTRBDF2");
 
     const double gamma = 2. - std::sqrt(2.);
 
@@ -55,7 +58,7 @@ namespace DiFfRG
     newton_BDF2.set_report_port(this->log);
 
     // create time controller instance
-    TC_PI tc(*this, 2, start, stop, impl.dt, impl.minimal_dt, impl.maximal_dt, output_dt);
+    TC_PI tc(*this, 2, start, stop, impl.dt, impl.minimal_dt, impl.maximal_dt);
     assembler.set_time(start);
 
     // shared jacobian matrix and linear solver (TR and BDF2 stages are sequential, never simultaneous)
@@ -129,20 +132,21 @@ namespace DiFfRG
       const auto dt = tc.get_dt();
       res = 0;
 
+      // The BDF2 stage divided by (2 - gamma), so that its Jacobian equals the trapezoidal one.
       assembler.set_time(t);
-      assembler.mass(res, u_n, powr<2>(1. - gamma) / gamma);
+      assembler.mass(res, u_n, powr<2>(1. - gamma) / (gamma * (2. - gamma)));
 
       assembler.set_time(t + dt * gamma);
-      assembler.mass(res, u_npgamma, -1. / gamma);
+      assembler.mass(res, u_npgamma, -1. / (gamma * (2. - gamma)));
 
       assembler.set_time(t + dt);
-      assembler.residual(res, u, (1. - gamma) * dt, (2. - gamma));
+      assembler.residual(res, u, (1. - gamma) / (2. - gamma) * dt, 1.);
     };
     newton_BDF2.update_jacobian = [&](const VectorType &u) {
       const auto t = tc.get_t();
       const auto dt = tc.get_dt();
-      const double mass_weight = 2. - gamma;
-      const double residual_weight = (1. - gamma) * dt;
+      const double mass_weight = 1.;
+      const double residual_weight = (1. - gamma) / (2. - gamma) * dt;
       const auto build_diagnostics = this->jacobian_diagnostics_state.make_build(
           this->next_jacobian_build_id++, ImplicitTimestepperKind::trbdf2, ImplicitTimestepperStage::bdf2, dt,
           mass_weight, mass_weight, residual_weight);
@@ -182,21 +186,69 @@ namespace DiFfRG
     };
     newton_BDF2.reinit(u_n);
 
-    // saving and stepping helper functions
-    auto save_data = [&](double t) {
+    // Frames on the grid start + n output_dt, interpolated quadratically through u_n, u_gamma and u_np1 within the
+    // step that reaches them (second order, like the method).
+    VectorType frame_state;
+    auto save_data = [&](double t, const VectorType &u) {
       assembler.set_time(t);
-      data_out.write_frame(t, [&](auto &frame) { assembler.attach_data_output(frame, u_n); });
+      data_out.write_frame(t, [&](auto &frame) { assembler.attach_data_output(frame, u); });
     };
-    auto dt_step = [&](double /*t*/, double /*dt*/) {
+    internal::OutputGrid output_grid(start, output_dt);
+    // R(u) without the mass term at t_n (R_n), t_n + gamma dt (R_gamma) and t_n + dt (R_np1).
+    VectorType R_n, R_gamma, R_np1, error_rhs, error;
+    bool R_n_valid = false;
+    auto evaluate_R = [&](VectorType &R, const VectorType &u, const double t) {
+      assembler.set_time(t);
+      R.reinit(u);
+      assembler.residual(R, u, 1., 0.);
+    };
+    // Local error estimate of Bank et al. (1985): with f = -M^{-1} R,
+    //   M e = 2 k dt (f_n / gamma - f_gamma / (gamma (1 - gamma)) + f_np1 / (1 - gamma)),
+    //   k = (-3 gamma^2 + 4 gamma - 2) / (12 (2 - gamma)),
+    // filtered by the stage matrix (M + gamma dt J / 2)^{-1}, as last factorized by Newton.
+    const double k_err = (-3. * gamma * gamma + 4. * gamma - 2.) / (12. * (2. - gamma));
+
+    auto dt_step = [&](double t, double dt) {
+      error_estimate = std::numeric_limits<double>::infinity();
+      if (!R_n_valid) evaluate_R(R_n, u_n, t);
+      R_n_valid = true;
+
       u_npgamma = u_n;
       newton_TR(u_npgamma);
       u_np1 = u_npgamma;
       newton_BDF2(u_np1);
+
+      evaluate_R(R_gamma, u_npgamma, t + gamma * dt);
+      evaluate_R(R_np1, u_np1, t + dt);
+      error_rhs.reinit(u_n);
+      error_rhs.add(-1. / gamma, R_n, 1. / (gamma * (1. - gamma)), R_gamma);
+      error_rhs.add(-1. / (1. - gamma), R_np1);
+      error_rhs *= 2. * k_err * dt;
+      error.reinit(u_n);
+      // The estimate needs only a few digits.
+      linSolver.solve(error_rhs, error, std::max(impl.abs_tol, 1e-3 * error_rhs.l2_norm()));
+      error_estimate = internal::weighted_rms(error, u_n, u_np1, impl.abs_tol, impl.rel_tol);
+      if (error_estimate > 1. && dt > impl.minimal_dt * (1. + 1e-10))
+        throw internal::StepRejected("TRBDF2: local error estimate " + std::to_string(error_estimate) + " > 1");
+
+      output_grid.advance_to(t + dt, [&](const double t_out) {
+        const double theta = (t_out - t) / dt;
+        // Lagrange polynomials on the nodes theta = 0, gamma, 1.
+        const double l_n = (theta - gamma) * (theta - 1.) / gamma;
+        const double l_gamma = theta * (theta - 1.) / (gamma * (gamma - 1.));
+        const double l_np1 = theta * (theta - gamma) / (1. - gamma);
+        frame_state.reinit(u_n);
+        frame_state.add(l_n, u_n, l_gamma, u_npgamma);
+        frame_state.add(l_np1, u_np1);
+        save_data(t_out, frame_state);
+      });
+
       u_n = u_np1;
+      std::swap(R_n, R_np1);
     };
 
     // the actual time loop
-    save_data(start);
+    save_data(start, u_n);
     while (!tc.finished()) {
       if (adaptor(tc.get_t(), u_n)) {
         u_np1 = u_n;
@@ -204,13 +256,15 @@ namespace DiFfRG
         jacobian.reinit(assembler.get_sparsity_pattern_jacobian());
         newton_TR.reinit(u_n);
         newton_BDF2.reinit(u_n);
+        R_n_valid = false;
       }
       this->log.progress({.topic = progress_topics::timestep, .time = tc.get_t(), .minimum_verbosity = 1});
       const double t_before_attempt = tc.get_t();
       const double attempted_h = tc.get_dt();
-      tc.advance(dt_step, save_data);
+      tc.advance(dt_step);
       this->jacobian_diagnostics_state.finish_attempt(tc.get_t() > t_before_attempt, attempted_h);
     }
+    output_grid.finish(stop, [&](const double t) { save_data(t, u_n); });
 
     initial_condition.spatial_data() = u_n;
     this->drain_output();

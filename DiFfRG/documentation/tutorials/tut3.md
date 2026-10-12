@@ -49,7 +49,7 @@ SetDirectory[GetDirectory[]];
 `Get["DiFfRG`"]` loads DiFfRG's Mathematica package, which in turn loads `FunKit` and `FormTracer`. If FunKit is not yet installed, DiFfRG offers to download and install it from [its GitHub repository](https://github.com/satfra/FunKit) (this requires an internet connection on first use). `GetDirectory[]` returns the directory of the current notebook, so all generated files end up next to it.
 
 ```{note}
-On this system, run notebooks headless with `wolfram -script ON.nb` (the `wolframscript` front-end is not available). FormTracer reads its configuration from the `form.set` file that sits next to the notebook.
+FormTracer reads its configuration from the `form.set` file next to the notebook; copy it along when you start a new application.
 ```
 
 ## Defining the field space and truncation
@@ -355,7 +355,7 @@ $ make -j8
 $ ./tut3
 ```
 
-The simulation flows the effective potential from the UV cutoff $\Lambda$ down to the IR. Besides the usual VTK/HDF5 output of the FE function `m2`, the model's `readouts` method writes a `data.csv` with physical observables along the flow - the condensate $\sigma$ and the pion and sigma masses $m_\pi$, $m_\sigma$. You can post-process these with the Python utilities shown in [Tutorial 2](tut2.md); the `Tutorials/tut3/phasediagram.ipynb` notebook demonstrates scanning the model in temperature.
+The simulation flows the effective potential from the UV cutoff $\Lambda$ down to the IR. Besides the usual VTK/HDF5 output of the FE function `m2`, the model's `readouts` method writes a table `output_data.csv` with physical observables along the flow - the condensate $\sigma$ and the pion and sigma masses $m_\pi$, $m_\sigma$. You can post-process these with the Python package (`DiFfRG.file_io`); `Examples/ONfiniteT/phasediagram.ipynb` scans the same model in temperature.
 
 ## Regenerating the flows yourself
 
@@ -366,4 +366,4 @@ $ cd Tutorials/tut3
 $ wolfram -script ON.nb
 ```
 
-This re-runs the derivation, `MakeKernel` and `UpdateFlows`, overwriting the `flows/` tree. Re-running CMake then picks up any changes to `flows/CMakeLists.txt`.
+This runs the notebook headless, re-running the derivation, `MakeKernel` and `UpdateFlows` and overwriting the `flows/` tree. Re-running CMake then picks up any changes to `flows/CMakeLists.txt`.

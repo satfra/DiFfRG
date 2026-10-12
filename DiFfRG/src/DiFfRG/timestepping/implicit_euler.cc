@@ -13,7 +13,12 @@
 #include <DiFfRG/timestepping/linear_solver/UMFPack.hh>
 #include <DiFfRG/timestepping/solver/kinsol.hh>
 #include <DiFfRG/timestepping/solver/newton.hh>
+#include <DiFfRG/timestepping/timestep_control/local_error.hh>
+#include <DiFfRG/timestepping/timestep_control/output_grid.hh>
 #include <DiFfRG/timestepping/timestep_control/pi.hh>
+#include <limits>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace DiFfRG
@@ -22,17 +27,19 @@ namespace DiFfRG
   void TimeStepperImplicitEuler_impl<VectorType, SparseMatrixType, dim, LinearSolver>::run_segment(
       AbstractFlowingVariables<NumberType, VectorType> &initial_condition, double start, double stop)
   {
+    this->require_no_variables(initial_condition, "TimeStepperImplicitEuler");
 
     // make some local copies of the initial condition which we use for stepping
     VectorType old_solution = initial_condition.spatial_data();
     VectorType solution = initial_condition.spatial_data();
 
     // newton algorithm
-    Newton<VectorType> newton(impl.abs_tol, impl.rel_tol, 2e-1, 11, 21);
+    ptr_newton = std::make_shared<Newton<VectorType>>(impl.abs_tol, impl.rel_tol, 2e-1, 11, 21);
+    auto &newton = *ptr_newton;
     newton.set_report_port(this->log);
 
     // create time controller instance
-    TC_PI tc(newton, 1, start, stop, impl.dt, impl.minimal_dt, impl.maximal_dt, output_dt);
+    TC_PI tc(*this, 1, start, stop, impl.dt, impl.minimal_dt, impl.maximal_dt);
     assembler.set_time(start);
 
     // create jacobian and solver for inverse jacobian
@@ -114,33 +121,70 @@ namespace DiFfRG
 
     newton.reinit(solution);
 
-    // saving and stepping helper functions
-    auto save_data = [&](double t) {
+    // Frames on the grid start + n output_dt, linearly interpolated within the step that reaches them.
+    VectorType frame_state;
+    auto save_data = [&](double t, const VectorType &u) {
       assembler.set_time(t);
-
-      data_out.write_frame(t, [&](auto &frame) {
-        if (t > start)
-          assembler.attach_data_output(frame, solution, newton.get_residual());
-        else
-          assembler.attach_data_output(frame, solution);
-      });
+      data_out.write_frame(t, [&](auto &frame) { assembler.attach_data_output(frame, u); });
     };
+    internal::OutputGrid output_grid(start, output_dt);
+    // R(u) without the mass term, at the start (R_old) and end (R_new) of a step.
+    VectorType R_old, R_new, error_rhs, error;
+    bool R_old_valid = false;
+    auto evaluate_R = [&](VectorType &R, const VectorType &u, const double t) {
+      assembler.set_time(t);
+      R.reinit(u);
+      assembler.residual(R, u, 1., 0.);
+    };
+
     auto dt_step = [&](double t, double dt) {
+      error_estimate = std::numeric_limits<double>::infinity();
+      if (!R_old_valid) evaluate_R(R_old, old_solution, t);
+      R_old_valid = true;
+
       assembler.set_time(t + dt);
       solution = old_solution;
       newton(solution);
+
+      // Local error of backward Euler, (dt/2)(f_{n+1} - f_n) with M f = -R(u), filtered by (M + dt J)^{-1}, i.e. by
+      // the Newton matrix last factorized (possibly at an earlier dt; it only damps stiff components).
+      evaluate_R(R_new, solution, t + dt);
+      error_rhs = R_old;
+      error_rhs -= R_new;
+      error_rhs *= dt / 2.;
+      error.reinit(solution);
+      // The estimate needs only a few digits.
+      linSolver.solve(error_rhs, error, std::max(impl.abs_tol, 1e-3 * error_rhs.l2_norm()));
+      error_estimate = internal::weighted_rms(error, old_solution, solution, impl.abs_tol, impl.rel_tol);
+      if (error_estimate > 1. && dt > impl.minimal_dt * (1. + 1e-10))
+        throw internal::StepRejected("ImplicitEuler: local error estimate " + std::to_string(error_estimate) + " > 1");
+
+      output_grid.advance_to(t + dt, [&](const double t_out) {
+        const double theta = (t_out - t) / dt;
+        frame_state = old_solution;
+        frame_state.sadd(1. - theta, theta, solution);
+        save_data(t_out, frame_state);
+      });
+
       old_solution = solution;
+      std::swap(R_old, R_new);
     };
 
     // the actual time loop
-    save_data(start);
+    save_data(start, old_solution);
     while (!tc.finished()) {
-      if (adaptor(tc.get_t(), old_solution)) solution = old_solution;
+      if (adaptor(tc.get_t(), old_solution)) {
+        solution = old_solution;
+        jacobian.reinit(assembler.get_sparsity_pattern_jacobian());
+        newton.reinit(old_solution);
+        R_old_valid = false;
+      }
       const double t_before_attempt = tc.get_t();
       const double attempted_h = tc.get_dt();
-      tc.advance(dt_step, save_data);
+      tc.advance(dt_step);
       this->jacobian_diagnostics_state.finish_attempt(tc.get_t() > t_before_attempt, attempted_h);
     }
+    output_grid.finish(stop, [&](const double t) { save_data(t, old_solution); });
 
     initial_condition.spatial_data() = solution;
     this->drain_output();

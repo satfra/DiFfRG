@@ -11,47 +11,30 @@ namespace DiFfRG
   using namespace dealii;
 
   /**
-   * @brief A class to set up initial data for whatever discretization we have chosen.
-   *        Also used to switch/manage memory, vectors, matrices over interfaces between spatial discretization and
-   * separate variables.
+   * @brief Interface of the state of a flow: the spatial dofs and the additional variables in one block vector.
    *
-   * @tparam Discretization Spatial Discretization used in the system
+   * Block 0 holds the FE/FV dofs, block 1 the variables. See FlowingVariables for the implementation.
+   *
+   * @tparam NumberType Scalar type of the state.
+   * @tparam VectorType_ Vector type of one block; a distributed run uses a parallel (PETSc) vector.
    */
   template <typename NumberType, typename VectorType_ = dealii::Vector<NumberType>> class AbstractFlowingVariables
   {
   public:
-    /**
-     * @brief The vector type holding the state.
-     *
-     * Appended with a default so every existing `AbstractFlowingVariables<double>` keeps its
-     * meaning. A distributed run substitutes a PETSc MPI vector here; the matching block type
-     * is derived from it rather than hard-wired, because dealii::BlockVector cannot hold a
-     * distributed block.
-     */
+    /// Vector type of one block.
     using VectorType = VectorType_;
+    /// Block vector type matching VectorType.
     using BlockVectorType = get_type::BlockVectorType<VectorType>;
 
-    /**
-     * @brief Obtain the data vector holding both spatial (block 0) and variable (block 1) data.
-     *
-     * @return BlockVectorType& The data vector.
-     */
+    /// The full state: spatial dofs (block 0) and variables (block 1).
     virtual BlockVectorType &data() = 0;
     virtual const BlockVectorType &data() const = 0;
 
-    /**
-     * @brief Obtain the spatial data vector.
-     *
-     * @return VectorType& The spatial data vector.
-     */
+    /// The spatial dofs (block 0).
     virtual VectorType &spatial_data() = 0;
     virtual const VectorType &spatial_data() const = 0;
 
-    /**
-     * @brief Obtain the variable data vector.
-     *
-     * @return VectorType& The variable data vector.
-     */
+    /// The variables (block 1).
     virtual VectorType &variable_data() = 0;
     virtual const VectorType &variable_data() const = 0;
   };

@@ -1,9 +1,26 @@
 #pragma once
 
+// standard library
+#include <cstddef>
+
 namespace DiFfRG
 {
+  /**
+   * @brief Compile-time \f$N\f$-point Gauss-Legendre rule on \f$[0, 1]\f$: \f$\int_0^1 f(x)\, dx \approx \sum_i w_i
+   * f(x_i)\f$.
+   *
+   * Members `x[N]` (nodes) and `w[N]` (weights, summing to 1), usable in `constexpr` and device code. Available for
+   * \f$N = 1 \dots 16, 20, 24, 32, 48, 64, 96, 128\f$; other \f$N\f$ are a compile error. The tables are given in
+   * double precision.
+   *
+   * @code
+   * constexpr GLQuadrature<16, double> gl;
+   * double integral = 0.;
+   * for (size_t i = 0; i < 16; ++i) integral += gl.w[i] * f(gl.x[i]);
+   * @endcode
+   */
   template <size_t N, typename ctype> struct GLQuadrature {
-    static_assert(N, "Requested quadrature order has not been implemented.");
+    static_assert(sizeof(ctype) == 0, "Requested quadrature order has not been implemented.");
   };
 
   template <typename ctype> struct GLQuadrature<1, ctype> {

@@ -17,7 +17,7 @@ namespace DiFfRG
    * @brief Per-dof absolute tolerances for SUNDIALS IDA, taken from AbstractAssembler::local_abs_tolerances.
    *
    * IDA reads absolute tolerances only when it is (re)initialised. Model tolerances may depend on the state, so
-   * the stepper asks refresh_needed() at every output time, from SUNDIALS::IDA::solver_should_restart: when some
+   * the stepper asks refresh_needed() at every output time, from IDADriver::solver_should_restart: when some
    * dof needs a tolerance tighter than the one IDA uses by more than the factor
    * /timestepping/implicit/local_tolerance_refresh, the new set is adopted and IDA restarts warm (it keeps the last
    * step size). Models should give tolerances that vary smoothly with the state, or every sign change of a scale
@@ -62,11 +62,14 @@ namespace DiFfRG
       return drifted;
     }
 
+    /// The per-dof absolute tolerances IDA uses.
     VectorType &get() { return atol; }
+    /// The smallest tolerance over all ranks (abs_tol if none are set).
     double min() const
     {
       return extreme([](double a, double b) { return std::min(a, b); }, true);
     }
+    /// The largest tolerance over all ranks (abs_tol if none are set).
     double max() const
     {
       return extreme([](double a, double b) { return std::max(a, b); }, false);

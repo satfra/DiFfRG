@@ -11,48 +11,57 @@ namespace DiFfRG
 {
   namespace Config
   {
-    /** Typed configuration consumed by output sinks. */
+    // clang-format off
+    /**
+     * @brief Settings of the output sinks (OutputSession, FEOutput, HDF5Output).
+     *
+     * | Key                                 | Type   | Default | Member / meaning |
+     * |-------------------------------------|--------|---------|------------------|
+     * | `/output/vtk`                       | bool   | true    | write_vtk: VTK files of the FE fields |
+     * | `/output/hdf5`                      | bool   | true    | write_hdf5: the run's `.h5` file |
+     * | `/output/json`                      | bool   | false   | write_json: write `<run>.log.json` (always written if write_hdf5 is false) |
+     * | `/output/max_pending_frames`        | uint   | 2       | VTK frames written in the background at once (at least 2 are used) |
+     * | `/output/verbosity`                 | int    | 0       | console log: 0 warnings and errors, 1 messages, ≥2 debug; ≥3 also per-frame output timings |
+     * | `/output/log_queue_size`            | uint   | 8192    | message queue length of the asynchronous logger (at least 256) |
+     * | `/output/log_level`                 | int    | 2       | spdlog level of the log file `<run>.log` (0 trace, 1 debug, 2 info, ...) |
+     * | `/discretization/output_subdivisions` | uint | 1       | subdivisions: cells are subdivided this often in the FE output |
+     * | `/physical/Lambda`                  | double | -1      | Lambda: if > 0, CSV tables get a column `k [GeV]` |
+     *
+     * `asynchronous`, `hdf5_queue_depth` and `max_pending_bytes` are not read from the parameters; set them in code.
+     */
+    // clang-format on
     struct OutputSettings {
+      /// Default of max_pending_bytes: 2 GiB.
       inline static constexpr std::size_t default_max_pending_bytes = 2ull * 1024ull * 1024ull * 1024ull;
 
+      /// All defaults.
       OutputSettings() = default;
+      /// Read the keys of the table above.
       explicit OutputSettings(const ConfigTree &config);
 
+      /// Write VTK and HDF5 frames on background threads (false: on the calling thread).
       bool asynchronous = true;
       bool write_vtk = true;
       bool write_hdf5 = true;
-      /** Mirrors /output/json. Forces the `<name>.log.json` copy of the configuration to be
-       * written; without it the file is only produced when there is no HDF5 output to carry the
-       * configuration in its `/config` group. */
       bool write_json = false;
       unsigned int max_pending_frames = 2;
-      /** Frames the HDF5 writer thread may have in flight. Deliberately separate from
-       * `max_pending_frames`, which bounds VTK/DataOut memory and has nothing to do with this.
-       *
-       * The default of 1 is a durability choice rather than a throughput one: each frame is
-       * still closed on disk before the next is opened, so a hard abort (SIGKILL, node
-       * eviction) loses at most this many frames on top of the one being written. Depth 1
-       * already hides the whole open/write/close behind the next output interval, because
-       * frames are separated by many timesteps. Ignored when `asynchronous` is false. */
+      /// HDF5 frames queued for the writer thread at most; ignored if asynchronous is false.
       unsigned int hdf5_queue_depth = 1;
+      /// Memory bound of the field copies held by pending VTK frames (0: no bound).
       std::size_t max_pending_bytes = default_max_pending_bytes;
       unsigned int subdivisions = 1;
-      /** Mirrors /output/verbosity, which the timesteppers already read. It sets how much of the run log
-       * reaches the console: at 0 only warnings and errors, at 1 the ordinary messages, from 2 upwards also
-       * debug records. The log file always receives everything, independent of this.
-       *
-       * At 3 and above the output sinks additionally emit one per-frame timing line and one
-       * output_timings.csv row. The aggregate timing report at the end of a run is a debug record:
-       * it is always written to the log file, and reaches the console from verbosity 2 upwards. */
+      /// At ≥ 3, each frame's output timings are logged and appended to `<run>_output_timings.csv`.
       int verbosity = 0;
       std::size_t log_queue_size = 8192;
       spdlog::level::level_enum log_level = spdlog::level::info;
       double Lambda = -1.;
+      /// The full parameters as JSON (written to `/config` of the HDF5 files).
       std::string configuration_json = "{}";
+      /// The full parameters as printed text (written to `<run>.log.json`).
       std::string configuration_log = "{}";
     };
   } // namespace Config
 
-  // Compatibility alias for applications written before typed settings were grouped under Config.
+  /// Alias of Config::OutputSettings.
   using OutputSettings = Config::OutputSettings;
 } // namespace DiFfRG

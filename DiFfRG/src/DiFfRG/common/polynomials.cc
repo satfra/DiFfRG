@@ -11,8 +11,8 @@ namespace DiFfRG
   double Polynomial::operator()(const double &x) const
   {
     double result = 0.;
-    for (uint i = 0; i < coefficients.size(); ++i)
-      result += coefficients[i] * std::pow(x, i);
+    for (auto c = coefficients.rbegin(); c != coefficients.rend(); ++c)
+      result = result * x + *c;
     return result;
   }
 
@@ -24,6 +24,10 @@ namespace DiFfRG
 
   void Polynomial::operator*=(const Polynomial &other)
   {
+    if (coefficients.empty() || other.coefficients.empty()) {
+      coefficients.clear();
+      return;
+    }
     std::vector<double> new_coefficients(coefficients.size() + other.coefficients.size() - 1);
     for (uint i = 0; i < coefficients.size(); ++i)
       for (uint j = 0; j < other.coefficients.size(); ++j)
@@ -42,6 +46,7 @@ namespace DiFfRG
 
   Polynomial Polynomial::derivative() const
   {
+    if (coefficients.empty()) return Polynomial({});
     std::vector<double> new_coefficients(coefficients.size() - 1);
     for (uint i = 1; i < coefficients.size(); ++i)
       new_coefficients[i - 1] = coefficients[i] * i;
@@ -56,6 +61,7 @@ namespace DiFfRG
 
   Polynomial Polynomial::square_argument() const
   {
+    if (coefficients.empty()) return Polynomial({});
     std::vector<double> new_coefficients(2 * coefficients.size() - 1);
     for (uint i = 0; i < coefficients.size(); ++i)
       new_coefficients[2 * i] = coefficients[i];

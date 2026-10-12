@@ -347,8 +347,7 @@ namespace
              {"minimal_dt", 1e-8},
              {"maximal_dt", 1.0},
              {"abs_tol", 1e-10},
-             {"rel_tol", 1e-10},
-             {"max_steps", 5000000}}}}},
+             {"rel_tol", 1e-10}}}}},
          {"output", {{"verbosity", 1}, {"vtk", false}, {"hdf5", false}}}});
   }
   std::filesystem::path fixture_path(const std::string &filename)

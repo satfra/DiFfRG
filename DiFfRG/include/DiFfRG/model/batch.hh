@@ -23,16 +23,39 @@
 #include <utility>
 #include <vector>
 
+/**
+ * @file batch.hh
+ * @brief What a model's evaluate_batch() sees: the input PointBatch, the output BatchOutput, and Term.
+ *
+ * The assemblers evaluate the model at many points at once (all quadrature points of many cells, or all points of
+ * many faces). Inputs and outputs are stored component-major with the points fastest: `batch.values(c)` is one
+ * contiguous column over all points, a PointSpan that can be handed directly to an integrator's map_points() as a
+ * per-point argument. Point i is the same point in every input and output column.
+ * @code
+ * template <typename Out, typename Batch> void evaluate_batch(Out &out, const Batch &batch) const
+ * {
+ *   // one integral per point; arguments as declared by the generated integrator (here k and u),
+ *   // cf. Examples/ONfiniteT_batched/model_batched.hh
+ *   if (out.requested(Term::flux)) integrator.map_points(out.flux(idx("u"), 0), k, batch.values(idx("u")));
+ *   if (out.requested(Term::source))
+ *     for (size_t i = 0; i < batch.size(); ++i)
+ *       out.source(idx("u"))[i] = -2. * batch.values(idx("u"))[i];
+ * }
+ * @endcode
+ * The rest of this file (namespace internal) is assembler plumbing: the per-point fallbacks and the seed-stacked
+ * AD jacobians of def::AD / def::FE_AD.
+ */
+
 namespace DiFfRG
 {
   /**
-   * @brief The per-point solution tuple the per-point model callbacks (flux, source, numflux, boundary_numflux and
-   * their jacobians) receive from a batched FEM assembler. It holds only the inputs the assembler gathered:
-   * - values only (DG, or batch_reads_derivatives = false): "fe_functions", "extractors", "variables", "cell_width"
-   * - with derivatives (batch_reads_hessians = false): "fe_functions", "fe_derivatives", "extractors", ...
-   * - with derivatives and hessians: "fe_functions", "fe_derivatives", "fe_hessians", "extractors", ...
+   * @brief The named tuple the per-point callbacks (flux, source, numflux, boundary_numflux and their jacobians)
+   * receive from CG and DG. It holds only the inputs the assembler gathered:
+   * - `batch_reads_derivatives = false`: "fe_functions", "extractors", "variables", "cell_width"
+   * - `batch_reads_hessians = false`: "fe_functions", "fe_derivatives", "extractors", "variables", "cell_width"
+   * - otherwise: "fe_functions", "fe_derivatives", "fe_hessians", "extractors", "variables", "cell_width"
    *
-   * A model that reads an entry its assembler does not provide therefore fails to compile.
+   * "cell_width" is the width of the cell the point belongs to. Reading an entry that is not there does not compile.
    */
   template <bool with_derivatives, bool with_hessians, typename... T> auto batch_tie(T &&...t)
   {
@@ -50,25 +73,27 @@ namespace DiFfRG
   }
 
   /**
-   * @brief The terms a batch evaluation (Model::evaluate_batch) can produce. The assembler requests only
-   * those it uses, e.g. `Term::flux | Term::source` at cell points and `Term::flux` at faces.
+   * @brief The terms an evaluate_batch call can be asked for: BatchOutput::requested(). Typically
+   * `Term::flux | Term::source` at cell points, `Term::flux` at faces; KT asks for one term per call.
    */
   enum class Term : unsigned { flux = 1, source = 2, diffusion_flux = 4 };
+  /// Union of two sets of terms.
   constexpr Term operator|(const Term a, const Term b) { return Term(unsigned(a) | unsigned(b)); }
-  /// Whether the set of terms @p set contains @p t.
-  constexpr bool contains(const Term set, const Term t) { return (unsigned(set) & unsigned(t)) != 0; }
-  /// The terms a batch's per-point tuple can be evaluated for: Batch::terms if it declares them (the KT traces
-  /// carry the tuple of one term only), otherwise all.
-  template <typename Batch> constexpr Term batch_terms()
-  {
-    if constexpr (requires { Batch::terms; })
-      return Batch::terms;
-    else
-      return Term::flux | Term::source | Term::diffusion_flux;
-  }
 
   namespace internal
   {
+    /// Whether the set of terms @p set contains @p t.
+    constexpr bool contains(const Term set, const Term t) { return (unsigned(set) & unsigned(t)) != 0; }
+    /// The terms a batch's per-point tuple can be evaluated for: Batch::terms if it declares them (the KT traces
+    /// carry the tuple of one term only), otherwise all.
+    template <typename Batch> constexpr Term batch_terms()
+    {
+      if constexpr (requires { Batch::terms; })
+        return Batch::terms;
+      else
+        return Term::flux | Term::source | Term::diffusion_flux;
+    }
+
     /// v = n copies of value, filled in parallel: these buffers hold up to millions of entries.
     template <typename T> void parallel_assign(std::vector<T> &v, const size_t n, const T &value)
     {
@@ -77,31 +102,26 @@ namespace DiFfRG
         std::fill(v.begin() + r.begin(), v.begin() + r.end(), value);
       });
     }
+
+    /// Copy of the solution at a single point of a PointBatch.
+    template <int dim, typename NT, size_t n_fe> struct PointState {
+      std::array<NT, n_fe> values;
+      std::array<dealii::Tensor<1, dim, NT>, n_fe> derivatives;
+      std::array<dealii::Tensor<2, dim, NT>, n_fe> hessians;
+      double cell_width;
+    };
   } // namespace internal
 
-  /// Copy of the solution at a single point of a PointBatch.
-  template <int dim, typename NT, size_t n_fe> struct PointState {
-    std::array<NT, n_fe> values;
-    std::array<dealii::Tensor<1, dim, NT>, n_fe> derivatives;
-    std::array<dealii::Tensor<2, dim, NT>, n_fe> hessians;
-    double cell_width;
-  };
-
   /**
-   * @brief The FE solution at a set of points: values and (if gathered) derivatives and hessians of every
-   * FE function, plus the position and cell width of each point. Extractors and variables are shared by
-   * all points.
+   * @brief The solution at a set of points: values and (if gathered) derivatives and hessians of every FE
+   * function, plus position and cell width of each point. Extractors and variables are shared by all points.
    *
-   * Storage is component-major with the points fastest, so values(c), derivatives(c, d) and
-   * hessians(c, d1, d2) are contiguous columns (PointSpan) that can be passed directly as per-point
-   * arguments to an integrator's map_points().
+   * Columns are contiguous over the points (see batch.hh); the order of the points carries no meaning.
    *
-   * Point i means the same point in every column, and in every column of the output BatchOutput.
-   * The order of the points carries no meaning for the model.
-   *
-   * @tparam with_derivatives, with_hessians which inputs the assembler gathers. Reading one it does not gather
-   * (derivatives() / hessians(), or the matching entry of the per-point tuple) does not compile; a model
-   * shared between assemblers asks `if constexpr (Batch::has_derivatives)`.
+   * @tparam with_derivatives, with_hessians which inputs the assembler gathers. CG and DG gather what the model's
+   * `batch_reads_derivatives` / `batch_reads_hessians` ask for, KT always derivatives and hessians only with
+   * `source_uses_hessians`. Reading one that is not gathered does not compile; a model used with several
+   * assemblers tests `if constexpr (Batch::has_derivatives)`.
    */
   template <int dim_, typename NT, size_t n_fe, typename Extractors, typename Variables, bool with_derivatives,
             bool with_hessians>
@@ -110,10 +130,15 @@ namespace DiFfRG
     static_assert(with_derivatives || !with_hessians, "Hessians are only gathered together with derivatives.");
 
   public:
+    /// Dimension of the field space.
     static constexpr int dim = dim_;
+    /// Number of FE functions (columns per input kind).
     static constexpr size_t n_fe_functions = n_fe;
+    /// Whether derivatives() is available.
     static constexpr bool has_derivatives = with_derivatives;
+    /// Whether hessians() is available.
     static constexpr bool has_hessians = with_hessians;
+    /// double, or an AD type when the jacobian is computed.
     using number_type = NT;
     using extractors_type = Extractors;
     /// The same batch in another number type, e.g. for AD.
@@ -121,10 +146,11 @@ namespace DiFfRG
     using rebind = PointBatch<dim, NT2, n_fe, std::array<NT2, std::tuple_size_v<Extractors>>, Variables,
                               with_derivatives, with_hessians>;
     /// The copy of one point that the per-point callbacks see, see tie().
-    using State = PointState<dim, NT, n_fe>;
+    using State = internal::PointState<dim, NT, n_fe>;
     /// Where tie() puts the extractors, i.e. the tuple index of the per-point extractor jacobians.
     static constexpr uint extractor_index = 1 + with_derivatives + with_hessians;
 
+    /// Assembler side: resize to @p n_points points.
     void reinit(const size_t n_points)
     {
       n = n_points;
@@ -133,6 +159,7 @@ namespace DiFfRG
       widths.resize(n);
     }
 
+    /// Assembler side: point the batch to the extractors and variables, which must outlive its use.
     void set_shared(const Extractors &extractors, const Variables &variables)
     {
       m_extractors = &extractors;
@@ -145,23 +172,27 @@ namespace DiFfRG
       m_variables = nullptr;
     }
 
+    /// Number of points.
     size_t size() const { return n; }
 
+    /// Values \f$u_c\f$ of FE function @p c at all points.
     PointSpan<const NT> values(const size_t c) const { return {column(value_column(c)), n}; }
-    /// Only if the assembler gathers derivatives (not under DG, nor with batch_reads_derivatives = false).
+    /// \f$\partial_d u_c\f$ at all points; only if `has_derivatives`.
     PointSpan<const NT> derivatives(const size_t c, const size_t d) const
       requires with_derivatives
     {
       return {column(derivative_column(c, d)), n};
     }
-    /// Only if the assembler gathers hessians (not under DG, nor with batch_reads_hessians = false).
+    /// \f$\partial_{d_1}\partial_{d_2} u_c\f$ at all points; only if `has_hessians`.
     PointSpan<const NT> hessians(const size_t c, const size_t d1, const size_t d2) const
       requires with_hessians
     {
       return {column(hessian_column(c, d1, d2)), n};
     }
+    /// Coordinate @p d of all points.
     PointSpan<const double> coordinates(const size_t d) const { return {positions.data() + d * n, n}; }
 
+    /// Position of point @p i.
     dealii::Point<dim> x(const size_t i) const
     {
       dealii::Point<dim> p;
@@ -169,9 +200,12 @@ namespace DiFfRG
         p[d] = positions[d * n + i];
       return p;
     }
+    /// Width of the cell containing point @p i.
     double cell_width(const size_t i) const { return widths[i]; }
 
+    /// The extractors \f$e_b\f$, the same for all points.
     const Extractors &extractors() const { return *m_extractors; }
+    /// The variables \f$v_a\f$, the same for all points.
     const Variables &variables() const { return *m_variables; }
 
     /// Point i as a State; only the gathered inputs are loaded.
@@ -285,12 +319,10 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief The solution at a set of points of an LDG main level: the values of the FE functions and of every
-   * LDG level, plus position and cell width; no derivatives. `values(c)` is FE function c, as in PointBatch,
-   * and `ldg_values(k, c)` component c of level k >= 1, both contiguous columns.
+   * @brief The batch of the LDG main level: values of the FE functions and of every LDG level, plus position and
+   * cell width; no derivatives. `values(c)` is FE function c, `ldg_values(k, c)` component c of level k >= 1.
    *
-   * Internally a PointBatch whose components are those of all levels in a row; seed-stacked AD therefore
-   * differentiates with respect to all levels at once.
+   * Internally a PointBatch over the components of all levels in a row, so the AD jacobian covers all levels.
    */
   template <int dim_, typename NT, typename Components, typename Extractors, typename Variables>
   class LDGPointBatch : public PointBatch<dim_, NT,
@@ -317,6 +349,7 @@ namespace DiFfRG
       return offset;
     }
 
+    /// Component @p c of LDG level @p k (k = 0: the FE functions) at all points.
     PointSpan<const NT> ldg_values(const uint k, const size_t c) const { return Base::values(level_offset(k) + c); }
     NT &ldg_value(const uint k, const size_t c, const size_t i) { return Base::value(level_offset(k) + c, i); }
 
@@ -346,22 +379,24 @@ namespace DiFfRG
   };
 
   /**
-   * @brief The requested terms (flux, source, diffusion flux) of every FE function at the points of a
-   * PointBatch, as contiguous columns (PointSpan). Only requested terms are stored, and asking for another one
-   * throws; reinit() zeroes them, so a model only writes what it computes.
+   * @brief The output of evaluate_batch: the requested terms of every FE function at all points of the batch, as
+   * contiguous columns (PointSpan). All columns are zero on entry, so a model writes only what it computes. Only
+   * requested terms are stored; accessing another one throws.
    */
   template <int dim, typename NT, size_t n_fe> class BatchOutput
   {
   public:
+    /// Number of output components (FE functions, or components of an LDG level).
     static constexpr size_t n_components = n_fe;
 
+    /// Assembler side: @p n_points points, storage for @p terms, all zero.
     void reinit(const size_t n_points, const Term terms)
     {
       n = n_points;
       m_terms = terms;
       size_t columns = 0;
       const auto place = [&](const Term t, const size_t width) {
-        if (!contains(terms, t)) return no_column;
+        if (!internal::contains(terms, t)) return no_column;
         const size_t offset = columns;
         columns += width;
         return offset;
@@ -371,14 +406,18 @@ namespace DiFfRG
       diffusion_offset = place(Term::diffusion_flux, n_fe * dim);
       internal::parallel_assign(data, n * columns, NT(0));
     }
+    /// Number of points.
     size_t size() const { return n; }
     /// Whether the assembler asked for @p t; a model may skip computing anything else.
-    bool requested(const Term t) const { return contains(m_terms, t); }
+    bool requested(const Term t) const { return internal::contains(m_terms, t); }
 
+    /// Flux \f$F_c\f$ in direction @p d at all points.
     PointSpan<NT> flux(const size_t c, const size_t d) { return column(flux_offset, c * dim + d, "flux"); }
     PointSpan<const NT> flux(const size_t c, const size_t d) const { return column(flux_offset, c * dim + d, "flux"); }
+    /// Source \f$s_c\f$ at all points.
     PointSpan<NT> source(const size_t c) { return column(source_offset, c, "source"); }
     PointSpan<const NT> source(const size_t c) const { return column(source_offset, c, "source"); }
+    /// KT diffusion flux of component @p c in direction @p d at all points.
     PointSpan<NT> diffusion_flux(const size_t c, const size_t d)
     {
       return column(diffusion_offset, c * dim + d, "diffusion flux");
@@ -388,17 +427,20 @@ namespace DiFfRG
       return column(diffusion_offset, c * dim + d, "diffusion flux");
     }
 
+    /// Write the fluxes of all components at point @p i.
     void store_flux(const size_t i, const std::array<dealii::Tensor<1, dim, NT>, n_fe> &F)
     {
       for (size_t c = 0; c < n_fe; ++c)
         for (int d = 0; d < dim; ++d)
           flux(c, d)[i] = F[c][d];
     }
+    /// Write the sources of all components at point @p i.
     void store_source(const size_t i, const std::array<NT, n_fe> &S)
     {
       for (size_t c = 0; c < n_fe; ++c)
         source(c)[i] = S[c];
     }
+    /// Write the diffusion fluxes of all components at point @p i.
     void store_diffusion_flux(const size_t i, const std::array<dealii::Tensor<1, dim, NT>, n_fe> &D)
     {
       for (size_t c = 0; c < n_fe; ++c)
@@ -427,60 +469,9 @@ namespace DiFfRG
   };
 
   /**
-   * @brief Derivatives of the n_out components of flux and source at one point with respect to the n_in input
-   * components (values, derivatives, hessians) and the extractors. Same layout as the per-point
-   * jacobian_flux_source* callbacks. At face points the flux blocks hold the numerical flux and the source
-   * blocks stay zero; an interior face point has one of these per trace, and the extractor blocks of trace 0
-   * hold the total.
-   */
-  template <int dim, size_t n_out, size_t n_in, size_t n_extr> struct PointJacobian {
-    using T1 = dealii::Tensor<1, dim, double>;
-    SimpleMatrix<T1, n_out, n_in> j_flux;
-    SimpleMatrix<dealii::Tensor<1, dim, T1>, n_out, n_in> j_grad_flux;
-    SimpleMatrix<dealii::Tensor<1, dim, dealii::Tensor<2, dim, double>>, n_out, n_in> j_hess_flux;
-    SimpleMatrix<T1, n_out, n_extr> j_extr_flux;
-    SimpleMatrix<double, n_out, n_in> j_source;
-    SimpleMatrix<T1, n_out, n_in> j_grad_source;
-    SimpleMatrix<dealii::Tensor<2, dim, double>, n_out, n_in> j_hess_source;
-    SimpleMatrix<double, n_out, n_extr> j_extr_source;
-
-    /// Whether the value, source and extractor blocks are finite (their tensors entry by entry).
-    bool is_finite() const
-    {
-      const auto finite = [](const auto &m, const uint rows, const uint cols) {
-        for (uint r = 0; r < rows; ++r)
-          for (uint c = 0; c < cols; ++c)
-            if (!std::isfinite(double(m(r, c) * m(r, c)))) return false;
-        return true;
-      };
-      return finite(j_flux, n_out, n_in) && finite(j_source, n_out, n_in) && finite(j_extr_flux, n_out, n_extr) &&
-             finite(j_extr_source, n_out, n_extr);
-    }
-  };
-  /// The jacobian at an interior face point: one block set per trace.
-  template <int dim, size_t n_out, size_t n_in, size_t n_extr>
-  using FaceJacobian = std::array<PointJacobian<dim, n_out, n_in, n_extr>, 2>;
-
-  /**
-   * @brief Buffers of the seed-stacked AD jacobian (internal::seed_stacked_jacobian) of an evaluation with n_out
-   * output components over batches of type Batch, kept by the caller across calls: they hold n_seeds copies of
-   * the batch (of each of its n_sides traces), and allocating them anew every time costs as much as the
-   * evaluation itself.
-   */
-  template <typename Batch, size_t n_out, size_t n_sides = 1> struct SeedStackWorkspace {
-    using ADBatch = typename Batch::template rebind<autodiff::real>;
-    static constexpr size_t n_extr = std::tuple_size_v<typename Batch::extractors_type>;
-    std::array<ADBatch, n_sides> batches;
-    BatchOutput<Batch::dim, autodiff::real, n_out> out;
-    /// AD numbers, unless the batch freezes its extractors (rebind keeps them double).
-    typename ADBatch::extractors_type extractors;
-    std::vector<dealii::Tensor<1, Batch::dim>> normals;
-  };
-
-  /**
-   * @brief Model traits read by the batched assemblers. A model declares
-   * `static constexpr bool batch_reads_derivatives = false` (or `batch_reads_hessians`) when neither its
-   * flux nor its source reads that input: the batch then skips it, and so do the AD jacobian seeds.
+   * @brief The model's `batch_reads_derivatives` (default true). Declare `static constexpr bool
+   * batch_reads_derivatives = false` in the model when no term reads \f$\partial u\f$: CG and DG then neither
+   * gather it nor seed it in the AD jacobians.
    */
   template <typename Model> constexpr bool batch_reads_derivatives()
   {
@@ -489,6 +480,7 @@ namespace DiFfRG
     else
       return true;
   }
+  /// The model's `batch_reads_hessians` (default true), as batch_reads_derivatives for \f$\partial^2 u\f$.
   template <typename Model> constexpr bool batch_reads_hessians()
   {
     if constexpr (requires { Model::batch_reads_hessians; })
@@ -499,6 +491,57 @@ namespace DiFfRG
 
   namespace internal
   {
+    /**
+     * @brief Derivatives of the n_out components of flux and source at one point with respect to the n_in input
+     * components (values, derivatives, hessians) and the extractors. Same layout as the per-point
+     * jacobian_flux_source* callbacks. At face points the flux blocks hold the numerical flux and the source
+     * blocks stay zero; an interior face point has one of these per trace, and the extractor blocks of trace 0
+     * hold the total.
+     */
+    template <int dim, size_t n_out, size_t n_in, size_t n_extr> struct PointJacobian {
+      using T1 = dealii::Tensor<1, dim, double>;
+      SimpleMatrix<T1, n_out, n_in> j_flux;
+      SimpleMatrix<dealii::Tensor<1, dim, T1>, n_out, n_in> j_grad_flux;
+      SimpleMatrix<dealii::Tensor<1, dim, dealii::Tensor<2, dim, double>>, n_out, n_in> j_hess_flux;
+      SimpleMatrix<T1, n_out, n_extr> j_extr_flux;
+      SimpleMatrix<double, n_out, n_in> j_source;
+      SimpleMatrix<T1, n_out, n_in> j_grad_source;
+      SimpleMatrix<dealii::Tensor<2, dim, double>, n_out, n_in> j_hess_source;
+      SimpleMatrix<double, n_out, n_extr> j_extr_source;
+
+      /// Whether the value, source and extractor blocks are finite (their tensors entry by entry).
+      bool is_finite() const
+      {
+        const auto finite = [](const auto &m, const uint rows, const uint cols) {
+          for (uint r = 0; r < rows; ++r)
+            for (uint c = 0; c < cols; ++c)
+              if (!std::isfinite(double(m(r, c) * m(r, c)))) return false;
+          return true;
+        };
+        return finite(j_flux, n_out, n_in) && finite(j_source, n_out, n_in) && finite(j_extr_flux, n_out, n_extr) &&
+               finite(j_extr_source, n_out, n_extr);
+      }
+    };
+    /// The jacobian at an interior face point: one block set per trace.
+    template <int dim, size_t n_out, size_t n_in, size_t n_extr>
+    using FaceJacobian = std::array<PointJacobian<dim, n_out, n_in, n_extr>, 2>;
+
+    /**
+     * @brief Buffers of the seed-stacked AD jacobian (seed_stacked_jacobian) of an evaluation with n_out
+     * output components over batches of type Batch, kept by the caller across calls: they hold n_seeds copies of
+     * the batch (of each of its n_sides traces), and allocating them anew every time costs as much as the
+     * evaluation itself.
+     */
+    template <typename Batch, size_t n_out, size_t n_sides = 1> struct SeedStackWorkspace {
+      using ADBatch = typename Batch::template rebind<autodiff::real>;
+      static constexpr size_t n_extr = std::tuple_size_v<typename Batch::extractors_type>;
+      std::array<ADBatch, n_sides> batches;
+      BatchOutput<Batch::dim, autodiff::real, n_out> out;
+      /// AD numbers, unless the batch freezes its extractors (rebind keeps them double).
+      typename ADBatch::extractors_type extractors;
+      std::vector<dealii::Tensor<1, Batch::dim>> normals;
+    };
+
     /// f(i, x, state) at every point i of the batch, in a flat parallel loop; state is the loaded Batch::State.
     template <typename Batch, typename F> void for_each_state(const Batch &batch, const F &f)
     {
@@ -598,99 +641,95 @@ namespace DiFfRG
         }
       });
     }
-  } // namespace internal
 
-  /**
-   * @brief Boundary numflux at all points of a boundary batch, into the flux columns of @p out: the
-   * model's `boundary_numflux_batch(out, normals, batch)` if it has one (def::FlowBoundaries does),
-   * otherwise its per-point boundary_numflux. normals[i] is the outward normal at point i.
-   */
-  template <typename Model, typename Out, typename Batch>
-  void evaluate_boundary_numflux(const Model &model, Out &out,
-                                 const std::vector<dealii::Tensor<1, Batch::dim>> &normals, const Batch &batch)
-  {
-    if constexpr (requires { model.boundary_numflux_batch(out, normals, batch); })
-      model.boundary_numflux_batch(out, normals, batch);
-    else {
-      using NT = typename Batch::number_type;
-      internal::for_each_point(batch, [&](const size_t i, const auto &x, const auto &sol) {
-        std::array<dealii::Tensor<1, Batch::dim, NT>, Out::n_components> F{};
-        model.boundary_numflux(F, normals[i], x, sol);
-        out.store_flux(i, F);
-      });
+    /**
+     * @brief Boundary numflux at all points of a boundary batch, into the flux columns of @p out: the
+     * model's `boundary_numflux_batch(out, normals, batch)` if it has one (def::FlowBoundaries does),
+     * otherwise its per-point boundary_numflux. normals[i] is the outward normal at point i.
+     */
+    template <typename Model, typename Out, typename Batch>
+    void evaluate_boundary_numflux(const Model &model, Out &out,
+                                   const std::vector<dealii::Tensor<1, Batch::dim>> &normals, const Batch &batch)
+    {
+      if constexpr (requires { model.boundary_numflux_batch(out, normals, batch); })
+        model.boundary_numflux_batch(out, normals, batch);
+      else {
+        using NT = typename Batch::number_type;
+        for_each_point(batch, [&](const size_t i, const auto &x, const auto &sol) {
+          std::array<dealii::Tensor<1, Batch::dim, NT>, Out::n_components> F{};
+          model.boundary_numflux(F, normals[i], x, sol);
+          out.store_flux(i, F);
+        });
+      }
     }
-  }
 
-  /**
-   * @brief Numerical flux at all points of an interior-face batch, into the flux columns of @p out: the
-   * model's `numflux_batch(out, normals, batch_s, batch_n)` if it has one (def::LLFFlux does), otherwise its
-   * per-point numflux. Point i of batch_s and batch_n are the two traces at the same face point, and
-   * normals[i] points out of the cell of batch_s.
-   */
-  template <typename Model, typename Out, typename Batch>
-  void evaluate_numflux(const Model &model, Out &out, const std::vector<dealii::Tensor<1, Batch::dim>> &normals,
-                        const Batch &batch_s, const Batch &batch_n)
-  {
-    if constexpr (requires { model.numflux_batch(out, normals, batch_s, batch_n); })
-      model.numflux_batch(out, normals, batch_s, batch_n);
-    else {
-      using NT = typename Batch::number_type;
-      internal::for_each_point_pair(batch_s, batch_n,
-                                    [&](const size_t i, const auto &x, const auto &sol_s, const auto &sol_n) {
-                                      std::array<dealii::Tensor<1, Batch::dim, NT>, Out::n_components> F{};
-                                      model.numflux(F, normals[i], x, sol_s, sol_n);
-                                      out.store_flux(i, F);
-                                    });
+    /**
+     * @brief Numerical flux at all points of an interior-face batch, into the flux columns of @p out: the
+     * model's `numflux_batch(out, normals, batch_s, batch_n)` if it has one (def::LLFFlux does), otherwise its
+     * per-point numflux. Point i of batch_s and batch_n are the two traces at the same face point, and
+     * normals[i] points out of the cell of batch_s.
+     */
+    template <typename Model, typename Out, typename Batch>
+    void evaluate_numflux(const Model &model, Out &out, const std::vector<dealii::Tensor<1, Batch::dim>> &normals,
+                          const Batch &batch_s, const Batch &batch_n)
+    {
+      if constexpr (requires { model.numflux_batch(out, normals, batch_s, batch_n); })
+        model.numflux_batch(out, normals, batch_s, batch_n);
+      else {
+        using NT = typename Batch::number_type;
+        for_each_point_pair(batch_s, batch_n, [&](const size_t i, const auto &x, const auto &sol_s, const auto &sol_n) {
+          std::array<dealii::Tensor<1, Batch::dim, NT>, Out::n_components> F{};
+          model.numflux(F, normals[i], x, sol_s, sol_n);
+          out.store_flux(i, F);
+        });
+      }
     }
-  }
 
-  /**
-   * @brief Level `to` of an LDG model at all points of a batch of level to - 1: flux and/or source, as @p out
-   * requests. See Model::ldg_evaluate_batch.
-   */
-  template <uint to, typename Model, typename Out, typename Batch>
-  void evaluate_ldg_level(const Model &model, Out &out, const Batch &batch)
-  {
-    model.template ldg_evaluate_batch<to>(out, batch);
-  }
-
-  /// The boundary numflux of LDG level `to`: the model's ldg_boundary_numflux_batch, else its per-point one.
-  template <uint to, typename Model, typename Out, typename Batch>
-  void evaluate_ldg_boundary_numflux(const Model &model, Out &out,
-                                     const std::vector<dealii::Tensor<1, Batch::dim>> &normals, const Batch &batch)
-  {
-    if constexpr (requires { model.template ldg_boundary_numflux_batch<to>(out, normals, batch); })
-      model.template ldg_boundary_numflux_batch<to>(out, normals, batch);
-    else {
-      using NT = typename Batch::number_type;
-      internal::for_each_state(batch, [&](const size_t i, const auto &x, const auto &s) {
-        std::array<dealii::Tensor<1, Batch::dim, NT>, Out::n_components> F{};
-        model.template ldg_boundary_numflux<to>(F, normals[i], x, s.values);
-        out.store_flux(i, F);
-      });
+    /**
+     * @brief Level `to` of an LDG model at all points of a batch of level to - 1: flux and/or source, as @p out
+     * requests. See Model::ldg_evaluate_batch.
+     */
+    template <uint to, typename Model, typename Out, typename Batch>
+    void evaluate_ldg_level(const Model &model, Out &out, const Batch &batch)
+    {
+      model.template ldg_evaluate_batch<to>(out, batch);
     }
-  }
 
-  /// The numerical flux of LDG level `to`: the model's ldg_numflux_batch (def::LDGUpDownFluxes has one), else
-  /// its per-point ldg_numflux.
-  template <uint to, typename Model, typename Out, typename Batch>
-  void evaluate_ldg_numflux(const Model &model, Out &out, const std::vector<dealii::Tensor<1, Batch::dim>> &normals,
-                            const Batch &batch_s, const Batch &batch_n)
-  {
-    if constexpr (requires { model.template ldg_numflux_batch<to>(out, normals, batch_s, batch_n); })
-      model.template ldg_numflux_batch<to>(out, normals, batch_s, batch_n);
-    else {
-      using NT = typename Batch::number_type;
-      internal::for_each_state_pair(batch_s, batch_n, [&](const size_t i, const auto &x, const auto &s, const auto &n) {
-        std::array<dealii::Tensor<1, Batch::dim, NT>, Out::n_components> F{};
-        model.template ldg_numflux<to>(F, normals[i], x, s.values, n.values);
-        out.store_flux(i, F);
-      });
+    /// The boundary numflux of LDG level `to`: the model's ldg_boundary_numflux_batch, else its per-point one.
+    template <uint to, typename Model, typename Out, typename Batch>
+    void evaluate_ldg_boundary_numflux(const Model &model, Out &out,
+                                       const std::vector<dealii::Tensor<1, Batch::dim>> &normals, const Batch &batch)
+    {
+      if constexpr (requires { model.template ldg_boundary_numflux_batch<to>(out, normals, batch); })
+        model.template ldg_boundary_numflux_batch<to>(out, normals, batch);
+      else {
+        using NT = typename Batch::number_type;
+        for_each_state(batch, [&](const size_t i, const auto &x, const auto &s) {
+          std::array<dealii::Tensor<1, Batch::dim, NT>, Out::n_components> F{};
+          model.template ldg_boundary_numflux<to>(F, normals[i], x, s.values);
+          out.store_flux(i, F);
+        });
+      }
     }
-  }
 
-  namespace internal
-  {
+    /// The numerical flux of LDG level `to`: the model's ldg_numflux_batch (def::LDGUpDownFluxes has one), else
+    /// its per-point ldg_numflux.
+    template <uint to, typename Model, typename Out, typename Batch>
+    void evaluate_ldg_numflux(const Model &model, Out &out, const std::vector<dealii::Tensor<1, Batch::dim>> &normals,
+                              const Batch &batch_s, const Batch &batch_n)
+    {
+      if constexpr (requires { model.template ldg_numflux_batch<to>(out, normals, batch_s, batch_n); })
+        model.template ldg_numflux_batch<to>(out, normals, batch_s, batch_n);
+      else {
+        using NT = typename Batch::number_type;
+        for_each_state_pair(batch_s, batch_n, [&](const size_t i, const auto &x, const auto &s, const auto &n) {
+          std::array<dealii::Tensor<1, Batch::dim, NT>, Out::n_components> F{};
+          model.template ldg_numflux<to>(F, normals[i], x, s.values, n.values);
+          out.store_flux(i, F);
+        });
+      }
+    }
+
     /// One forward-mode AD seed direction among the FE inputs of one trace of a point.
     struct BatchSeed {
       enum Kind { value, derivative, hessian } kind;
@@ -894,214 +933,209 @@ namespace DiFfRG
         for (uint c = 0; c < n_columns; ++c)
           dst(r, Batch::level_offset(k) + c) = src(r, c);
     }
-  } // namespace internal
 
-  /**
-   * @brief Jacobian of flux and source at all points of a batch: for a model with AD jacobians
-   * (def::AD) the seed-stacked AD of evaluate_batch, see internal::seed_stacked_jacobian; otherwise
-   * the model's per-point jacobian_flux_source* callbacks.
-   */
-  template <typename Model, typename Batch, size_t n_out, size_t n_extr>
-  void evaluate_flux_source_jacobian(const Model &model,
-                                     std::vector<PointJacobian<Batch::dim, n_out, Batch::n_fe_functions, n_extr>> &J,
+    /**
+     * @brief Jacobian of flux and source at all points of a batch: for a model with AD jacobians
+     * (def::AD) the seed-stacked AD of evaluate_batch, see seed_stacked_jacobian; otherwise
+     * the model's per-point jacobian_flux_source* callbacks.
+     */
+    template <typename Model, typename Batch, size_t n_out, size_t n_extr>
+    void evaluate_flux_source_jacobian(const Model &model,
+                                       std::vector<PointJacobian<Batch::dim, n_out, Batch::n_fe_functions, n_extr>> &J,
+                                       const Batch &batch, const size_t max_stacked,
+                                       SeedStackWorkspace<Batch, n_out> &workspace)
+    {
+      constexpr int dim = Batch::dim;
+      parallel_assign(J, batch.size(), {});
+      if constexpr (has_batch_ad_jacobians<Model>)
+        seed_stacked_jacobian<n_out, 1>([&](auto &out, const auto &ad, size_t) { model.evaluate_batch(out, ad[0]); },
+                                        [&](const size_t i, uint) -> auto & { return J[i]; }, std::array{&batch},
+                                        max_stacked, Term::flux | Term::source, workspace, seeds_extractors<Model>);
+      else
+        for_each_point(batch, [&](const size_t i, const auto &x, const auto &sol) {
+          auto &Ji = J[i];
+          if constexpr (is_ldg_batch<Batch>) {
+            // One per-point call per level, as the level is a template parameter of the callback.
+            constexpr_for<0, Batch::n_levels, 1>([&](auto k) {
+              SimpleMatrix<dealii::Tensor<1, dim>, n_out, Model::Components::count_fe_functions(k)> jF{};
+              SimpleMatrix<double, n_out, Model::Components::count_fe_functions(k)> jS{};
+              model.template jacobian_flux_source<k, 0>(jF, jS, x, sol);
+              copy_level_columns<Batch, k>(Ji.j_flux, jF);
+              copy_level_columns<Batch, k>(Ji.j_source, jS);
+            });
+          } else {
+            model.template jacobian_flux_source<0, 0>(Ji.j_flux, Ji.j_source, x, sol);
+            model.template jacobian_flux_source_grad<1>(Ji.j_grad_flux, Ji.j_grad_source, x, sol);
+            model.template jacobian_flux_source_hess<2>(Ji.j_hess_flux, Ji.j_hess_source, x, sol);
+          }
+          if constexpr (n_extr > 0)
+            model.template jacobian_flux_source_extr<Batch::extractor_index>(Ji.j_extr_flux, Ji.j_extr_source, x, sol);
+        });
+    }
+
+    /**
+     * @brief Jacobian of the boundary numflux at all points of a boundary batch, into the flux blocks of
+     * J. Same dispatch as evaluate_flux_source_jacobian, with the per-point jacobian_boundary_numflux*.
+     */
+    template <typename Model, typename Batch, size_t n_out, size_t n_extr>
+    void
+    evaluate_boundary_numflux_jacobian(const Model &model,
+                                       std::vector<PointJacobian<Batch::dim, n_out, Batch::n_fe_functions, n_extr>> &J,
+                                       const std::vector<dealii::Tensor<1, Batch::dim>> &normals, const Batch &batch,
+                                       const size_t max_stacked, SeedStackWorkspace<Batch, n_out> &workspace)
+    {
+      constexpr int dim = Batch::dim;
+      parallel_assign(J, batch.size(), {});
+      if constexpr (has_batch_ad_jacobians<Model>)
+        seed_stacked_jacobian<n_out, 1>(
+            [&](auto &out, const auto &ad, const size_t n_blocks) {
+              evaluate_boundary_numflux(model, out, stack_normals(workspace.normals, normals, n_blocks), ad[0]);
+            },
+            [&](const size_t i, uint) -> auto & { return J[i]; }, std::array{&batch}, max_stacked, Term::flux,
+            workspace, seeds_extractors<Model>);
+      else
+        for_each_point(batch, [&](const size_t i, const auto &x, const auto &sol) {
+          auto &Ji = J[i];
+          if constexpr (is_ldg_batch<Batch>) {
+            constexpr_for<0, Batch::n_levels, 1>([&](auto k) {
+              SimpleMatrix<dealii::Tensor<1, dim>, n_out, Model::Components::count_fe_functions(k)> jF{};
+              model.template jacobian_boundary_numflux<k, 0>(jF, normals[i], x, sol);
+              copy_level_columns<Batch, k>(Ji.j_flux, jF);
+            });
+          } else {
+            model.template jacobian_boundary_numflux<0, 0>(Ji.j_flux, normals[i], x, sol);
+            model.template jacobian_boundary_numflux_grad<1>(Ji.j_grad_flux, normals[i], x, sol);
+            model.template jacobian_boundary_numflux_hess<2>(Ji.j_hess_flux, normals[i], x, sol);
+          }
+          if constexpr (n_extr > 0)
+            model.template jacobian_boundary_numflux_extr<Batch::extractor_index>(Ji.j_extr_flux, normals[i], x, sol);
+        });
+    }
+
+    /**
+     * @brief Jacobian of the numerical flux at all points of an interior-face batch with respect to both
+     * traces, into the flux blocks of J[i][0] (trace s) and J[i][1] (trace n); the extractor blocks of
+     * J[i][0] hold the total. Same dispatch as evaluate_flux_source_jacobian, with the per-point
+     * jacobian_numflux*.
+     */
+    template <typename Model, typename Batch, size_t n_out, size_t n_extr>
+    void evaluate_numflux_jacobian(const Model &model,
+                                   std::vector<FaceJacobian<Batch::dim, n_out, Batch::n_fe_functions, n_extr>> &J,
+                                   const std::vector<dealii::Tensor<1, Batch::dim>> &normals, const Batch &batch_s,
+                                   const Batch &batch_n, const size_t max_stacked,
+                                   SeedStackWorkspace<Batch, n_out, 2> &workspace)
+    {
+      constexpr int dim = Batch::dim;
+      constexpr size_t n_in = Batch::n_fe_functions;
+      using T1 = dealii::Tensor<1, dim>;
+      parallel_assign(J, batch_s.size(), {});
+      if constexpr (has_batch_ad_jacobians<Model>)
+        seed_stacked_jacobian<n_out, 2>(
+            [&](auto &out, const auto &ad, const size_t n_blocks) {
+              evaluate_numflux(model, out, stack_normals(workspace.normals, normals, n_blocks), ad[0], ad[1]);
+            },
+            [&](const size_t i, const uint side) -> auto & { return J[i][side]; }, std::array{&batch_s, &batch_n},
+            max_stacked, Term::flux, workspace, seeds_extractors<Model>);
+      else
+        for_each_point_pair(batch_s, batch_n, [&](const size_t i, const auto &x, const auto &sol_s, const auto &sol_n) {
+          if constexpr (is_ldg_batch<Batch>) {
+            constexpr_for<0, Batch::n_levels, 1>([&](auto k) {
+              std::array<SimpleMatrix<T1, n_out, Model::Components::count_fe_functions(k)>, 2> jF{};
+              model.template jacobian_numflux<k, 0>(jF, normals[i], x, sol_s, sol_n);
+              for (uint side = 0; side < 2; ++side)
+                copy_level_columns<Batch, k>(J[i][side].j_flux, jF[side]);
+            });
+          } else {
+            std::array<SimpleMatrix<T1, n_out, n_in>, 2> j_value;
+            std::array<SimpleMatrix<dealii::Tensor<1, dim, T1>, n_out, n_in>, 2> j_grad;
+            std::array<SimpleMatrix<dealii::Tensor<1, dim, dealii::Tensor<2, dim>>, n_out, n_in>, 2> j_hess;
+            model.template jacobian_numflux<0, 0>(j_value, normals[i], x, sol_s, sol_n);
+            model.template jacobian_numflux_grad<1>(j_grad, normals[i], x, sol_s, sol_n);
+            model.template jacobian_numflux_hess<2>(j_hess, normals[i], x, sol_s, sol_n);
+            for (uint side = 0; side < 2; ++side) {
+              J[i][side].j_flux = j_value[side];
+              J[i][side].j_grad_flux = j_grad[side];
+              J[i][side].j_hess_flux = j_hess[side];
+            }
+          }
+          if constexpr (n_extr > 0) {
+            std::array<SimpleMatrix<T1, n_out, n_extr>, 2> j_extr;
+            model.template jacobian_numflux_extr<Batch::extractor_index>(j_extr, normals[i], x, sol_s, sol_n);
+            for (uint c = 0; c < n_out; ++c)
+              for (uint e = 0; e < n_extr; ++e)
+                J[i][0].j_extr_flux(c, e) = j_extr[0](c, e) + j_extr[1](c, e);
+          }
+        });
+    }
+
+    /**
+     * @brief Jacobian of LDG level `to` (flux and source) at all points of a batch of level to - 1: for a model with
+     * AD jacobians the seed-stacked AD of ldg_evaluate_batch, otherwise its per-point jacobian_flux_source<to - 1,
+     * to>.
+     */
+    template <uint to, typename Model, typename Batch, size_t n_out>
+    void evaluate_ldg_level_jacobian(const Model &model,
+                                     std::vector<PointJacobian<Batch::dim, n_out, Batch::n_fe_functions, 0>> &J,
                                      const Batch &batch, const size_t max_stacked,
                                      SeedStackWorkspace<Batch, n_out> &workspace)
-  {
-    constexpr int dim = Batch::dim;
-    internal::parallel_assign(J, batch.size(), {});
-    if constexpr (internal::has_batch_ad_jacobians<Model>)
-      internal::seed_stacked_jacobian<n_out, 1>(
-          [&](auto &out, const auto &ad, size_t) { model.evaluate_batch(out, ad[0]); },
-          [&](const size_t i, uint) -> auto & { return J[i]; }, std::array{&batch}, max_stacked,
-          Term::flux | Term::source, workspace, internal::seeds_extractors<Model>);
-    else
-      internal::for_each_point(batch, [&](const size_t i, const auto &x, const auto &sol) {
-        auto &Ji = J[i];
-        if constexpr (internal::is_ldg_batch<Batch>) {
-          // One per-point call per level, as the level is a template parameter of the callback.
-          constexpr_for<0, Batch::n_levels, 1>([&](auto k) {
-            SimpleMatrix<dealii::Tensor<1, dim>, n_out, Model::Components::count_fe_functions(k)> jF{};
-            SimpleMatrix<double, n_out, Model::Components::count_fe_functions(k)> jS{};
-            model.template jacobian_flux_source<k, 0>(jF, jS, x, sol);
-            internal::copy_level_columns<Batch, k>(Ji.j_flux, jF);
-            internal::copy_level_columns<Batch, k>(Ji.j_source, jS);
-          });
-        } else {
-          model.template jacobian_flux_source<0, 0>(Ji.j_flux, Ji.j_source, x, sol);
-          model.template jacobian_flux_source_grad<1>(Ji.j_grad_flux, Ji.j_grad_source, x, sol);
-          model.template jacobian_flux_source_hess<2>(Ji.j_hess_flux, Ji.j_hess_source, x, sol);
-        }
-        if constexpr (n_extr > 0)
-          model.template jacobian_flux_source_extr<Batch::extractor_index>(Ji.j_extr_flux, Ji.j_extr_source, x, sol);
-      });
-  }
+    {
+      parallel_assign(J, batch.size(), {});
+      if constexpr (has_batch_ad_jacobians<Model>)
+        seed_stacked_jacobian<n_out, 1>(
+            [&](auto &out, const auto &ad, size_t) { evaluate_ldg_level<to>(model, out, ad[0]); },
+            [&](const size_t i, uint) -> auto & { return J[i]; }, std::array{&batch}, max_stacked,
+            Term::flux | Term::source, workspace, seeds_extractors<Model>);
+      else
+        for_each_state(batch, [&](const size_t i, const auto &x, const auto &s) {
+          model.template jacobian_flux_source<to - 1, to>(J[i].j_flux, J[i].j_source, x, s.values);
+        });
+    }
 
-  /**
-   * @brief Jacobian of the boundary numflux at all points of a boundary batch, into the flux blocks of
-   * J. Same dispatch as evaluate_flux_source_jacobian, with the per-point jacobian_boundary_numflux*.
-   */
-  template <typename Model, typename Batch, size_t n_out, size_t n_extr>
-  void
-  evaluate_boundary_numflux_jacobian(const Model &model,
-                                     std::vector<PointJacobian<Batch::dim, n_out, Batch::n_fe_functions, n_extr>> &J,
-                                     const std::vector<dealii::Tensor<1, Batch::dim>> &normals, const Batch &batch,
-                                     const size_t max_stacked, SeedStackWorkspace<Batch, n_out> &workspace)
-  {
-    constexpr int dim = Batch::dim;
-    internal::parallel_assign(J, batch.size(), {});
-    if constexpr (internal::has_batch_ad_jacobians<Model>)
-      internal::seed_stacked_jacobian<n_out, 1>(
-          [&](auto &out, const auto &ad, const size_t n_blocks) {
-            evaluate_boundary_numflux(model, out, internal::stack_normals(workspace.normals, normals, n_blocks), ad[0]);
-          },
-          [&](const size_t i, uint) -> auto & { return J[i]; }, std::array{&batch}, max_stacked, Term::flux, workspace,
-          internal::seeds_extractors<Model>);
-    else
-      internal::for_each_point(batch, [&](const size_t i, const auto &x, const auto &sol) {
-        auto &Ji = J[i];
-        if constexpr (internal::is_ldg_batch<Batch>) {
-          constexpr_for<0, Batch::n_levels, 1>([&](auto k) {
-            SimpleMatrix<dealii::Tensor<1, dim>, n_out, Model::Components::count_fe_functions(k)> jF{};
-            model.template jacobian_boundary_numflux<k, 0>(jF, normals[i], x, sol);
-            internal::copy_level_columns<Batch, k>(Ji.j_flux, jF);
-          });
-        } else {
-          model.template jacobian_boundary_numflux<0, 0>(Ji.j_flux, normals[i], x, sol);
-          model.template jacobian_boundary_numflux_grad<1>(Ji.j_grad_flux, normals[i], x, sol);
-          model.template jacobian_boundary_numflux_hess<2>(Ji.j_hess_flux, normals[i], x, sol);
-        }
-        if constexpr (n_extr > 0)
-          model.template jacobian_boundary_numflux_extr<Batch::extractor_index>(Ji.j_extr_flux, normals[i], x, sol);
-      });
-  }
+    /// Jacobian of the boundary numflux of LDG level `to`; see evaluate_ldg_level_jacobian.
+    template <uint to, typename Model, typename Batch, size_t n_out>
+    void evaluate_ldg_boundary_numflux_jacobian(
+        const Model &model, std::vector<PointJacobian<Batch::dim, n_out, Batch::n_fe_functions, 0>> &J,
+        const std::vector<dealii::Tensor<1, Batch::dim>> &normals, const Batch &batch, const size_t max_stacked,
+        SeedStackWorkspace<Batch, n_out> &workspace)
+    {
+      parallel_assign(J, batch.size(), {});
+      if constexpr (has_batch_ad_jacobians<Model>)
+        seed_stacked_jacobian<n_out, 1>(
+            [&](auto &out, const auto &ad, const size_t n_blocks) {
+              evaluate_ldg_boundary_numflux<to>(model, out, stack_normals(workspace.normals, normals, n_blocks), ad[0]);
+            },
+            [&](const size_t i, uint) -> auto & { return J[i]; }, std::array{&batch}, max_stacked, Term::flux,
+            workspace, seeds_extractors<Model>);
+      else
+        for_each_state(batch, [&](const size_t i, const auto &x, const auto &s) {
+          model.template jacobian_boundary_numflux<to - 1, to>(J[i].j_flux, normals[i], x, s.values);
+        });
+    }
 
-  /**
-   * @brief Jacobian of the numerical flux at all points of an interior-face batch with respect to both
-   * traces, into the flux blocks of J[i][0] (trace s) and J[i][1] (trace n); the extractor blocks of
-   * J[i][0] hold the total. Same dispatch as evaluate_flux_source_jacobian, with the per-point
-   * jacobian_numflux*.
-   */
-  template <typename Model, typename Batch, size_t n_out, size_t n_extr>
-  void evaluate_numflux_jacobian(const Model &model,
-                                 std::vector<FaceJacobian<Batch::dim, n_out, Batch::n_fe_functions, n_extr>> &J,
-                                 const std::vector<dealii::Tensor<1, Batch::dim>> &normals, const Batch &batch_s,
-                                 const Batch &batch_n, const size_t max_stacked,
-                                 SeedStackWorkspace<Batch, n_out, 2> &workspace)
-  {
-    constexpr int dim = Batch::dim;
-    constexpr size_t n_in = Batch::n_fe_functions;
-    using T1 = dealii::Tensor<1, dim>;
-    internal::parallel_assign(J, batch_s.size(), {});
-    if constexpr (internal::has_batch_ad_jacobians<Model>)
-      internal::seed_stacked_jacobian<n_out, 2>(
-          [&](auto &out, const auto &ad, const size_t n_blocks) {
-            evaluate_numflux(model, out, internal::stack_normals(workspace.normals, normals, n_blocks), ad[0], ad[1]);
-          },
-          [&](const size_t i, const uint side) -> auto & { return J[i][side]; }, std::array{&batch_s, &batch_n},
-          max_stacked, Term::flux, workspace, internal::seeds_extractors<Model>);
-    else
-      internal::for_each_point_pair(
-          batch_s, batch_n, [&](const size_t i, const auto &x, const auto &sol_s, const auto &sol_n) {
-            if constexpr (internal::is_ldg_batch<Batch>) {
-              constexpr_for<0, Batch::n_levels, 1>([&](auto k) {
-                std::array<SimpleMatrix<T1, n_out, Model::Components::count_fe_functions(k)>, 2> jF{};
-                model.template jacobian_numflux<k, 0>(jF, normals[i], x, sol_s, sol_n);
-                for (uint side = 0; side < 2; ++side)
-                  internal::copy_level_columns<Batch, k>(J[i][side].j_flux, jF[side]);
-              });
-            } else {
-              std::array<SimpleMatrix<T1, n_out, n_in>, 2> j_value;
-              std::array<SimpleMatrix<dealii::Tensor<1, dim, T1>, n_out, n_in>, 2> j_grad;
-              std::array<SimpleMatrix<dealii::Tensor<1, dim, dealii::Tensor<2, dim>>, n_out, n_in>, 2> j_hess;
-              model.template jacobian_numflux<0, 0>(j_value, normals[i], x, sol_s, sol_n);
-              model.template jacobian_numflux_grad<1>(j_grad, normals[i], x, sol_s, sol_n);
-              model.template jacobian_numflux_hess<2>(j_hess, normals[i], x, sol_s, sol_n);
-              for (uint side = 0; side < 2; ++side) {
-                J[i][side].j_flux = j_value[side];
-                J[i][side].j_grad_flux = j_grad[side];
-                J[i][side].j_hess_flux = j_hess[side];
-              }
-            }
-            if constexpr (n_extr > 0) {
-              std::array<SimpleMatrix<T1, n_out, n_extr>, 2> j_extr;
-              model.template jacobian_numflux_extr<Batch::extractor_index>(j_extr, normals[i], x, sol_s, sol_n);
-              for (uint c = 0; c < n_out; ++c)
-                for (uint e = 0; e < n_extr; ++e)
-                  J[i][0].j_extr_flux(c, e) = j_extr[0](c, e) + j_extr[1](c, e);
-            }
-          });
-  }
-
-  /**
-   * @brief Jacobian of LDG level `to` (flux and source) at all points of a batch of level to - 1: for a model with
-   * AD jacobians the seed-stacked AD of ldg_evaluate_batch, otherwise its per-point jacobian_flux_source<to - 1,
-   * to>.
-   */
-  template <uint to, typename Model, typename Batch, size_t n_out>
-  void evaluate_ldg_level_jacobian(const Model &model,
-                                   std::vector<PointJacobian<Batch::dim, n_out, Batch::n_fe_functions, 0>> &J,
-                                   const Batch &batch, const size_t max_stacked,
-                                   SeedStackWorkspace<Batch, n_out> &workspace)
-  {
-    internal::parallel_assign(J, batch.size(), {});
-    if constexpr (internal::has_batch_ad_jacobians<Model>)
-      internal::seed_stacked_jacobian<n_out, 1>(
-          [&](auto &out, const auto &ad, size_t) { evaluate_ldg_level<to>(model, out, ad[0]); },
-          [&](const size_t i, uint) -> auto & { return J[i]; }, std::array{&batch}, max_stacked,
-          Term::flux | Term::source, workspace, internal::seeds_extractors<Model>);
-    else
-      internal::for_each_state(batch, [&](const size_t i, const auto &x, const auto &s) {
-        model.template jacobian_flux_source<to - 1, to>(J[i].j_flux, J[i].j_source, x, s.values);
-      });
-  }
-
-  /// Jacobian of the boundary numflux of LDG level `to`; see evaluate_ldg_level_jacobian.
-  template <uint to, typename Model, typename Batch, size_t n_out>
-  void
-  evaluate_ldg_boundary_numflux_jacobian(const Model &model,
-                                         std::vector<PointJacobian<Batch::dim, n_out, Batch::n_fe_functions, 0>> &J,
-                                         const std::vector<dealii::Tensor<1, Batch::dim>> &normals, const Batch &batch,
-                                         const size_t max_stacked, SeedStackWorkspace<Batch, n_out> &workspace)
-  {
-    internal::parallel_assign(J, batch.size(), {});
-    if constexpr (internal::has_batch_ad_jacobians<Model>)
-      internal::seed_stacked_jacobian<n_out, 1>(
-          [&](auto &out, const auto &ad, const size_t n_blocks) {
-            evaluate_ldg_boundary_numflux<to>(model, out, internal::stack_normals(workspace.normals, normals, n_blocks),
-                                              ad[0]);
-          },
-          [&](const size_t i, uint) -> auto & { return J[i]; }, std::array{&batch}, max_stacked, Term::flux, workspace,
-          internal::seeds_extractors<Model>);
-    else
-      internal::for_each_state(batch, [&](const size_t i, const auto &x, const auto &s) {
-        model.template jacobian_boundary_numflux<to - 1, to>(J[i].j_flux, normals[i], x, s.values);
-      });
-  }
-
-  /// Jacobian of the numerical flux of LDG level `to` with respect to both traces; see evaluate_ldg_level_jacobian.
-  template <uint to, typename Model, typename Batch, size_t n_out>
-  void evaluate_ldg_numflux_jacobian(const Model &model,
-                                     std::vector<FaceJacobian<Batch::dim, n_out, Batch::n_fe_functions, 0>> &J,
-                                     const std::vector<dealii::Tensor<1, Batch::dim>> &normals, const Batch &batch_s,
-                                     const Batch &batch_n, const size_t max_stacked,
-                                     SeedStackWorkspace<Batch, n_out, 2> &workspace)
-  {
-    using T1 = dealii::Tensor<1, Batch::dim>;
-    internal::parallel_assign(J, batch_s.size(), {});
-    if constexpr (internal::has_batch_ad_jacobians<Model>)
-      internal::seed_stacked_jacobian<n_out, 2>(
-          [&](auto &out, const auto &ad, const size_t n_blocks) {
-            evaluate_ldg_numflux<to>(model, out, internal::stack_normals(workspace.normals, normals, n_blocks), ad[0],
-                                     ad[1]);
-          },
-          [&](const size_t i, const uint side) -> auto & { return J[i][side]; }, std::array{&batch_s, &batch_n},
-          max_stacked, Term::flux, workspace, internal::seeds_extractors<Model>);
-    else
-      internal::for_each_state_pair(batch_s, batch_n, [&](const size_t i, const auto &x, const auto &s, const auto &n) {
-        std::array<SimpleMatrix<T1, n_out, Batch::n_fe_functions>, 2> jF;
-        model.template jacobian_numflux<to - 1, to>(jF, normals[i], x, s.values, n.values);
-        J[i][0].j_flux = jF[0];
-        J[i][1].j_flux = jF[1];
-      });
-  }
+    /// Jacobian of the numerical flux of LDG level `to` with respect to both traces; see evaluate_ldg_level_jacobian.
+    template <uint to, typename Model, typename Batch, size_t n_out>
+    void evaluate_ldg_numflux_jacobian(const Model &model,
+                                       std::vector<FaceJacobian<Batch::dim, n_out, Batch::n_fe_functions, 0>> &J,
+                                       const std::vector<dealii::Tensor<1, Batch::dim>> &normals, const Batch &batch_s,
+                                       const Batch &batch_n, const size_t max_stacked,
+                                       SeedStackWorkspace<Batch, n_out, 2> &workspace)
+    {
+      using T1 = dealii::Tensor<1, Batch::dim>;
+      parallel_assign(J, batch_s.size(), {});
+      if constexpr (has_batch_ad_jacobians<Model>)
+        seed_stacked_jacobian<n_out, 2>(
+            [&](auto &out, const auto &ad, const size_t n_blocks) {
+              evaluate_ldg_numflux<to>(model, out, stack_normals(workspace.normals, normals, n_blocks), ad[0], ad[1]);
+            },
+            [&](const size_t i, const uint side) -> auto & { return J[i][side]; }, std::array{&batch_s, &batch_n},
+            max_stacked, Term::flux, workspace, seeds_extractors<Model>);
+      else
+        for_each_state_pair(batch_s, batch_n, [&](const size_t i, const auto &x, const auto &s, const auto &n) {
+          std::array<SimpleMatrix<T1, n_out, Batch::n_fe_functions>, 2> jF;
+          model.template jacobian_numflux<to - 1, to>(jF, normals[i], x, s.values, n.values);
+          J[i][0].j_flux = jF[0];
+          J[i][1].j_flux = jF[1];
+        });
+    }
+  } // namespace internal
 } // namespace DiFfRG

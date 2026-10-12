@@ -1,14 +1,20 @@
 #pragma once
 
 // standard library
+#include <DiFfRG/discretization/common/snapshot_state.hh>
+
 #include <limits>
+#include <stdexcept>
+#include <vector>
 
 namespace DiFfRG
 {
   /**
-   * @brief Implement a simple interface to do all adaptivity tasks, i.e. solution transfer, reinit of dofHandlers, etc.
+   * @brief Interface of mesh adaptors: decide when to adapt the mesh, adapt it, and transfer the solution.
    *
-   * @tparam Assembler The used assembler should implement the methods refinement_indicator and reinit
+   * Implementations: HAdaptivity (refinement and coarsening of cells) and NoAdaptivity (fixed mesh).
+   *
+   * @tparam VectorType Vector type of the spatial solution.
    */
   template <typename VectorType> class AbstractAdaptor
   {
@@ -16,30 +22,53 @@ namespace DiFfRG
     virtual ~AbstractAdaptor() = default;
 
     /**
-     * @brief Check if an adaptation step should be done and tranfer the given solution to the new mesh.
+     * @brief Adapt the mesh if one is due at time @p t, and transfer @p sol to the new mesh.
      *
-     * @param t Current time; at adapt_dt time distances we perform an adaptation
-     * @param sol Current solution
-     * @return true if adapation has happened, false otherwise
+     * @param t The current RG time.
+     * @param sol The current solution; resized and interpolated if the mesh changed.
+     * @return true if the mesh changed.
      */
     virtual bool operator()(const double t, VectorType &sol) = 0;
 
     /**
-     * @brief Force an adaptation and transfer the solution sol to the new mes
+     * @brief As operator()(t, sol), but also transfers the vectors in @p also_transfer (states on the same mesh as
+     * @p sol, e.g. a stepper's earlier checkpoints) to the new mesh.
+     *
+     * The default implementation can transfer nothing else: it throws if an adaptation happened and
+     * @p also_transfer is not empty.
+     */
+    virtual bool adapt_at(const double t, VectorType &sol, const std::vector<VectorType *> &also_transfer)
+    {
+      const bool adapted = (*this)(t, sol);
+      if (adapted && !also_transfer.empty())
+        throw std::logic_error("This mesh adaptor cannot transfer additional vectors; implement adapt_at().");
+      return adapted;
+    }
 
-     * @param solution to be transferred
+    /**
+     * @brief Adapt the mesh now, regardless of the schedule, and transfer @p solution to the new mesh.
+     *
+     * @return true if the mesh changed.
      */
     virtual bool adapt(VectorType &solution) = 0;
 
     /**
      * @brief The time of the last adaptation, or NaN if this adaptor keeps no such schedule.
      *
-     * Stored in flow snapshots, so that a restarted flow adapts at the same times as the
-     * uninterrupted one would have.
+     * Stored in flow snapshots, so that a restarted flow adapts at the same times as an uninterrupted one.
      */
     virtual double last_adaptation_time() const { return std::numeric_limits<double>::quiet_NaN(); }
 
-    /** @brief Restore the adaptation schedule from a snapshot; see last_adaptation_time(). */
+    /// Restore the adaptation schedule from a snapshot; see last_adaptation_time().
     virtual void set_last_adaptation_time(const double /*t*/) {}
+
+    /**
+     * @brief Store what later adaptations depend on beyond the schedule (e.g. the age of cells), for flow snapshots.
+     *
+     * load_state() is called on a restart once the mesh of the snapshot is rebuilt.
+     */
+    virtual void save_state([[maybe_unused]] ModelState &state) const {}
+    /// Restore what save_state() stored.
+    virtual void load_state([[maybe_unused]] const ModelState &state) {}
   };
 } // namespace DiFfRG

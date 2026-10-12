@@ -12,49 +12,38 @@
 namespace DiFfRG
 {
   /**
-   * @brief A class to output data to a CSV file.
+   * @brief One CSV table with one row per output frame.
    *
-   * In every time step, the user can add values to the output, which will be written to the file when flush is called.
-   * Every timestep has to contain the same values, but the order in which they are added can change.
+   * Columns: `t`, then `k [GeV]` \f$= \Lambda e^{-t}\f$ if \f$\Lambda > 0\f$ was set, then the values in the order
+   * in which they were added in the first frame. Every frame must add exactly the same names (in any order), each
+   * once; otherwise flush() throws. Applications obtain one through OutputFrame::table rather than constructing it.
    */
   class CsvOutput
   {
   public:
     /**
-     * @brief Construct a new Csv Output object
-     *
-     * @param top_folder The top folder to store the output in.
-     * @param output_name The name of the output file.
-     * @param config The ConfigTree object containing the parameters.
+     * @brief Create (truncate) the file @p top_folder / @p output_name, creating folders as needed.
      */
     CsvOutput(const std::string top_folder, const std::string output_name);
+    /// The ConfigTree is ignored.
     [[deprecated("Use CsvOutput(top_folder, output_name) instead")]] CsvOutput(
         const std::string top_folder, const std::string output_name, [[maybe_unused]] const ConfigTree &config)
         : CsvOutput(std::move(top_folder), std::move(output_name))
     {
     }
 
-    /**
-     * @brief Add a value to the output.
-     *
-     * @param name The name of the value.
-     * @param value The value to add.
-     */
+    /// Add the value of column @p name to the current frame; throws if @p name was already added in this frame.
     void value(const std::string &name, const double value);
 
-    /**
-     * @brief Add a value to the output.
-     *
-     * @param name The name of the value.
-     * @param value The value to add.
-     */
+    /// Write the current frame as one row at RG time @p time (the first call also writes the header).
     void flush(const double time);
+    /// Throw if the current frame does not contain exactly the columns of the first frame.
     void validate_frame() const;
 
     /**
-     * @brief Set the value of Lambda. If Lambda is set, the output will contain a column for k = exp(-t) * Lambda.
+     * @brief Set \f$\Lambda\f$; if \f$\Lambda > 0\f$, a column `k [GeV]` \f$= \Lambda e^{-t}\f$ is added.
      *
-     * @param Lambda The value of Lambda.
+     * Must be called before the first flush(); changing it afterwards throws.
      */
     void set_Lambda(const double Lambda);
 
@@ -64,12 +53,13 @@ namespace DiFfRG
     std::ofstream output_stream;
 
     std::vector<std::string> insertion_order;
-    std::unordered_map<std::string, std::vector<double>> values;
+    /// The values of the current frame.
+    std::unordered_map<std::string, double> values;
     std::unordered_set<std::string> written_this_frame;
 
     std::vector<std::string> header;
-    std::vector<double> time_values;
-    std::vector<double> k_values;
+    /// Number of rows written.
+    std::size_t n_frames = 0;
 
     double Lambda;
   };

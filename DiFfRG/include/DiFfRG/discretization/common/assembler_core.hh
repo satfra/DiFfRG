@@ -37,6 +37,48 @@ namespace DiFfRG
   namespace internal
   {
     /**
+     * @brief A solution vector, and optionally its time derivative, with the constraints applied: hanging-node
+     * values from their masters, and the model's affine constraints. The timesteppers do not apply them, so the
+     * constrained entries of their vectors are stale, and the assemblers read this instead.
+     *
+     * Applying the constraints is affine, D(x) = C x + g, so the time derivative is D(u + u_dot) - D(u) = C u_dot.
+     * Without constraints nothing is copied.
+     */
+    template <typename VectorType> class ConstrainedSolution
+    {
+    public:
+      template <typename Constraints>
+      ConstrainedSolution(const Constraints &constraints, const VectorType &u) : u_ptr(&u)
+      {
+        if (constraints.n_constraints() == 0) return;
+        u_copy.emplace(u);
+        constraints.distribute(*u_copy);
+        u_ptr = &*u_copy;
+      }
+      template <typename Constraints>
+      ConstrainedSolution(const Constraints &constraints, const VectorType &u, const VectorType &u_dot)
+          : ConstrainedSolution(constraints, u)
+      {
+        u_dot_ptr = &u_dot;
+        if (!u_copy) return;
+        u_dot_copy.emplace(u);
+        *u_dot_copy += u_dot;
+        constraints.distribute(*u_dot_copy);
+        *u_dot_copy -= *u_copy;
+        u_dot_ptr = &*u_dot_copy;
+      }
+      ConstrainedSolution(const ConstrainedSolution &) = delete;
+      ConstrainedSolution &operator=(const ConstrainedSolution &) = delete;
+
+      const VectorType &u() const { return *u_ptr; }
+      const VectorType &u_dot() const { return *u_dot_ptr; }
+
+    private:
+      std::optional<VectorType> u_copy, u_dot_copy;
+      const VectorType *u_ptr = nullptr, *u_dot_ptr = nullptr;
+    };
+
+    /**
      * @brief What every assembler (CG, DG, LDG, KT) does the same way: the EoM search, the extractors and their
      * jacobian, the readouts, the variables' residual, the constraints, the mass matrix, the linear-algebra setup
      * and the timings.
@@ -118,11 +160,17 @@ namespace DiFfRG
       virtual IndexSet get_differential_indices() const override
       {
         ComponentMask component_mask(model.template differential_components<dim>());
+        IndexSet differential = DoFTools::extract_dofs(dof_handler, component_mask);
+        // A constrained dof (hanging node, model affine constraint) has an empty residual row: its value is fixed by
+        // the constraints, not by an equation, see constrained().
+        IndexSet constrained_dofs(dof_handler.n_dofs());
+        for (const auto &line : discretization.get_constraints().get_lines())
+          constrained_dofs.add_index(line.index);
+        differential.subtract_set(constrained_dofs);
         // Restricted to owned rows under the distributed policy: deal.II writes every index of this set into a
         // distributed vector and compresses with VectorOperation::insert, so an unrestricted set has every rank
         // inserting into every entry.
-        return restrict_to_owned<VectorType>(DoFTools::extract_dofs(dof_handler, component_mask),
-                                             discretization.get_locally_owned_dofs());
+        return restrict_to_owned<VectorType>(differential, discretization.get_locally_owned_dofs());
       }
 
       virtual SnapshotSpatialState capture_snapshot_state(const VectorType &spatial_replica) const override
@@ -145,6 +193,25 @@ namespace DiFfRG
         return DiFfRG::internal::load_model_state(model, state);
       }
 
+      /// The model's needs_restart at the EoM of @p solution, if it defines one; see DiFfRG::HasNeedsRestart.
+      virtual bool needs_restart([[maybe_unused]] const double t,
+                                 [[maybe_unused]] const VectorType &solution) const override
+      {
+        if constexpr (HasNeedsRestart<Model, dim, NumberType>) {
+          auto cell = EoM_cell;
+          const auto EoM =
+              locate_EoM(
+                  cell, solution, [&](const auto &p, const auto &values) { return model.EoM(p, values); },
+                  [&](const auto &p, const auto &values) { return model.EoM_postprocess(p, values); })
+                  .point;
+          derived().prepare_point_evaluation(solution);
+          return model.template needs_restart<dim, NumberType>(t, EoM, derived().extractor_sample(solution));
+        } else
+          return false;
+      }
+
+      virtual bool requests_restarts() const override { return HasNeedsRestart<Model, dim, NumberType>; }
+
       using AbstractBase::attach_data_output;
       /// The FE functions, their time derivatives and residuals (when given), and the model's readouts.
       virtual void attach_data_output(OutputFrame<dim, VectorType> &data_out, const VectorType &solution,
@@ -157,12 +224,14 @@ namespace DiFfRG
           names_dot.push_back(name + "_dot");
           names_residual.push_back(name + "_residual");
         }
+        const auto state = dt_solution.size() > 0 ? constrained(solution, dt_solution) : constrained(solution);
+        const VectorType &u = state.u();
         auto fe_out = data_out.fields();
-        fe_out.attach(dof_handler, solution, names);
-        if (dt_solution.size() > 0) fe_out.attach(dof_handler, dt_solution, names_dot);
+        fe_out.attach(dof_handler, u, names);
+        if (dt_solution.size() > 0) fe_out.attach(dof_handler, state.u_dot(), names_dot);
         if (residual.size() > 0) fe_out.attach(dof_handler, residual, names_residual);
 
-        readouts(data_out, solution, variables);
+        readouts(data_out, u, variables);
       }
 
       /// The model's dt_variables, with the extractors at the EoM.
@@ -172,7 +241,7 @@ namespace DiFfRG
         Timer timer;
         Extractors extracted{};
         if constexpr (Components::count_extractors() > 0)
-          extract(extracted, spatial_solution, variables, true, false, false);
+          extract(extracted, constrained(spatial_solution).u(), variables, true, false, false);
         model.dt_variables(residual, v_tie(variables, std::as_const(extracted)));
         Kokkos::fence();
         timings_variable_residual.push_back(timer.wall_time());
@@ -184,7 +253,7 @@ namespace DiFfRG
         Timer timer;
         Extractors extracted{};
         if constexpr (Components::count_extractors() > 0)
-          extract(extracted, spatial_solution, variables, true, false, false);
+          extract(extracted, constrained(spatial_solution).u(), variables, true, false, false);
         model.template jacobian_variables<0>(jacobian, v_tie(variables, std::as_const(extracted)));
         Kokkos::fence();
         timings_variable_jacobian.push_back(timer.wall_time());
@@ -379,14 +448,31 @@ namespace DiFfRG
                     const VectorType &variables) const
       {
         derived().prepare_point_evaluation(solution);
-        auto potential = reconstruct_potential(solution);
+        // The raw potential is a solve over the whole mesh; skip it if neither the model nor the output reads it.
+        constexpr bool model_reads_potential =
+            Model::readouts_use_potential || (Components::count_extractors() > 0 && Model::extract_uses_potential);
+        if (model_reads_potential || data_out.writes_raw_potential()) {
+          auto potential = reconstruct_potential(solution);
+          readouts_with(data_out, solution, variables, potential);
+          data_out.attach_raw_potential(std::move(potential));
+        } else if constexpr (!model_reads_potential)
+          readouts_with(data_out, solution, variables, UnusedPotential{});
+      }
+
+      /// readouts() with the raw potential @p potential (or UnusedPotential) in the solution tuples.
+      template <typename Potential>
+      void readouts_with(OutputFrame<dim, VectorType> &data_out, const VectorType &solution,
+                         const VectorType &variables, const Potential &potential) const
+      {
         // GCC 16 fails to find members inside `if constexpr` in this variadic lambda; keep `this->`.
         auto helper = [&](auto &&...args) {
           if constexpr (sizeof...(args) == 3) {
             auto &&[id, EoMfun, outputter] = std::forward_as_tuple(std::forward<decltype(args)>(args)...);
             data_out.register_readout(id);
             auto cell = this->EoM_cell;
-            auto EoM_result = this->locate_EoM(cell, solution, EoMfun, [](const auto &p, const auto &) { return p; });
+            auto EoM_result = this->locate_EoM(cell, solution, EoMfun, [this](const auto &p, const auto &values) {
+              return this->model.EoM_postprocess(p, values);
+            });
             const auto EoM = EoM_result.point;
             const auto readout_solution = this->derived().evaluate_at(EoM, cell, solution, potential);
 
@@ -407,7 +493,6 @@ namespace DiFfRG
           }
         };
         model.readouts_multiple(helper, data_out);
-        data_out.attach_raw_potential(std::move(potential));
       }
 
       /**
@@ -475,6 +560,16 @@ namespace DiFfRG
       static double average(const std::vector<double> &t)
       {
         return t.empty() ? 0. : std::accumulate(t.begin(), t.end(), 0.) / t.size();
+      }
+
+      /// The solution (and its time derivative) with the constraints applied, see internal::ConstrainedSolution.
+      internal::ConstrainedSolution<VectorType> constrained(const VectorType &u) const
+      {
+        return {discretization.get_constraints(), u};
+      }
+      internal::ConstrainedSolution<VectorType> constrained(const VectorType &u, const VectorType &u_dot) const
+      {
+        return {discretization.get_constraints(), u, u_dot};
       }
 
       Discretization &discretization;

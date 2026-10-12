@@ -152,12 +152,8 @@ namespace DiFfRG
      * @brief Read an integer regardless of which arm boost::json stored it in.
      *
      * boost::json keeps a signed C++ integer as int64 and an unsigned one as uint64, and
-     * `as_int64()` throws on the uint64 arm. A config parsed from a file therefore reads fine
-     * while the same config built in C++ from an `unsigned` does not -- which made get_uint, the
-     * accessor that exists precisely for unsigned values, unable to read them. The failure is
-     * quiet where it matters: get_uint_or_warn catches the exception and falls back to its
-     * default, so a caller silently gets the default value instead of the one it set.
-     * as_double_relaxed above already handles both arms; these did not.
+     * `as_int64()` throws on the uint64 arm, so a config built in C++ from an `unsigned` could not
+     * be read by the integer getters.
      */
     std::int64_t as_int64_relaxed(const boost::json::value &v)
     {
@@ -215,57 +211,29 @@ namespace DiFfRG
     }
   }
 
+  // The getters with a default fall back only for a missing key; a key that is present but cannot be read as the
+  // requested type throws like the one-argument getters, instead of silently replacing the user's value.
+
   double ConfigTree::get_double(const std::string &key, const double def) const
   {
-    try {
-      return internal::as_double_relaxed(value.at_pointer(key));
-    } catch (const std::exception &e) {
-      return def;
-    }
+    return contains(key) ? get_double(key) : def;
   }
 
-  int ConfigTree::get_int(const std::string &key, const int def) const
-  {
-    // as_int64_relaxed, not as_int64: this overload swallows the exception and returns def, so
-    // reading the wrong boost::json arm here is not an error the caller ever sees -- it is a
-    // silent substitution of the default for the value they set. get_*_or_warn delegates here,
-    // so this is the path that actually bites.
-    try {
-      return internal::as_int64_relaxed(value.at_pointer(key));
-    } catch (const std::exception &e) {
-      return def;
-    }
-  }
+  int ConfigTree::get_int(const std::string &key, const int def) const { return contains(key) ? get_int(key) : def; }
 
   uint ConfigTree::get_uint(const std::string &key, const uint def) const
   {
-    // See the note on get_int(key, def) above.
-    try {
-      const std::int64_t val = internal::as_int64_relaxed(value.at_pointer(key));
-      if (val < 0 || static_cast<std::uint64_t>(val) > std::numeric_limits<uint>::max())
-        throw std::runtime_error("value is negative or does not fit in an unsigned int");
-      return static_cast<uint>(val);
-    } catch (const std::exception &e) {
-      return def;
-    }
+    return contains(key) ? get_uint(key) : def;
   }
 
   std::string ConfigTree::get_string(const std::string &key, const std::string &def) const
   {
-    try {
-      return value.at_pointer(key).as_string().c_str();
-    } catch (const std::exception &e) {
-      return def;
-    }
+    return contains(key) ? get_string(key) : def;
   }
 
   bool ConfigTree::get_bool(const std::string &key, const bool def) const
   {
-    try {
-      return value.at_pointer(key).as_bool();
-    } catch (const std::exception &e) {
-      return def;
-    }
+    return contains(key) ? get_bool(key) : def;
   }
 
   bool ConfigTree::contains(const std::string &key) const
@@ -311,35 +279,35 @@ namespace DiFfRG
 
   double ConfigTree::get_double_or_warn(const std::string &key, const double def) const
   {
-    if (contains(key)) return get_double(key, def);
+    if (contains(key)) return get_double(key);
     internal::warn_missing_key(key, internal::format_double(def));
     return def;
   }
 
   int ConfigTree::get_int_or_warn(const std::string &key, const int def) const
   {
-    if (contains(key)) return get_int(key, def);
+    if (contains(key)) return get_int(key);
     internal::warn_missing_key(key, std::to_string(def));
     return def;
   }
 
   uint ConfigTree::get_uint_or_warn(const std::string &key, const uint def) const
   {
-    if (contains(key)) return get_uint(key, def);
+    if (contains(key)) return get_uint(key);
     internal::warn_missing_key(key, std::to_string(def));
     return def;
   }
 
   std::string ConfigTree::get_string_or_warn(const std::string &key, const std::string &def) const
   {
-    if (contains(key)) return get_string(key, def);
+    if (contains(key)) return get_string(key);
     internal::warn_missing_key(key, "'" + def + "'");
     return def;
   }
 
   bool ConfigTree::get_bool_or_warn(const std::string &key, const bool def) const
   {
-    if (contains(key)) return get_bool(key, def);
+    if (contains(key)) return get_bool(key);
     internal::warn_missing_key(key, def ? "true" : "false");
     return def;
   }

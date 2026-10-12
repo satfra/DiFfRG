@@ -4,7 +4,7 @@
 
 DiFfRG follows a **Model → Discretization → Assembler → TimeStepper → Output** pipeline:
 
-1. **Model** — The user defines the physics by inheriting from `AbstractModel<Model, Components>` (CRTP). A model specifies the mass function, flux, source terms, and optionally numerical fluxes and boundary conditions.
+1. **Model** — The user defines the physics by inheriting from `def::AbstractModel<Model, Components>`. A model specifies the mass function, flux, source terms, and optionally numerical fluxes and boundary conditions; see [Numerical models](models.md).
 
 2. **Components** — A descriptor type that declares how many FE functions (and their polynomial orders), extractors, and additional variables the model uses.
 
@@ -17,9 +17,9 @@ DiFfRG follows a **Model → Discretization → Assembler → TimeStepper → Ou
 4. **TimeStepper** — Evolves the discretized system in RG time. Options include:
    - *Explicit*: Forward Euler, Boost Runge-Kutta, Adams-Bashforth-Moulton
    - *Implicit*: SUNDIALS IDA, implicit Euler, TRBDF2
-   - Linear/nonlinear solvers are configured underneath (UMFPack, GMRES, Newton, KINSOL).
+   - The linear solver of the implicit steppers (UMFPack, GMRES, ...) is a template argument; see [Timesteppers](timesteppers.md).
 
-5. **Output** — An `OutputSession` owns a copyable `OutputPath` handle and writes complete `OutputFrame`s to CSV, HDF5, or VTK at configurable intervals. Missing output paths use automatically cleaned temporary storage. Independent algorithms receive copyable diagnostic and reporting ports; no named output registry is global.
+5. **Output** — An `OutputSession` writes the solution and the model's readouts to HDF5, VTK and CSV files at regular RG-time intervals; see [Output](output.md).
 
 ## Directory Layout
 
@@ -27,7 +27,7 @@ DiFfRG follows a **Model → Discretization → Assembler → TimeStepper → Ou
 DiFfRG/
 ├── include/DiFfRG/
 │   ├── common/          Math utilities, JSON/TOML config, quadrature, Kokkos wrappers
-│   ├── discretization/  Assemblers (CG/DG/FV), mesh, coordinates, data output
+│   ├── discretization/  Assemblers (CG/DG/LDG/FV), mesh, coordinates, data output
 │   ├── model/           AbstractModel (CRTP), component descriptors, numerical fluxes
 │   ├── physics/         Integrators, interpolators, regulators, threshold functions
 │   └── timestepping/    Explicit/implicit steppers, linear/nonlinear solvers
@@ -35,12 +35,12 @@ DiFfRG/
 ├── tests/               Catch2 test sources
 ├── python/              Post-processing (VTK/HDF5 I/O, plotting)
 ├── Mathematica/         Symbolic computation and C++ code generation
-└── documentation/       Doxygen config and guides
+└── documentation/       This documentation (Sphinx + Doxygen)
 ```
 
 ## Configuration
 
-Simulations are configured via a `parameter.json` or `parameter.toml` file, which is read by `ConfigurationHelper` into a `ConfigTree`. Key sections:
+Simulations are configured via a `parameter.json` or `parameter.toml` file, which is read by `ConfigurationHelper` into a `ConfigTree`. Key sections (all keys are listed in the [parameter reference](parameters.md)):
 
 - `/physical/` — Physics parameters (temperature, couplings, etc.)
 - `/integration/` — Quadrature orders and tolerances for momentum integrals
@@ -65,13 +65,11 @@ x_grid = "0:1e-2:1"
 
 Nothing else changes with the format. Parameters are always addressed by the same path, both from C++ (`config.get_double("/physical/T")`) and on the command line (`-sd /physical/T=0.1`), and the configuration log written next to the output is always JSON.
 
-If no parameter file is given with `-p` and the default `parameter.json` does not exist, but `parameter.toml` does, the latter is used. A file named explicitly with `-p` is never substituted. `--generate-parameter-file` writes whichever format the parameter file name implies.
-
-`ConfigTree` was previously called `JSONValue`; that name still works as a deprecated alias.
+If no parameter file is given with `-p` and the default `parameter.json` does not exist, but `parameter.toml` does, the latter is used. A file named explicitly with `-p` is never substituted. `--generate-parameter-file` (or `--gen-toml`) writes a TOML file with the default values, `--gen-json` a JSON file; the file is named like the parameter file and an existing file is never replaced.
 
 ## Key Design Patterns
 
-- **CRTP** (Curiously Recurring Template Pattern) for zero-overhead polymorphism in models and assemblers.
+- **CRTP** (Curiously Recurring Template Pattern): a model passes its own type to its base class, so the library calls the model's methods without virtual-function overhead.
 - **Kokkos execution spaces** (`GPU_exec`, `TBB_exec`, `KokkosHost_exec`) abstract the CPU/GPU backend.
 - **C++20 concepts** constrain template parameters with clear diagnostics.
 - **Automatic differentiation** computes Jacobians without hand-coded derivatives.

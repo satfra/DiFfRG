@@ -31,19 +31,17 @@
 /**
  * @file linear_algebra.hh
  *
- * @brief All compile-time knowledge about which linear algebra types DiFfRG uses.
+ * @brief Which vector, matrix and mesh types belong together.
  *
- * This is the single place that knows the *types*: which vector belongs to which
- * matrix, which of them are distributed, and what an unqualified build gets by
- * default. It deliberately holds no runtime code -- the MPI-collective helpers that
- * branch on this knowledge live in discretization/common/la_policy.hh, and the
- * linear-solver selection lives in timestepping/default_linear_solver.hh (solvers
- * sit above this layer, so naming them here would invert the include order).
+ * Two families of linear algebra are supported:
+ * - serial: `dealii::Vector<double>` with `dealii::SparseMatrix<double>` (or the block versions), on a
+ *   `dealii::Triangulation`;
+ * - distributed (MPI builds with PETSc): `dealii::PETScWrappers::MPI::Vector` with
+ *   `PETScWrappers::MPI::SparseMatrix`, on a `dealii::parallel::shared::Triangulation`, rows split across ranks.
  *
- * Split out of common/types.hh, which now keeps only the generic C++ concepts. That
- * matters beyond tidiness: everything under physics/ needs `get_type::ctype` and
- * nothing else, yet used to pull sparse_direct.h, block_sparse_matrix.h and four
- * PETSc headers into every Kokkos/CUDA translation unit through this include.
+ * The get_type:: aliases map a vector or matrix type to its companions. Which family a discretization uses follows
+ * from its mesh (LAVectorFor, LASparseMatrixFor); an unqualified mesh follows the build (DefaultTriangulation).
+ * The linear solver that matches is chosen in timestepping/default_linear_solver.hh.
  */
 
 namespace DiFfRG
@@ -149,20 +147,22 @@ namespace DiFfRG
 #endif
     } // namespace internal
 
+    /// The entry type of a vector, e.g. `double` for `dealii::Vector<double>`.
     template <typename VectorType> using NumberType = typename internal::_NumberType<VectorType>::value;
 
+    /// The sparsity-pattern type a matrix is built from (`DynamicSparsityPattern` for PETSc matrices).
     template <typename SparseMatrixType>
     using SparsityPattern = typename internal::_SparsityPattern<SparseMatrixType>::value;
 
+    /// A direct solver for a serial matrix (UMFPACK), used by the explicit steppers to invert the mass matrix.
     template <typename SparseMatrixType>
     using InverseSparseMatrixType = typename internal::_InverseSparseMatrixType<SparseMatrixType>::value;
 
     /**
      * @brief The block-vector type belonging to a given vector type.
      *
-     * Timesteppers need this for the FE+variables run path, where the state is one
-     * block vector (block 0 = FE dofs, block 1 = variables). It used to be hard-wired
-     * to dealii::BlockVector, which silently excluded every distributed vector type.
+     * Timesteppers use it for the combined state of FE functions and variables: block 0 holds the FE degrees of
+     * freedom, block 1 the variables.
      */
     template <typename VectorType> using BlockVectorType = typename internal::_BlockVectorType<VectorType>::value;
   } // namespace get_type
@@ -170,10 +170,7 @@ namespace DiFfRG
   /**
    * @brief A vector type DiFfRG's timesteppers and assemblers can work with.
    *
-   * Satisfied exactly when the get_type trait table knows the vector's number type,
-   * i.e. for dealii::Vector/BlockVector and -- in an MPI build -- the PETSc MPI
-   * vectors. This replaces a hard `static_assert(is_same_v<VectorType, Vector<...>>)`
-   * that predated any distributed vector support.
+   * `dealii::Vector`, `dealii::BlockVector` and, in a PETSc build, the PETSc MPI vectors.
    */
   template <typename VectorType>
   concept SupportedVectorType = requires { typename get_type::internal::_NumberType<VectorType>::value; };
@@ -181,9 +178,7 @@ namespace DiFfRG
   /**
    * @brief Whether a linear algebra type distributes its rows across MPI ranks.
    *
-   * Everything the assemblers do differently under distribution keys off this one predicate, so
-   * that the assembler bodies read identically for both policies and the branching lives in
-   * la_policy.hh.
+   * True for the PETSc MPI vectors and matrices, false for the serial deal.II types.
    */
   template <typename T> inline constexpr bool is_distributed_la = false;
 
@@ -199,7 +194,7 @@ namespace DiFfRG
   // ##############################################################################
   //
   // An MPI build defaults to distributed linear algebra on a partitioned mesh; a
-  // serial build defaults to what it always did. Both halves of that choice -- the
+  // serial build defaults to serial linear algebra. Both halves of that choice -- the
   // triangulation and the vector/matrix pair -- must flip together, because a
   // distributed vector partitions its rows by rank ownership and that only exists
   // once the mesh has been partitioned.
@@ -212,12 +207,23 @@ namespace DiFfRG
   // a full-size vector that is never summed.
 
 #if defined(DEAL_II_WITH_MPI) && defined(DEAL_II_WITH_PETSC)
+/// Defined in builds with MPI and PETSc, where meshes and linear algebra are distributed by default.
 #define DIFFRG_DEFAULT_LA_DISTRIBUTED 1
 #endif
 
 #ifdef DIFFRG_DEFAULT_LA_DISTRIBUTED
+  /**
+   * @brief The triangulation an unqualified mesh (e.g. `RectangularMesh<dim>`) uses.
+   *
+   * `dealii::parallel::shared::Triangulation` in builds with MPI and PETSc, `dealii::Triangulation` otherwise.
+   */
   template <int dim> using DefaultTriangulation = dealii::parallel::shared::Triangulation<dim>;
 #else
+  /**
+   * @brief The triangulation an unqualified mesh (e.g. `RectangularMesh<dim>`) uses.
+   *
+   * `dealii::parallel::shared::Triangulation` in builds with MPI and PETSc, `dealii::Triangulation` otherwise.
+   */
   template <int dim> using DefaultTriangulation = dealii::Triangulation<dim>;
 #endif
 
@@ -230,21 +236,23 @@ namespace DiFfRG
   // exists once the mesh is partitioned. Both directions of disagreement are wrong,
   // and the Discretizations static_assert against both.
   //
-  // So derive the pair from the mesh rather than from the build configuration. That
-  // makes the mesh the single dial: naming RectangularMeshSerial<dim> pins serial
-  // linear algebra with it, which is what a test compared against a stored reference
-  // needs in an MPI build tree. Defaulting the pair to the *build* configuration
-  // instead made that pin silently insufficient -- the mesh went serial while the
-  // vectors stayed PETSc, and the mismatch only surfaced as a static_assert naming
-  // the mesh, not the vectors the caller never mentioned.
-  //
-  // A plain RectangularMesh<dim> still follows the build configuration, because its
-  // own default triangulation does; nothing about the defaulted spelling changes.
+  // So the pair is derived from the mesh, not from the build configuration: naming
+  // RectangularMeshSerial<dim> pins serial linear algebra even in an MPI build, while a
+  // plain RectangularMesh<dim> follows the build configuration.
 
 #ifdef DIFFRG_DEFAULT_LA_DISTRIBUTED
+  /**
+   * @brief The vector type for a discretization on `Mesh`: the PETSc MPI vector on a partitioned mesh
+   * (`Mesh::is_parallel`), `dealii::Vector<NumberType>` otherwise.
+   *
+   * The PETSc vector's entry type is fixed by PETSc (`PetscScalar`), independent of `NumberType`. In builds without
+   * PETSc this is always `dealii::Vector<NumberType>`. Use e.g. `RectangularMeshSerial<dim>` to force serial
+   * linear algebra in an MPI build.
+   */
   template <typename Mesh, typename NumberType>
   using LAVectorFor =
       std::conditional_t<Mesh::is_parallel, dealii::PETScWrappers::MPI::Vector, dealii::Vector<NumberType>>;
+  /// The sparse-matrix type for a discretization on `Mesh`, matching LAVectorFor.
   template <typename Mesh, typename NumberType>
   using LASparseMatrixFor =
       std::conditional_t<Mesh::is_parallel, dealii::PETScWrappers::MPI::SparseMatrix, dealii::SparseMatrix<NumberType>>;

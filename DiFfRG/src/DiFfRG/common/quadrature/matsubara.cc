@@ -238,7 +238,7 @@ namespace DiFfRG
     std::vector<NT> w(m_size, 0.);
 
     // compute the nodes and weights of the quadrature rule
-    make_quadrature(a, b, mu0, x, w);
+    internal::make_quadrature(a, b, mu0, x, w);
 
     // normalize the weights and scale the nodes
     for (int i = 0; i < m_size; ++i) {

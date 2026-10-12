@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <deal.II/base/timer.h>
 #include <deal.II/lac/block_vector.h>
-#include <deal.II/sundials/ida.h>
 #include <limits>
 #include <utility>
 
@@ -18,6 +17,8 @@
 #include <DiFfRG/discretization/data/output_session.hh>
 #include <DiFfRG/timestepping/abm_error_control.hh>
 #include <DiFfRG/timestepping/ida_rank_agreement.hh>
+#include <DiFfRG/timestepping/ida_driver.hh>
+#include <DiFfRG/timestepping/jacobian_alpha_update.hh>
 #include <DiFfRG/timestepping/linear_solver/GMRES.hh>
 #include <DiFfRG/timestepping/linear_solver/PETScDirect.hh>
 #include <DiFfRG/timestepping/linear_solver/PETScKrylov.hh>
@@ -56,6 +57,7 @@ namespace DiFfRG
     // sparsity patterns)
     SparseMatrixType spatial_jacobian;
     assembler.reinit_matrix(spatial_jacobian);
+    JacobianAlphaUpdate<VectorType, SparseMatrixType, dim> jacobian_update(assembler);
     LinearSolver<SparseMatrixType, VectorType> linSolver;
     linSolver.set_report_port(this->log);
     if constexpr (requires { linSolver.set_iterative_refinement(true); })
@@ -66,11 +68,8 @@ namespace DiFfRG
     const MPI_Comm comm = assembler.get_communicator();
     const uint n_vars = initial_data.block(1).size();
 
-    // Create a SUNDIALS IDA object with the right settings for spatial data
-    typename SUNDIALS::IDA<VectorType>::AdditionalData ida_data(t_start, t_stop, impl.dt, output_dt, impl.minimal_dt, 5,
-                                                                impl.max_non_linear_iterations, 0, impl.abs_tol,
-                                                                impl.rel_tol);
-    typename SUNDIALS::IDA<VectorType> time_stepper(ida_data);
+    // Create the IDA integrator for spatial data
+    IDADriver<VectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt));
 
     // Initialize initial condition
     VectorType spatial_y = initial_data.block(0);
@@ -80,7 +79,7 @@ namespace DiFfRG
     // process-local vectors. Under MPI the variables block of the state is owned by rank 0 alone and is read through
     // a replicated view; serially the view is a passthrough and these are plain vectors as before.
     SolutionView<VectorType> initial_variables_view;
-    reinit_variables_view(initial_variables_view, n_vars, comm);
+    internal::reinit_variables_view(initial_variables_view, n_vars, comm);
     initial_variables_view.refresh(initial_data.block(1));
     const VectorType initial_variables = initial_variables_view.get();
     VectorType variable_y = initial_variables;
@@ -276,14 +275,25 @@ namespace DiFfRG
         eigen_to_dealii(variable_buffer.back(), variable_y);
         return;
       }
-      std::size_t idx = 0;
-      for (std::size_t i = 0; i + 1 < variable_buffer_times.size(); ++i)
-        if (variable_buffer_times[i] <= t && t <= variable_buffer_times[i + 1]) idx = i;
+      // front < t < back, so the first time above t has a predecessor.
+      const std::size_t idx = std::upper_bound(variable_buffer_times.begin(), variable_buffer_times.end(), t) -
+                              variable_buffer_times.begin() - 1;
       const double t_prev = variable_buffer_times[idx];
       const double t_next = variable_buffer_times[idx + 1];
       const double alpha = (t - t_prev) / (t_next - t_prev);
       variable_ret = alpha * variable_buffer[idx + 1] + (1. - alpha) * variable_buffer[idx];
       eigen_to_dealii(variable_ret, variable_y);
+    };
+
+    // Drop the buffered trajectory before t, keeping the last point at or before t and at least two points: once a
+    // frame at t is written, IDA (and with it every query) is past t.
+    auto prune_buffer_before = [&](const double t) {
+      const std::size_t n_le = std::upper_bound(variable_buffer_times.begin(), variable_buffer_times.end(), t) -
+                               variable_buffer_times.begin();
+      const std::size_t n_drop =
+          std::min(n_le > 0 ? n_le - 1 : 0, variable_buffer.size() >= 2 ? variable_buffer.size() - 2 : 0);
+      variable_buffer.erase(variable_buffer.begin(), variable_buffer.begin() + n_drop);
+      variable_buffer_times.erase(variable_buffer_times.begin(), variable_buffer_times.begin() + n_drop);
     };
 
     // Refresh the predictor's cached dv/dt by evaluating the variable residual at the
@@ -343,12 +353,12 @@ namespace DiFfRG
     // away from fast features (a jump in the variables' right-hand side, say) nothing changes;
     // across one the step shrinks and grows back.
     internal::ABMStepControl step_control({.enabled = expl.error_control,
-                                                  .aligned = false,
-                                                  .t0 = t_start,
-                                                  .base_dt = base_dt,
-                                                  .minimal_dt = expl.minimal_dt,
-                                                  .abs_tol = expl.abs_tol,
-                                                  .rel_tol = expl.rel_tol});
+                                           .aligned = false,
+                                           .t0 = t_start,
+                                           .base_dt = base_dt,
+                                           .minimal_dt = expl.minimal_dt,
+                                           .abs_tol = expl.abs_tol,
+                                           .rel_tol = expl.rel_tol});
     auto explicit_step = [&](double &step_time) {
       step_control.step(variable_stepper, get_variable_residual, variable_sol, step_time, cur_dt,
                         [&](const double t, const double dt, const double err) {
@@ -521,6 +531,31 @@ namespace DiFfRG
       }
     };
 
+    // Serve v(t) to IDA. All three modes are independent of IDA's spatial trial state, so repeated
+    // Newton iterations at the same trial endpoint (and retries after rejection) all see
+    // the same v(t) -- which is what keeps Newton convergent when the FEM source reads v.
+    auto serve_variables = [&](VectorType &variable_y, const double t) {
+      if (mode_stagger) {
+        // Keep the explicit grid half a step ahead of the accepted region, then: queries
+        // past the current interval's midpoint fall inside the buffer -> interpolate
+        // (centered); queries still in the first half are served by the forward predictor
+        // (re-anchored at the buffer front).
+        advance_lead_half();
+        refresh_predictor_from_buffer_tail();
+        if (t <= variable_buffer_times.back() || is_close(t, variable_buffer_times.back())) {
+          interpolate_buffer(variable_y, t);
+        } else {
+          eval_predictor(variable_ret, t);
+          eigen_to_dealii(variable_ret, variable_y);
+        }
+      } else if (mode_predict) {
+        serve_lookahead(variable_y, t);
+      } else {
+        eval_predictor(variable_ret, t);
+        eigen_to_dealii(variable_ret, variable_y);
+      }
+    };
+
     // Serve the explicit variables at time t for a speculative IDA call (residual /
     // jacobian). The trial endpoint `frontier` is only committed once IDA confirms its
     // acceptance (signalled by a later request at a strictly larger time, in which case
@@ -585,28 +620,7 @@ namespace DiFfRG
         spatial_hi = spatial_y;
       }
 
-      // Serve v(t) to IDA. All three modes are independent of `spatial_y`, so repeated
-      // Newton iterations at the same trial endpoint (and retries after rejection) all see
-      // the same v(t) -- which is what keeps Newton convergent when the FEM source reads v.
-      if (mode_stagger) {
-        // Keep the explicit grid half a step ahead of the accepted region, then: queries
-        // past the current interval's midpoint fall inside the buffer -> interpolate
-        // (centered); queries still in the first half are served by the forward predictor
-        // (re-anchored at the buffer front).
-        advance_lead_half();
-        refresh_predictor_from_buffer_tail();
-        if (t <= variable_buffer_times.back() || is_close(t, variable_buffer_times.back())) {
-          interpolate_buffer(variable_y, t);
-        } else {
-          eval_predictor(variable_ret, t);
-          eigen_to_dealii(variable_ret, variable_y);
-        }
-      } else if (mode_predict) {
-        serve_lookahead(variable_y, t);
-      } else {
-        eval_predictor(variable_ret, t);
-        eigen_to_dealii(variable_ret, variable_y);
-      }
+      serve_variables(variable_y, t);
       assembler.set_time(t);
     };
 
@@ -664,8 +678,8 @@ namespace DiFfRG
 
     // Replicated views of the state for the assembler and the output path: IDA's vectors hold only this rank's rows,
     // while assembly and output read arbitrary dofs. See SolutionView and the same views in sundials_ida.cc.
-    SolutionView<VectorType> y_state, y_dot_state, sol_view, sol_dot_view, residual_view;
-    for (auto *view : {&y_state, &y_dot_state, &sol_view, &sol_dot_view, &residual_view})
+    SolutionView<VectorType> y_state, y_dot_state, sol_view, sol_dot_view, residual_view, restart_view;
+    for (auto *view : {&y_state, &y_dot_state, &sol_view, &sol_dot_view, &residual_view, &restart_view})
       assembler.reinit_solution_view(*view);
 
     // Per-dof absolute tolerances, if the model sets them (def::HasAbsTolerances); see LocalAbsTolerances.
@@ -679,10 +693,21 @@ namespace DiFfRG
 
     // Tells SUNDIALS to do an internal reset, e.g. if we do local refinement, or if the per-dof tolerances drifted
     time_stepper.solver_should_restart = [&](const double t, VectorType &sol, VectorType &sol_dot) -> bool {
-      if (adaptor(t, sol)) {
-        assembler.reinit_vector(sol_dot);
+      // sol_dot, IDA's step history (IDADriver::history) and the explicit side's spatial states move to the new
+      // mesh along with sol.
+      std::vector<VectorType *> spatial_states{&sol_dot, &spatial_lo, &spatial_hi, &spatial_pending};
+      for (auto *v : time_stepper.history())
+        spatial_states.push_back(v);
+      for (auto &ckpt : spatial_ckpts)
+        spatial_states.push_back(&ckpt);
+      if (adaptor.adapt_at(t, sol, spatial_states)) {
+        assembler.reinit_vector(spatial_eval);
+        assembler.reinit_vector(residual_placeholder);
+        residual = &residual_placeholder;
         assembler.reinit_matrix(spatial_jacobian);
-        for (auto *view : {&y_state, &y_dot_state, &sol_view, &sol_dot_view, &residual_view, &spatial_eval_view})
+        jacobian_update.forget();
+        for (auto *view :
+             {&y_state, &y_dot_state, &sol_view, &sol_dot_view, &residual_view, &spatial_eval_view, &restart_view})
           assembler.reinit_solution_view(*view);
         local_tol.init(sol);
         return true;
@@ -695,19 +720,40 @@ namespace DiFfRG
       return false;
     };
 
-    time_stepper.differential_components = [&]() { return assembler.get_differential_indices(); };
+    // A model with a discontinuity in time asks for a restart at an accepted step (see HasNeedsRestart). IDA then
+    // restarts cold, and the explicit side starts over at t as well: the variables are committed at t, the Adams
+    // history, the spatial checkpoints and the predictor slope, all of which would reach across the discontinuity,
+    // are dropped, and the explicit steps begin again with their Runge-Kutta start.
+    if (assembler.requests_restarts())
+      time_stepper.step_needs_restart = [&](const double t, const VectorType &sol, const VectorType &) {
+        // The variables at t as IDA was served them for this step, taken before the model is asked: it may change
+        // its flow in needs_restart, and they belong to the flow up to t.
+        serve_variables(variable_y, t);
+        restart_view.refresh(sol);
+        if (!assembler.needs_restart(t, restart_view.get())) return false;
+        dealii_to_eigen(variable_y, variable_sol);
+        variable_buffer.assign(1, variable_sol);
+        variable_buffer_times.assign(1, t);
+        variable_stepper = decltype(variable_stepper){};
+        spatial_ckpt_times.assign(1, t);
+        spatial_ckpts.assign(1, sol);
+        spatial_lo = spatial_hi = spatial_pending = sol;
+        spatial_lo_time = spatial_hi_time = t;
+        t_committed = t_pending = frontier = t_accepted = t;
+        // The slope after the discontinuity: the model has switched in needs_restart, so this reads the new flow.
+        refresh_dv_committed_from_buffer();
+        have_prev_dv = false;
+        look_valid = false;
+        this->log.info("Restarting the time integration at t = {:.6f} on the model's request", t);
+        return true;
+      };
 
-    // Called whenever a vector needs to initalized
-    time_stepper.reinit_vector = [&](VectorType &v) { assembler.reinit_vector(v); };
+    time_stepper.differential_components = [&]() { return assembler.get_differential_indices(); };
 
     // At output_dt intervals this function saves intermediate solutions
     double last_save = -1.;
-    // SUNDIALS::IDA::solve_dae reports the initial condition as t = 0, whatever the start time is.
-    // The first call is always that one, so it is relabelled to the actual start of the run.
-    bool initial_output = true;
-    time_stepper.output_step = [&](const double t_reported, const VectorType &sol, const VectorType &sol_dot,
+    time_stepper.output_step = [&](const double t, const VectorType &sol, const VectorType &sol_dot,
                                    uint /*step_number*/) {
-      const double t = std::exchange(initial_output, false) ? t_start : t_reported;
       if (!is_close(last_save, t, 1e-10)) {
         assembler.set_time(t);
         commit_variables(variable_y, sol, t);
@@ -720,156 +766,167 @@ namespace DiFfRG
         });
 
         last_save = t;
+        prune_buffer_before(t);
       }
     };
 
     //  Calculate the residual of y_dot + F(y)
-    time_stepper.residual = [&](const double t, const VectorType &y, const VectorType &y_dot, VectorType &res) -> int {
-      CalcDtTimer calc_timer;
-      if (is_close(t, stuck_t, impl.minimal_dt * 1e-1))
-        stuck++;
-      else {
-        stuck = 0;
-        stuck_t = t;
-      }
+    time_stepper.residual = internal::throw_on_ida_failure(
+        [&](const double t, const VectorType &y, const VectorType &y_dot, VectorType &res) -> int {
+          CalcDtTimer calc_timer;
+          if (is_close(t, stuck_t, impl.minimal_dt * 1e-1))
+            stuck++;
+          else {
+            stuck = 0;
+            stuck_t = t;
+          }
 
-      if (stuck > 200) throw std::runtime_error("timestepping got stuck at t = " + std::to_string(t));
-      if (failure_counter > 200) {
-        throw std::runtime_error("timestep failure, at t = " + std::to_string(t));
-      }
-      if (!std::isfinite(y.l1_norm())) {
-        callback_diagnostics.nonfinite_solution_failures++;
-        return ++failure_counter;
-      }
+          if (stuck > 200) throw std::runtime_error("timestepping got stuck at t = " + std::to_string(t));
+          if (failure_counter > 200) {
+            throw std::runtime_error("timestep failure, at t = " + std::to_string(t));
+          }
+          if (!std::isfinite(y.l1_norm())) {
+            callback_diagnostics.nonfinite_solution_failures++;
+            return ++failure_counter;
+          }
 
-      bool failed = false;
-      try {
-        res = 0;
-        assembler.set_time(t);
-        const auto request_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
-        ProgressEvent variables_event{.topic = progress_topics::variables, .time = t, .minimum_verbosity = 2};
-        request_diagnostics.append_to(variables_event);
-        this->log.progress(variables_event);
-        request_variables(variable_y, y, t);
-        y_state.refresh(y);
-        y_dot_state.refresh(y_dot);
-        assembler.residual(res, y_state.get(), 1., y_dot_state.get(), 1., variable_y);
-        residual = &res;
-      } catch (std::exception &e) {
-        callback_diagnostics.residual_exceptions++;
-        failed = true;
-      }
-      // An exception is local to the rank that threw; agree before the next collective.
-      if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
+          bool failed = false;
+          try {
+            res = 0;
+            assembler.set_time(t);
+            const auto request_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
+            ProgressEvent variables_event{.topic = progress_topics::variables, .time = t, .minimum_verbosity = 2};
+            request_diagnostics.append_to(variables_event);
+            this->log.progress(variables_event);
+            request_variables(variable_y, y, t);
+            y_state.refresh(y);
+            y_dot_state.refresh(y_dot);
+            assembler.residual(res, y_state.get(), 1., y_dot_state.get(), 1., variable_y);
+            residual = &res;
+          } catch (std::exception &e) {
+            callback_diagnostics.residual_exceptions++;
+            failed = true;
+          }
+          // An exception is local to the rank that threw; agree before the next collective.
+          if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
 
-      if (!std::isfinite(res.l1_norm())) {
-        callback_diagnostics.nonfinite_residual_failures++;
-        return ++failure_counter;
-      }
+          if (!std::isfinite(res.l1_norm())) {
+            callback_diagnostics.nonfinite_residual_failures++;
+            return ++failure_counter;
+          }
 
-      const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
-      ProgressEvent residual_event{.topic = progress_topics::implicit_residual,
-                                   .time = t,
-                                   .duration_ms = calc_timer.lap(),
-                                   .minimum_verbosity = 1};
-      current_diagnostics.append_to(residual_event);
-      this->log.progress(residual_event);
-
-      failure_counter = 0;
-      return 0;
-    };
-    // Calculate the jacobian d(y_dot + F(y))/dy + d(y_dot*alpha)/dy_dot
-    time_stepper.setup_jacobian = [&](const double t, const VectorType &y, const VectorType &y_dot,
-                                      const double alpha) -> int {
-      CalcDtTimer calc_timer;
-      if (failure_counter > 200) throw std::runtime_error("timestep failure at jacobian");
-
-      const auto build_diagnostics = make_ida_jacobian_build_diagnostics(time_stepper, this->next_jacobian_build_id++,
-                                                                         alpha, ImplicitTimestepperKind::ida_boost_abm);
-      JacobianMatrixDiagnostics matrix_diagnostics;
-      matrix_diagnostics.n_rows = spatial_jacobian.m();
-      JacobianFactorizationDiagnostics factorization_diagnostics;
-      bool diagnostics_recorded = false;
-      const auto record_diagnostics = [&]() {
-        if (diagnostics_recorded) return;
-        diagnostics_recorded = true;
-        record_jacobian_diagnostics(jacobian_diagnostic_port, "jacobian_diagnostics.csv", t, build_diagnostics,
-                                    matrix_diagnostics, factorization_diagnostics);
-      };
-
-      bool failed = false;
-      try {
-        spatial_jacobian = 0;
-        assembler.set_time(t);
-        const auto request_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
-        ProgressEvent variables_event{.topic = progress_topics::variables, .time = t, .minimum_verbosity = 2};
-        request_diagnostics.append_to(variables_event);
-        this->log.progress(variables_event);
-        request_variables(variable_y, y, t);
-        y_state.refresh(y);
-        y_dot_state.refresh(y_dot);
-        assembler.jacobian(spatial_jacobian, y_state.get(), 1., y_dot_state.get(), alpha, 1., variable_y);
-        if (jacobian_diagnostics_enabled) matrix_diagnostics = analyze_jacobian_matrix(spatial_jacobian);
-        linSolver.init(spatial_jacobian);
-
-        const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
-        ProgressEvent jacobian_event{
-            .topic = progress_topics::jacobian, .time = t, .duration_ms = calc_timer.lap(), .minimum_verbosity = 2};
-        current_diagnostics.append_to(jacobian_event);
-        this->log.progress(jacobian_event);
-
-        factorize_with_diagnostics(linSolver, spatial_jacobian, factorization_diagnostics,
-                                   jacobian_diagnostics_enabled);
-        if (factorization_diagnostics.factorization_success == 1.) {
           const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
-          ProgressEvent factorization_event{.topic = progress_topics::factorization,
-                                            .time = t,
-                                            .duration_ms = calc_timer.lap(),
-                                            .minimum_verbosity = 3};
-          current_diagnostics.append_to(factorization_event);
-          this->log.progress(factorization_event);
-        }
-        record_diagnostics();
-      } catch (std::exception &e) {
-        if constexpr (decltype(linSolver)::performs_factorization)
-          if (std::isnan(factorization_diagnostics.factorization_success))
-            factorization_diagnostics.factorization_success = 0.;
-        record_diagnostics();
-        callback_diagnostics.jacobian_failures++;
-        failed = true;
-      }
-      if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
+          ProgressEvent residual_event{.topic = progress_topics::implicit_residual,
+                                       .time = t,
+                                       .duration_ms = calc_timer.lap(),
+                                       .minimum_verbosity = 1};
+          current_diagnostics.append_to(residual_event);
+          this->log.progress(residual_event);
 
-      failure_counter = 0;
-      return 0;
+          failure_counter = 0;
+          return 0;
+        });
+    // Calculate the jacobian d(y_dot + F(y))/dy + d(y_dot*alpha)/dy_dot
+    time_stepper.setup_jacobian = internal::throw_on_ida_failure(
+        [&](const double t, const VectorType &y, const VectorType &y_dot, const double alpha) -> int {
+          CalcDtTimer calc_timer;
+          if (failure_counter > 200) throw std::runtime_error("timestep failure at jacobian");
+
+          const auto build_diagnostics = make_ida_jacobian_build_diagnostics(
+              time_stepper, this->next_jacobian_build_id++, alpha, ImplicitTimestepperKind::ida_boost_abm);
+          JacobianMatrixDiagnostics matrix_diagnostics;
+          matrix_diagnostics.n_rows = spatial_jacobian.m();
+          JacobianFactorizationDiagnostics factorization_diagnostics;
+          bool diagnostics_recorded = false;
+          const auto record_diagnostics = [&]() {
+            if (diagnostics_recorded) return;
+            diagnostics_recorded = true;
+            record_jacobian_diagnostics(jacobian_diagnostic_port, "jacobian_diagnostics.csv", t, build_diagnostics,
+                                        matrix_diagnostics, factorization_diagnostics);
+          };
+
+          bool failed = false;
+          try {
+            jacobian_update.forget();
+            spatial_jacobian = 0;
+            assembler.set_time(t);
+            const auto request_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
+            ProgressEvent variables_event{.topic = progress_topics::variables, .time = t, .minimum_verbosity = 2};
+            request_diagnostics.append_to(variables_event);
+            this->log.progress(variables_event);
+            request_variables(variable_y, y, t);
+            y_state.refresh(y);
+            y_dot_state.refresh(y_dot);
+            assembler.jacobian(spatial_jacobian, y_state.get(), 1., y_dot_state.get(), alpha, 1., variable_y);
+            if (jacobian_diagnostics_enabled) matrix_diagnostics = analyze_jacobian_matrix(spatial_jacobian);
+            linSolver.init(spatial_jacobian);
+
+            const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
+            ProgressEvent jacobian_event{
+                .topic = progress_topics::jacobian, .time = t, .duration_ms = calc_timer.lap(), .minimum_verbosity = 2};
+            current_diagnostics.append_to(jacobian_event);
+            this->log.progress(jacobian_event);
+
+            factorize_with_diagnostics(linSolver, spatial_jacobian, factorization_diagnostics,
+                                       jacobian_diagnostics_enabled);
+            if (factorization_diagnostics.factorization_success == 1.) {
+              const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
+              ProgressEvent factorization_event{.topic = progress_topics::factorization,
+                                                .time = t,
+                                                .duration_ms = calc_timer.lap(),
+                                                .minimum_verbosity = 3};
+              current_diagnostics.append_to(factorization_event);
+              this->log.progress(factorization_event);
+            }
+            record_diagnostics();
+          } catch (std::exception &e) {
+            if constexpr (decltype(linSolver)::performs_factorization)
+              if (std::isnan(factorization_diagnostics.factorization_success))
+                factorization_diagnostics.factorization_success = 0.;
+            record_diagnostics();
+            callback_diagnostics.jacobian_failures++;
+            failed = true;
+          }
+          if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
+
+          jacobian_update.remember(t, y_state.get(), y_dot_state.get(), alpha);
+          failure_counter = 0;
+          return 0;
+        });
+
+    // IDA only changed its step size or order: change the last Jacobian to the new alpha, see IDADriver.
+    time_stepper.update_jacobian_alpha = [&](const double, const VectorType &, const VectorType &, const double alpha) {
+      return jacobian_update.update_and_factorize(spatial_jacobian, alpha, linSolver);
     };
 
     // Solve the linear system J dst = src
-    time_stepper.solve_with_jacobian = [&](const VectorType &src, VectorType &dst, const double tol) -> int {
-      CalcDtTimer calc_timer;
-      bool failed = false;
-      try {
-        const auto sol_iterations = linSolver.solve(src, dst, tol);
-        // A direct solver reports no iterations (-1), but its time counts all the same.
-        const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
-        ProgressEvent solve_event{.topic = progress_topics::implicit_linear_solve,
-                                  .time = stuck_t,
-                                  .duration_ms = calc_timer.lap(),
-                                  .iterations = sol_iterations,
-                                  .minimum_verbosity = 2};
-        current_diagnostics.append_to(solve_event);
-        this->log.progress(solve_event);
-      } catch (std::exception &) {
-        callback_diagnostics.linear_solver_failures++;
-        failed = true;
-      }
-      if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
-      return 0;
-    };
+    time_stepper.solve_with_jacobian =
+        internal::throw_on_ida_failure([&](const VectorType &src, VectorType &dst, const double tol) -> int {
+          CalcDtTimer calc_timer;
+          bool failed = false;
+          try {
+            const auto sol_iterations = linSolver.solve(src, dst, tol);
+            // A direct solver reports no iterations (-1), but its time counts all the same.
+            const auto current_diagnostics = make_timestepping_diagnostics(time_stepper, callback_diagnostics);
+            ProgressEvent solve_event{.topic = progress_topics::implicit_linear_solve,
+                                      .time = stuck_t,
+                                      .duration_ms = calc_timer.lap(),
+                                      .iterations = sol_iterations,
+                                      .minimum_verbosity = 2};
+            current_diagnostics.append_to(solve_event);
+            this->log.progress(solve_event);
+          } catch (std::exception &) {
+            callback_diagnostics.linear_solver_failures++;
+            failed = true;
+          }
+          if (internal::agreed_ida_result(comm, failed) != 0) return ++failure_counter;
+          return 0;
+        });
 
     // Start the time loop
     try {
       time_stepper.solve_dae(spatial_y, spatial_y_dot);
+      log_ida_statistics(time_stepper, this->log);
     } catch (const std::exception &e) {
       this->log.error("Timestepping failed: {}", e.what());
       this->finalize_output_after_failure([&]() { time_stepper.output_step(stuck_t, spatial_y, spatial_y_dot, 0); });
@@ -879,8 +936,9 @@ namespace DiFfRG
     initial_data.block(0) = spatial_y;
     commit_variables(variable_y, spatial_y, t_stop);
     VectorType variables_scratch;
-    reinit_local_variables_vector(variables_scratch, n_vars);
-    compute_variables_into(initial_data.block(1), variables_scratch, [&](VectorType &out) { out = variable_y; });
+    internal::reinit_local_variables_vector(variables_scratch, n_vars);
+    internal::compute_variables_into(initial_data.block(1), variables_scratch,
+                                     [&](VectorType &out) { out = variable_y; });
     this->drain_output();
   }
 } // namespace DiFfRG

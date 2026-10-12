@@ -32,8 +32,9 @@ int main(int argc, char *argv[])
   const auto log = data_out.report_port();
   Discretization discretization(mesh, config, log);
   Assembler assembler(discretization, model, config);
-  // KT requires a fixed rectangular mesh; no h-adaptivity.
-  NoAdaptivity mesh_adaptor(assembler);
+  // h-adaptivity (1D KT only), driven by the default curvature indicator; /discretization/adaptivity/level = 0 switches
+  // it off.
+  HAdaptivity mesh_adaptor(assembler, config);
   TimeStepper time_stepper(config, assembler, data_out, mesh_adaptor);
 
   // Set up the initial condition

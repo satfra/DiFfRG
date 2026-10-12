@@ -31,8 +31,9 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief What a kernel receives in place of a LinearInterpolator1D: read-only views of its device
-   * and host buffers plus its coordinates, in one precision. See has_kernel_handle.
+   * @brief Read-only view of a LinearInterpolator1D, as passed to integration kernels.
+   *
+   * Obtained from LinearInterpolator1D::handle(); offers the same index(), at() and operator(). See has_kernel_handle.
    */
   template <typename NT, typename Coordinates> class LinearInterpolator1DHandle
   {
@@ -67,30 +68,25 @@ namespace DiFfRG
   };
 
   /**
-   * @brief A linear interpolator for 1D data, callable from host AND device code.
+   * @brief Linear interpolation of data given on a 1D grid, usable in host and device code.
    *
-   * The object owns one device-resident allocation and its host mirror, and update() leaves both
-   * current. There is therefore no memory-space template parameter and no lazily built twin in the
-   * other space: at() simply reads whichever buffer belongs to the side it is executing on.
+   * With \f$i(x)\f$ the fractional grid index of \f$x\f$ (Coordinates::backward), \f$i_0 = \lfloor i \rfloor\f$
+   * and \f$t = i - i_0\f$,
+   * \f[ f(x) = (1-t)\, f_{i_0} + t\, f_{i_0+1}\,. \f]
+   * The interpolation is linear in the grid index, i.e. linear in \f$x\f$ only for linear coordinates.
    *
-   * That dispatch cannot be an `if constexpr`. "Am I on the device" is a property of the
-   * compilation pass, not of a template argument, and only __CUDA_ARCH__ carries it. Under nvcc
-   * with a GNU host compiler KOKKOS_IF_ON_DEVICE/KOKKOS_IF_ON_HOST are a plain preprocessor
-   * selection (Kokkos_Macros.hpp; the NV_IF_TARGET spelling there is gated on
-   * KOKKOS_COMPILER_NVHPC, which this build does not use), so each pass compiles exactly one body
-   * and each pass ends in a return. This is NOT the nvcc extended-lambda `if constexpr` miscompile
-   * documented in quadrature_integrator.hh -- that one is about lambda bodies.
+   * Outside the grid the boundary value is returned (constant extrapolation). A periodic coordinate system wraps
+   * around instead. The grid needs at least 2 points (bounded axis).
    *
-   * If the dispatch is ever wrong the failure is loud rather than silent: View::operator() runs
-   * runtime_check_memory_access_violation, which Kokkos::abort()s with "attempt to access
-   * inaccessible memory space". See tests/physics/interpolation/host_device_dispatch.cc.
+   * The data is zero after construction; set it with update(). Host and device copies are kept in sync, so the same
+   * object can be evaluated on either side. A double-precision interpolator also keeps a single-precision copy, used
+   * by single-precision kernels (see handle()).
    *
-   * Like SplineInterpolator1D, a double-precision interpolator keeps a single-precision copy for
-   * single-precision kernels.
-   *
-   * @tparam NT input data type
-   * @tparam Coordinates coordinate system of the input data
+   * @tparam NT value type of the data (real, complex or autodiff)
+   * @tparam Coordinates 1D coordinate system of the grid, e.g. LinearCoordinates1D or LogarithmicCoordinates1D
    */
+  // Host/device dispatch in at() uses KOKKOS_IF_ON_DEVICE/HOST, a per-compilation-pass selection. If it is ever
+  // wrong, Kokkos aborts with "attempt to access inaccessible memory space" (see host_device_dispatch.cc in tests).
   template <typename NT, typename Coordinates> class LinearInterpolator1D
   {
     static_assert(Coordinates::dim == 1, "LinearInterpolator1D requires 1D coordinates");
@@ -116,9 +112,9 @@ namespace DiFfRG
     static constexpr size_t dim = 1;
 
     /**
-     * @brief Construct a LinearInterpolator1D with internal, zeroed data and a coordinate system.
+     * @brief Allocate zeroed data on the grid of `coordinates`.
      *
-     * @param coordinates coordinate system of the data
+     * @param coordinates coordinate system of the data; its size() is the number of grid points
      */
     LinearInterpolator1D(const Coordinates &coordinates)
         : coordinates(coordinates), size(coordinates.size()),
@@ -138,35 +134,22 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Shallow copy of BOTH views, valid in host and in device code.
-     *
-     * Carrying the HostSpace mirror into a device closure is exactly what Kokkos::DualView does:
-     * the view tracker force-disables reference counting on the device side, so the host pointer
-     * is copied and never dereferenced there. Defaulted rather than user-defined, because a
-     * host-only copy constructor makes capture into a KOKKOS_LAMBDA ill-formed.
+     * @brief Shallow copy: the copy shares the data, so later update() calls are seen by both.
      */
+    // Defaulted so that capture into a KOKKOS_LAMBDA stays well-formed; as in Kokkos::DualView, the host view is
+    // copied into device closures but never dereferenced there.
     KOKKOS_DEFAULTED_FUNCTION LinearInterpolator1D(const LinearInterpolator1D &) = default;
 
     /**
-     * @brief Replace the data, leaving host AND device current. The only mutator.
+     * @brief Replace the data. Host and device copies are both current when this returns.
      *
-     * The mirror is filled by a plain host copy rather than a Kokkos::deep_copy. A deep_copy
-     * dispatches onto an execution space and would have to be fenced before the H2D below could be
-     * enqueued; a memcpy/loop is complete when it returns. That is what leaves exactly one fence in
-     * this function.
-     *
-     * The trailing fence is NOT optional: it is what lets the caller refill host_data on the next
-     * update() without racing an in-flight H2D copy. Dropping it requires double-buffering the
-     * host staging array.
-     *
-     * The H2D names an execution space instance. The space-less deep_copy brackets EVERY copy in a
-     * global Kokkos::fence() that synchronizes all execution space instances of all enabled
-     * backends -- measured at ~11.4 cudaDeviceSynchronize calls per copy, i.e. ~98k device-wide
-     * barriers in a single 425-RHS YangMills solve. This copy only needs to be ordered against the
-     * kernels that read it, which share this execution space instance.
+     * @param in_data values at the grid points, `get_coordinates().size()` entries, converted to NT
      */
     template <typename NT2> void update(const NT2 *in_data)
     {
+      // Host fill by memcpy/loop (complete on return), then one H2D copy on a named execution space instance: the
+      // space-less deep_copy would fence every backend globally. The trailing fence lets the next update() refill
+      // host_data without racing the copy.
       if constexpr (std::is_same_v<NT, NT2> && std::is_trivially_copyable_v<NT>)
         std::memcpy(host_data.data(), in_data, size * sizeof(NT));
       else
@@ -186,8 +169,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief The compact view of this interpolator a kernel computing in CT receives, see
-     * has_kernel_handle: the single-precision copy for a float kernel, the data itself otherwise.
+     * @brief The read-only view a kernel computing in precision CT receives (see has_kernel_handle).
+     *
+     * For CT = float and double data this reads the single-precision copy, otherwise the data itself.
      */
     template <typename CT> auto handle() const
     {
@@ -200,20 +184,17 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Host-side element access. Always valid, including on a copy.
+     * @brief Value at grid point i (host only).
      */
     NT operator[](size_t i) const { return host_data(i); }
 
     /**
-     * @brief Map a physical coordinate onto the grid index.
+     * @brief Fractional grid index of the point x, i.e. Coordinates::backward(x).
      *
-     * Split out for the same reason as in SplineInterpolator1D: for a logarithmic or focused-log
-     * axis Coordinates::backward is a fp64 log/log1p costing ~200 fp64 instructions, and a kernel
-     * evaluating several dressings at one momentum otherwise pays it once per dressing (the
-     * compiler cannot CSE it, since each interpolator owns its own coordinate members).
+     * `f(x) == f.at(f.index(x))`. Several interpolators on the same coordinate system can share one index() call,
+     * which saves the (possibly expensive) coordinate transform.
      *
-     * Depends only on the coordinate system, so the result may be shared across interpolators that
-     * share one -- stencil resolution and clamping stay in at().
+     * @param x physical coordinate
      */
     typename Coordinates::ctype KOKKOS_FUNCTION index(const typename Coordinates::ctype x) const
     {
@@ -221,7 +202,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Interpolate at a grid index previously obtained from index().
+     * @brief Interpolate at a fractional grid index, as returned by index().
+     *
+     * @param idx fractional grid index; values outside [0, size-1] are clamped (or wrapped, if periodic)
      */
     NT KOKKOS_FUNCTION at(const typename Coordinates::ctype idx) const
     {
@@ -230,7 +213,9 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Interpolate the data at a given point.
+     * @brief Interpolate the data at the point x.
+     *
+     * @param x physical coordinate
      */
     NT KOKKOS_FUNCTION operator()(const typename Coordinates::ctype x) const { return at(index(x)); }
 
@@ -242,10 +227,7 @@ namespace DiFfRG
     const Coordinates &get_coordinates() const { return coordinates; }
 
     /**
-     * @brief Read-only handle to the host values.
-     *
-     * Deliberately const: there is no public way to push a host-side edit to the device, so a
-     * write handle could only ever desynchronize the two. Route mutations through update().
+     * @brief Pointer to the host copy of the values (read-only; change the data with update()).
      */
     const NT *data() const { return host_data.data(); }
 

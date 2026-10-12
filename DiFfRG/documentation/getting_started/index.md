@@ -4,7 +4,12 @@
 :maxdepth: 2
 
 installation
-models
 structure
+models
+parameters
+timesteppers
+output
 snapshots
+mpi
+troubleshooting
 ```

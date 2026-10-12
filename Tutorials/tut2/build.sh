@@ -21,5 +21,5 @@ scriptpath="$(
 
 mkdir -p build
 cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS='-O3 -march=native -ffast-math -fno-finite-math-only' ..
+cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j"$threads"

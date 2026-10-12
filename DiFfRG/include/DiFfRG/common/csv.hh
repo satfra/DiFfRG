@@ -6,20 +6,27 @@
 #include <string_view>
 #include <vector>
 
+/**
+ * @file csv.hh
+ * @brief Reading and writing numeric CSV files.
+ */
+
 namespace DiFfRG
 {
   /**
    * @brief The CSV dialect DiFfRG reads and writes.
    *
-   * The same rules are implemented by the analysis-side readers in julia/src/io/csv.jl and
-   * python/DiFfRG/file_io/csv.py, so a file written by CsvOutput loads identically in all three.
+   * The Python reader python/DiFfRG/file_io/csv.py implements the same rules.
    *
-   * Data cells hold numbers only and are parsed with std::from_chars, which is locale-independent.
-   * A cell that is empty or does not parse becomes NaN rather than raising, so a run that wrote an
-   * inf or left a gap still loads and the gap stays visible in the data. Header names may be quoted
-   * in the RFC-4180 sense, which is the only way a name can contain the separator. Rows whose field
-   * count differs from the header are skipped. Comment lines, blank lines, a UTF-8 BOM and CRLF
-   * line endings are all tolerated.
+   * - Data cells hold numbers only; parsing does not depend on the locale.
+   * - A cell that is empty or does not parse reads as NaN, so gaps stay visible in the data. `inf` and `-inf` are
+   *   read as infinities.
+   * - Header names may be quoted with `"` (a quote inside is written `""`), which is the only way a name can
+   *   contain the separator. A quoted name cannot span several lines.
+   * - Rows whose number of fields differs from the first row (the header, if there is one) are skipped with a
+   *   warning.
+   * - Blank lines, lines whose first non-space character is the comment character, a UTF-8 byte order mark
+   *   and Windows line endings are tolerated.
    */
   struct CsvDialect {
     /** The character separating fields within a line. */
@@ -42,7 +49,9 @@ namespace DiFfRG
     /** One vector of values per column. All columns have the same length. */
     std::vector<std::vector<double>> columns;
 
+    /// Number of data rows (header, comments and skipped rows not counted).
     size_t n_rows() const;
+    /// Number of columns.
     size_t n_cols() const;
 
     /**
@@ -77,23 +86,36 @@ namespace DiFfRG
   /**
    * @brief Split one CSV line into its fields, honouring quoting.
    *
-   * Exposed because it is the one place that defines what a field boundary is; both the reader and
-   * the header path use it.
+   * @param line One line, without the line break.
+   * @param separator The field separator.
    */
   std::vector<std::string> split_csv_line(std::string_view line, char separator);
 
   /**
-   * @brief Parse a single numeric cell, yielding NaN for anything that is not a number.
+   * @brief Parse a single numeric cell; NaN for anything that is not a number (infinities are kept).
+   *
+   * @param field The cell text; surrounding whitespace and a leading `+` are allowed.
    */
   double parse_csv_cell(std::string_view field);
 
   /**
-   * @brief Write a header row, quoting any name that would otherwise forge a field boundary.
+   * @brief Write a header row. Line breaks in names become spaces; names containing the separator or `"`, or
+   * starting with the comment character, are quoted.
+   *
+   * @param stream The stream to write to.
+   * @param names The column names.
+   * @param dialect Provides the separator.
    */
   void write_csv_header(std::ostream &stream, const std::vector<std::string> &names, const CsvDialect &dialect = {});
 
   /**
-   * @brief Write one row of values.
+   * @brief Write one row of values, followed by a line break.
+   *
+   * The number format (precision) is that of `stream`.
+   *
+   * @param stream The stream to write to.
+   * @param values The values.
+   * @param dialect Provides the separator.
    */
   void write_csv_row(std::ostream &stream, const std::vector<double> &values, const CsvDialect &dialect = {});
 } // namespace DiFfRG

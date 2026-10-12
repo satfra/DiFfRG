@@ -2,8 +2,6 @@
 
 // standard library
 #include <cmath>
-#include <iomanip>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -12,38 +10,49 @@
 namespace DiFfRG
 {
   /**
-   * @brief This is a default time controller implementation which should be used as a base class for any other time
-   * controller. It only implements the basic tasks that should be done when advancing time, i.e. saving, aborting if the
-   * stepper got stuck, checking if the simulation is finished and restricting the minimal timestep.
+   * @brief Step-size control for the Newton-based implicit steppers (TimeStepperImplicitEuler, TimeStepperTRBDF2);
+   * base class of TC_PI.
    *
-   * @tparam NEWT the used solver type which should at least explose the methods set_ignore_nonconv(bool)->void and
-   * get_error()->double.
+   * Calls the step function, advances the time, keeps the step in [min_dt, max_dt] and ends exactly at max_t.
+   * Output is the caller's business. When the suggested step falls below min_dt, the step min_dt is taken and accepted
+   * even if Newton does not converge. This base class keeps the step size constant and aborts on the first failed step;
+   * TC_PI adapts it. Throws if the time does not advance for more than 10 steps.
+   *
+   * @tparam NEWT the solver; must provide set_ignore_nonconv(bool) and get_error().
    */
   template <typename NEWT> class TC_Default
   {
   public:
+    /**
+     * @param newton_ the solver, see NEWT.
+     * @param alg_order_ order of the time discretization, used by TC_PI.
+     * @param t_ start time.
+     * @param max_t_ final time.
+     * @param dt_ initial step.
+     * @param min_dt_, max_dt_ bounds of the step.
+     */
     TC_Default(NEWT &newton_, unsigned int alg_order_, double t_, double max_t_, double dt_, double min_dt_,
-               double max_dt_, double output_dt_)
+               double max_dt_)
         : newton(newton_), alg_order(alg_order_), t(t_), max_t(max_t_), sug_dt(dt_), min_dt(min_dt_), max_dt(max_dt_),
-          output_dt(output_dt_), cur_dt(sug_dt), last_save(t), last_t(t_), t_start(t_), stuck(0), fin(false)
+          cur_dt(sug_dt), last_t(t_), stuck(0), fin(false)
     {
     }
 
+    /// The step to take next.
     double get_dt() const { return cur_dt; }
+    /// The current time.
     double get_t() const { return t; }
-    /**
-     * @brief Get how many times in succession the timestepper was at the same time step
-     */
+    /// How many steps in a row did not advance the time.
     unsigned int get_stuck() const { return stuck; }
+    /// Whether max_t has been reached.
     bool finished() const { return fin; }
 
     /**
-     * @brief Method to perform a single time step
+     * @brief Attempt one step and plan the next.
      *
-     * @param f a function which performs a time step, of the signature void(double t, double dt)
-     * @param of a function which saves the current step to disk, of signature void(double t)
+     * @param f performs the step from t to t + dt, `void(double t, double dt)`; throws on failure.
      */
-    template <typename F, typename OF> void advance(F &f, OF &of)
+    template <typename F> void advance(F &f)
     {
       // first, try to do the timestep
       try {
@@ -63,13 +72,6 @@ namespace DiFfRG
         last_t = t;
       }
 
-      // check if the stepper should output data
-      if (t > last_save + output_dt) {
-        of(t);
-        // Anchored at the start, like the output grids of the other steppers.
-        last_save = t_start + std::floor((t - t_start) / output_dt) * output_dt;
-      }
-
       // should the suggested timestep be below the minimum timestep, tell the solver that it should
       // accept even timesteps which do not fulfill the convergence criterion (otherwise the evolution would just stop)
       newton.set_ignore_nonconv(false);
@@ -85,40 +87,21 @@ namespace DiFfRG
       if (t + cur_dt > max_t) cur_dt = max_t - t;
 
       // if we are over max_t, the timestepping is finished
-      if (t - 1e-4 * cur_dt >= max_t) {
-        of(t);
-        fin = true;
-      }
+      if (t - 1e-4 * cur_dt >= max_t) fin = true;
       // Unrecoverably stuck: throw rather than finish, since callers rely on ending at max_t.
       if (stuck > 10) {
-        of(t);
         throw std::runtime_error("Timestepping got stuck at t = " + std::to_string(t));
       }
     }
 
-    void print_step_info()
-    {
-      std::ostringstream message;
-      message << std::setw(16) << "| step from t = " << std::setw(8) << std::setprecision(5) << last_t << std::setw(8)
-              << " to t = ";
-    }
-
   protected:
-    /**
-     * @brief The default implementation of step_success does nothing except incrementing time and trying to plan the
-     * next step to hit a save point.
-     */
+    /// Called after a successful step: advance the time. The step size stays the suggested one.
     virtual void step_success()
     {
       t += cur_dt;
-      if (t + sug_dt - 1e-4 * sug_dt > last_save + output_dt)
-        cur_dt = last_save + output_dt - t;
-      else
-        cur_dt = sug_dt;
+      cur_dt = sug_dt;
     }
-    /**
-     * @brief The default implementation of step_fail immediately aborts the program.
-     */
+    /// Called after a failed step; this default throws.
     virtual void step_fail(const std::exception &e)
     {
       throw std::runtime_error("Timestepping failed. Error: \n" + std::string(e.what()));
@@ -126,8 +109,7 @@ namespace DiFfRG
 
     NEWT &newton;
     unsigned int alg_order;
-    double t, max_t, sug_dt, min_dt, max_dt, output_dt, cur_dt, last_save, last_t;
-    const double t_start;
+    double t, max_t, sug_dt, min_dt, max_dt, cur_dt, last_t;
     unsigned int stuck;
 
     bool fin;

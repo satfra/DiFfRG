@@ -1,4 +1,6 @@
 #include <catch2/catch_all.hpp>
+#include <limits>
+#include <sstream>
 
 #include <DiFfRG/common/csv.hh>
 #include <DiFfRG/common/csv_reader.hh>
@@ -21,12 +23,15 @@ namespace
     ScratchFile(const std::string &suffix, const std::string &content)
     {
       static std::mt19937_64 rng(std::random_device{}());
-      path = std::filesystem::temp_directory_path() /
-             ("diffrg_csv_" + std::to_string(rng()) + "_" + suffix);
+      path = std::filesystem::temp_directory_path() / ("diffrg_csv_" + std::to_string(rng()) + "_" + suffix);
       std::ofstream file(path, std::ios::binary);
       file << content;
     }
-    ~ScratchFile() { std::error_code ec; std::filesystem::remove(path, ec); }
+    ~ScratchFile()
+    {
+      std::error_code ec;
+      std::filesystem::remove(path, ec);
+    }
 
     ScratchFile(const ScratchFile &) = delete;
     ScratchFile &operator=(const ScratchFile &) = delete;
@@ -71,16 +76,37 @@ TEST_CASE("parse_csv reads a header", "[common][csv]")
 
 TEST_CASE("parse_csv yields NaN rather than throwing on bad cells", "[common][csv]")
 {
-  // Blank, non-numeric and non-finite cells all collapse to NaN, so that every gap in the data
-  // looks the same to the NaN filtering downstream.
-  const auto table = parse_csv("1.0,,garbage,inf,-inf,nan,2.5e\n");
+  // Blank and non-numeric cells collapse to NaN, so that every gap in the data looks the same to the NaN
+  // filtering downstream; infinities are kept.
+  const auto table = parse_csv("1.0,,garbage,nan,2.5e,inf,-inf,Infinity\n");
 
-  REQUIRE(table.n_cols() == 7);
+  REQUIRE(table.n_cols() == 8);
   CHECK(table.columns[0][0] == Catch::Approx(1.0));
-  for (size_t col = 1; col < table.n_cols(); ++col) {
+  for (size_t col = 1; col < 5; ++col) {
     INFO("column " << col);
     CHECK(std::isnan(table.columns[col][0]));
   }
+  CHECK(table.columns[5][0] == std::numeric_limits<double>::infinity());
+  CHECK(table.columns[6][0] == -std::numeric_limits<double>::infinity());
+  CHECK(table.columns[7][0] == std::numeric_limits<double>::infinity());
+}
+
+TEST_CASE("Header names survive a write and read", "[common][csv]")
+{
+  const std::vector<std::string> names{"plain", "with,comma", "with \"quote\"", "#hash", "line\nbreak"};
+  std::ostringstream out;
+  write_csv_header(out, names, CsvDialect{',', true});
+  write_csv_row(out, {1., 2., 3., 4., 5.}, CsvDialect{',', true});
+
+  const auto table = parse_csv(out.str(), CsvDialect{',', true});
+  REQUIRE(table.header.size() == names.size());
+  CHECK(table.header[0] == "plain");
+  CHECK(table.header[1] == "with,comma");
+  CHECK(table.header[2] == "with \"quote\"");
+  CHECK(table.header[3] == "#hash");
+  CHECK(table.header[4] == "line break"); // line breaks become spaces
+  REQUIRE(table.n_rows() == 1);
+  CHECK(table.columns[4][0] == 5.);
 }
 
 TEST_CASE("parse_csv tolerates the usual file-format noise", "[common][csv]")
@@ -109,7 +135,9 @@ TEST_CASE("parse_csv tolerates the usual file-format noise", "[common][csv]")
 
   SECTION("a UTF-8 BOM")
   {
-    const auto table = parse_csv("\xEF\xBB\xBF" "t,x\n1,2\n", {',', true});
+    const auto table = parse_csv("\xEF\xBB\xBF"
+                                 "t,x\n1,2\n",
+                                 {',', true});
     REQUIRE(table.header == std::vector<std::string>{"t", "x"});
     CHECK(table.columns[0][0] == Catch::Approx(1.0));
   }

@@ -36,13 +36,13 @@ namespace DiFfRG
         file_data.emplace_back(std::move(column));
     }
 
-    // Find rows that contain NaN in any column
+    // Find rows that contain a non-finite value (NaN or inf) in any column
     const size_t n_rows = file_data[0].size();
     std::vector<bool> keep(n_rows, true);
     size_t n_removed = 0;
     for (size_t i = 0; i < n_rows; ++i) {
       for (size_t j = 0; j < file_data.size(); ++j) {
-        if (std::isnan(file_data[j][i])) {
+        if (!std::isfinite(file_data[j][i])) {
           keep[i] = false;
           n_removed++;
           break;
@@ -52,10 +52,10 @@ namespace DiFfRG
 
     if (n_removed != 0) {
       ReportPort report;
-      report.warn("ExternalDataInterpolator::setup: removed {} row(s) with NaN values.", n_removed);
+      report.warn("ExternalDataInterpolator::setup: removed {} row(s) with non-finite values.", n_removed);
     }
 
-    // Remove NaN rows using copy-if pattern (O(n) per column instead of O(n*removed))
+    // Remove those rows using copy-if pattern (O(n) per column instead of O(n*removed))
     if (n_removed > 0) {
       for (size_t col = 0; col < file_data.size(); ++col) {
         size_t write = 0;
@@ -75,12 +75,9 @@ namespace DiFfRG
     for (uint i = 0; i < file_data.size(); ++i)
       interpolators.emplace_back(file_data[x_column].begin(), file_data[x_column].end(), file_data[i].begin(), order);
 
-    max_x = 0.;
-    min_x = 1e200;
-    for (const auto &x : file_data[x_column]) {
-      max_x = std::max(max_x, x);
-      min_x = std::min(min_x, x);
-    }
+    const auto [min_it, max_it] = std::minmax_element(file_data[x_column].begin(), file_data[x_column].end());
+    min_x = *min_it;
+    max_x = *max_it;
 
     // Check consistency
     if (!check_consistency(1e-4, x_column))

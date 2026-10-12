@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -18,7 +19,12 @@
 
 namespace DiFfRG
 {
-  // A concept for what is a coordinate class
+  /**
+   * @brief A coordinate system: a map from grid indices to physical coordinates.
+   *
+   * Requires `ctype` (scalar type), `dim` (number of axes), size() (number of grid points), from_linear_index(s)
+   * (the multi-index of the s-th point) and forward(multi-index) (its physical coordinates).
+   */
   template <typename T>
   concept is_coordinates = requires(T t) {
     typename T::ctype;
@@ -59,10 +65,30 @@ namespace DiFfRG
    */
   template <typename C, size_t i> inline constexpr bool is_periodic_axis_v = internal::axis_periodic<C, i>::value;
 
+  namespace internal
+  {
+    /// @p value with the fewest digits (at least 6) that read back exactly; used by the to_string() methods.
+    template <typename NT> std::string round_trip(const NT value)
+    {
+      char buffer[40];
+      for (int precision = 6; precision < std::numeric_limits<NT>::max_digits10; ++precision) {
+        std::snprintf(buffer, sizeof(buffer), "%.*g", precision, double(value));
+        if (NT(std::strtod(buffer, nullptr)) == value) return std::string(buffer);
+      }
+      std::snprintf(buffer, sizeof(buffer), "%.*g", std::numeric_limits<NT>::max_digits10, double(value));
+      return std::string(buffer);
+    }
+  } // namespace internal
+
   /**
-   * @brief Utility class for combining multiple coordinate systems into one
+   * @brief Product grid of one-dimensional coordinate systems.
    *
-   * @tparam Coordinates... the coordinate systems to combine
+   * A point has the multi-index \f$(i_0, \dots, i_{d-1})\f$ and coordinates
+   * \f$(x_0(i_0), \dots, x_{d-1}(i_{d-1}))\f$, with \f$x_k\f$ the map of the k-th axis. The linear index is
+   * row-major (last axis fastest): \f$s = (\dots(i_0 N_1 + i_1) N_2 + \dots) N_{d-1} + i_{d-1}\f$, \f$N_k\f$ the
+   * size of axis k.
+   *
+   * @tparam Coordinates The one-dimensional axes, all with the same ctype.
    */
   template <typename... Coordinates> class CoordinatePackND
   {
@@ -76,19 +102,16 @@ namespace DiFfRG
     static_assert(((Coordinates::dim == 1) && ...), "CoordinatePackND requires all coordinates to have dim 1");
 
   public:
+    /// Scalar type.
     using ctype = typename device::tuple_element<0, device::tuple<Coordinates...>>::type::ctype;
+    /// Number of axes.
     static constexpr size_t dim = sizeof...(Coordinates);
 
-    /**
-     * @brief Construct a new CoordinatePackND object
-     *
-     * @param coordinates the coordinate systems to combine
-     */
+    /// From the axes.
     CoordinatePackND(Coordinates... coordinates) : coordinates(coordinates...) {}
 
     /**
-     * @brief Convert axis by axis from a pack of the same coordinate systems in another precision,
-     * e.g. the float twin of a double grid. Implicit, like the converting constructors of the axes.
+     * @brief Convert from the same axes in another precision, e.g. float from double.
      */
     template <typename... Coordinates2>
       requires(sizeof...(Coordinates2) == sizeof...(Coordinates) &&
@@ -99,6 +122,7 @@ namespace DiFfRG
     {
     }
 
+    /// The coordinates of the point with indices @p i (one per axis; may be fractional).
     template <typename... I>
       requires(std::is_convertible_v<std::decay_t<I>, size_t> && ...)
     KOKKOS_FORCEINLINE_FUNCTION device::array<ctype, dim> forward(I &&...i) const
@@ -106,6 +130,7 @@ namespace DiFfRG
       static_assert(sizeof...(I) == sizeof...(Coordinates));
       return forward_impl(device::make_integer_sequence<int, sizeof...(I)>(), device::forward<I>(i)...);
     }
+    /// The coordinates of the point with multi-index @p coords.
     template <typename IT>
     KOKKOS_FORCEINLINE_FUNCTION device::array<ctype, dim> forward(const device::array<IT, dim> &coords) const
     {
@@ -119,6 +144,7 @@ namespace DiFfRG
       return {{device::get<Is>(coordinates).forward(device::get<Is>(device::tie(i...)))...}};
     }
 
+    /// The (fractional) grid indices of the coordinates @p i, axis by axis.
     template <typename... I> KOKKOS_FORCEINLINE_FUNCTION device::array<ctype, sizeof...(I)> backward(I &&...i) const
     {
       static_assert(sizeof...(I) == sizeof...(Coordinates));
@@ -132,6 +158,7 @@ namespace DiFfRG
       return {{device::get<Is>(coordinates).backward(device::get<Is>(device::tie(i...)))...}};
     }
 
+    /// Axis @p i.
     template <size_t i> const auto &get_coordinates() const { return device::get<i>(coordinates); }
 
     /**
@@ -140,14 +167,15 @@ namespace DiFfRG
     template <size_t i>
     using coordinate_type = typename device::tuple_element<i, device::tuple<Coordinates...>>::type;
 
+    /// Total number of points, the product of the axis sizes.
     size_t KOKKOS_FORCEINLINE_FUNCTION size() const
     {
-      // multiply all sizes
       size_t size = 1;
       constexpr_for<0, sizeof...(Coordinates), 1>([&](auto i) { size *= device::get<i>(coordinates).size(); });
       return size;
     }
 
+    /// The size of each axis.
     device::array<size_t, sizeof...(Coordinates)> KOKKOS_FORCEINLINE_FUNCTION sizes() const
     {
       device::array<size_t, sizeof...(Coordinates)> sizes;
@@ -155,6 +183,7 @@ namespace DiFfRG
       return sizes;
     }
 
+    /// The multi-index of the point with linear index @p s (row-major, last axis fastest).
     device::array<size_t, sizeof...(Coordinates)> KOKKOS_INLINE_FUNCTION from_linear_index(size_t s) const
     {
       device::array<size_t, sizeof...(Coordinates)> idx;
@@ -167,14 +196,12 @@ namespace DiFfRG
       return idx;
     }
 
+    /// Equal if the axes have the same types and are pairwise equal; false for different axis types.
     template <typename... Coordinates2>
     friend bool operator==(const CoordinatePackND<Coordinates...> &r, const CoordinatePackND<Coordinates2...> &l)
     {
-      if constexpr (sizeof...(Coordinates) != sizeof...(Coordinates2)) return false; // Different number of coordinates
-      if constexpr ((!std::is_same_v<Coordinates, Coordinates2> && ...))
-        return false; // Different types of coordinates
-      else if constexpr (sizeof...(Coordinates) == 0)
-        return true; // Empty coordinate pack, always equal
+      if constexpr (!std::is_same_v<device::tuple<Coordinates...>, device::tuple<Coordinates2...>>)
+        return false; // different axes
       else {
         // Check if all coordinates are equal
         bool equal = true;
@@ -184,6 +211,7 @@ namespace DiFfRG
       }
     }
 
+    /// "CoordinatePackND(<axis 0>, <axis 1>, ...)"; identifies the grid, e.g. in HDF5 output.
     std::string to_string() const
     {
       std::string ret = "CoordinatePackND(";
@@ -207,22 +235,10 @@ namespace DiFfRG
   };
 
   /**
-   * @brief A contiguous window into the *linear* index range of another coordinate system.
+   * @brief The points with linear indices [offset, offset + size) of another coordinate system @p Base.
    *
-   * The window is `[offset, offset + size)` of `Base`'s flattened grid, which is exactly the shape
-   * MapScheduler hands out (`part(G, r, j)`), and it is deliberately **not** a per-axis box. An
-   * earlier version derived one, by running `Base::from_linear_index()` on both ends and
-   * subtracting; that is only the same set when `dim == 1`, which is why splitting used to be
-   * restricted to one-dimensional grids and the expensive multi-angle vertex flows were assigned
-   * whole to a single rank.
-   *
-   * Carrying the linear offset instead makes the window exact in any dimension, at no cost:
-   * `from_linear_index(s)` returns the **base** multi-index of global point `offset + s`, and
-   * `forward()` is then `Base::forward` unchanged. So the position computed for a windowed point is
-   * the same fp64 value as the unwindowed run computes for that global point, which is what keeps a
-   * distributed result bitwise identical to a serial one.
-   *
-   * Only MapScheduler's four `map()` call sites construct this.
+   * from_linear_index(s) returns Base's multi-index of point offset + s, and forward() is Base's, so positions are
+   * identical to those on the full grid. Used to split map() evaluations between MPI ranks.
    */
   template <typename Base> class SubCoordinates : public Base
   {
@@ -230,35 +246,30 @@ namespace DiFfRG
     using ctype = typename Base::ctype;
     static constexpr size_t dim = Base::dim;
 
+    /// The window [@p offset, @p offset + @p size) of @p base; throws if empty or out of range.
     SubCoordinates(const Base &base, size_t offset, size_t size) : Base(base), m_offset(offset), m_size(size)
     {
       if (size == 0) throw std::runtime_error("SubCoordinates: size must be > 0");
       if (offset + size > base.size()) throw std::runtime_error("SubCoordinates: offset + size must be <= base.size()");
     }
 
-    /// Per-axis extents, which a linear window only has when the grid is one-dimensional. Nothing
-    /// on the map() path calls this -- the integrators drive everything off size() and
-    /// from_linear_index() -- so a caller that needs a box should say so at compile time rather
-    /// than receive a plausible-looking wrong answer.
+    /// Per-axis extents; only defined for dim == 1 (a linear window is not a box otherwise).
     device::array<size_t, dim> KOKKOS_FORCEINLINE_FUNCTION sizes() const
     {
       static_assert(dim == 1, "SubCoordinates is a linear index window, which is a per-axis box only for dim == 1.");
       return device::array<size_t, dim>{{m_size}};
     }
 
+    /// Number of points in the window.
     size_t KOKKOS_FORCEINLINE_FUNCTION size() const { return m_size; }
 
-    /// The base multi-index of the window's s-th point. Note this is a *base* index: it is fed
-    /// straight back into Base::forward(), which is what makes the positions identical to the
-    /// unwindowed ones.
+    /// Base's multi-index of the window's @p s-th point.
     device::array<size_t, dim> KOKKOS_INLINE_FUNCTION from_linear_index(size_t s) const
     {
       return Base::from_linear_index(m_offset + s);
     }
 
-    /// Spelled-out array rather than `forward({{i...}})`: a braced-init-list cannot deduce the
-    /// element type of the overload below, so the old spelling was ill-formed the moment anyone
-    /// called it. Nothing on the map() path does, which is why it never showed up.
+    /// Base::forward of the Base indices @p i.
     template <typename... I>
       requires(std::is_convertible_v<std::decay_t<I>, size_t> && ...)
     KOKKOS_FORCEINLINE_FUNCTION device::array<ctype, dim> forward(I &&...i) const
@@ -267,17 +278,15 @@ namespace DiFfRG
       return forward(device::array<size_t, dim>{{static_cast<size_t>(i)...}});
     }
 
-    /// Takes a *base* multi-index, i.e. what from_linear_index() above returns.
+    /// Base::forward of a Base multi-index (as returned by from_linear_index()).
     template <typename IT> KOKKOS_INLINE_FUNCTION device::array<ctype, dim> forward(device::array<IT, dim> i) const
     {
       return Base::forward(i);
     }
 
-    // backward() is deliberately not overridden: it is the inverse of forward(), which is now
-    // Base's unchanged, so Base::backward is already the right answer and is inherited as is.
+    // backward() is Base's.
 
-    /// Identifies the window, not just the base grid: the position cache in QuadratureIntegrator
-    /// keys on this, and two windows into one base grid must not collide.
+    /// "SubCoordinates(<base>, offset, size)"; identifies the window.
     std::string to_string() const
     {
       return "SubCoordinates(" + Base::to_string() + ", " + std::to_string(m_offset) + ", " + std::to_string(m_size) +
@@ -289,21 +298,33 @@ namespace DiFfRG
     size_t m_size;
   };
 
+  /**
+   * @brief Equally spaced points on [start, stop], including both ends.
+   *
+   * With N = grid_extent ≥ 2 and grid index i (real values allowed):
+   * \f[ x(i) = \mathrm{start} + i\,\frac{\mathrm{stop} - \mathrm{start}}{N - 1}\,. \f]
+   *
+   * @tparam NT Scalar type of the coordinates.
+   */
   template <typename NT = double>
     requires std::is_floating_point_v<NT>
   class LinearCoordinates1D
   {
   public:
+    /// Scalar type.
     using ctype = NT;
+    /// One axis.
     static constexpr size_t dim = 1;
 
+    /// @p grid_extent points (≥ 2, throws otherwise) from @p start to @p stop.
     LinearCoordinates1D(size_t grid_extent, double start, double stop)
         : start(start), stop(stop), grid_extent(grid_extent), parent_extent(grid_extent)
     {
-      if (grid_extent == 0) throw std::runtime_error("LinearCoordinates1D: grid_extent must be > 0");
+      if (grid_extent < 2) throw std::runtime_error("LinearCoordinates1D: grid_extent must be > 1");
       a = (stop - start) / (grid_extent - 1.);
     }
 
+    /// Convert from another precision.
     template <typename NT2>
     LinearCoordinates1D(const LinearCoordinates1D<NT2> &other)
         : LinearCoordinates1D(LinearCoordinates1D(other.parent_size(), other.start, other.stop), other.size())
@@ -311,23 +332,13 @@ namespace DiFfRG
     }
 
     /**
-     * @brief The first n points of this grid, as a grid of the same type.
+     * @brief The first @p n points of this grid, as a grid of the same type.
      *
-     * forward(i) of the result is bit-identical to forward(i) here for every i < n, and backward()
-     * is unchanged, so a kernel mapped over prefix(n) fills exactly the first n entries it would
-     * fill over the full grid. That is how to skip the upper end of a grid -- e.g. momenta p >> k
-     * whose loops have decoupled -- without a different coordinate type, and hence without
-     * regenerating kernels that take this type by name. (SubCoordinates is the general window,
-     * but a different type.)
+     * forward(i) is bit-identical to that of the full grid for i < n, and backward() is unchanged; use it to skip the
+     * upper end of a grid without changing the coordinate type. The prefix keeps the parameters and point count of the
+     * full grid (parent_size()); to_string() appends ".prefix(n)".
      *
-     * The spacing is copied, not re-derived: a grid rebuilt from n points and the prefix's last
-     * point would put its points elsewhere (by an ulp, or -- where the spacing depends on the
-     * point count -- entirely). A prefix therefore keeps its parent's parameters and point count
-     * (parent_size()), and to_string() renders it as "<parent>.prefix(n)", so the position caches
-     * and HDF5 datasets keyed on it never confuse it with the parent or with a genuine n-point
-     * grid. For a grid that is not a prefix, to_string() and operator== are unchanged.
-     *
-     * @param n number of points kept, 1 <= n <= size()
+     * @param n Number of points kept, 1 ≤ n ≤ size().
      */
     LinearCoordinates1D prefix(size_t n) const
     {
@@ -338,38 +349,34 @@ namespace DiFfRG
     /// Number of points of the grid this one is a prefix() of; size() unless it is a prefix.
     size_t KOKKOS_FORCEINLINE_FUNCTION parent_size() const { return parent_extent; }
 
+    /// The multi-index {i} of point i.
     device::array<size_t, 1> KOKKOS_FORCEINLINE_FUNCTION from_linear_index(size_t i) const
     {
       return device::array<size_t, 1>{i};
     }
 
-    /**
-     * @brief Transform from the grid to the physical space
-     *
-     * @param x grid coordinate
-     * @return NumberType physical coordinate
-     */
+    /// The coordinate \f$x(i)\f$ at grid index @p x (real values allowed).
     template <typename IT> NT KOKKOS_FORCEINLINE_FUNCTION forward(const IT &x) const { return start + a * x; }
 
+    /// As forward(x[0]).
     template <typename IT> device::array<NT, 1> KOKKOS_FORCEINLINE_FUNCTION forward(const device::array<IT, 1> &x) const
     {
       return {forward(x[0])};
     }
 
-    /**
-     * @brief Transform from the physical space to the grid
-     *
-     * @param y physical coordinate
-     * @return double grid coordinate
-     */
+    /// The inverse map: the (fractional) grid index of the coordinate @p y.
     NT KOKKOS_FORCEINLINE_FUNCTION backward(const NT &y) const { return (y - start) / a; }
 
+    /// Number of points N.
     size_t KOKKOS_FORCEINLINE_FUNCTION size() const { return grid_extent; }
 
+    /// {N}.
     device::array<size_t, 1> KOKKOS_FORCEINLINE_FUNCTION sizes() const { return {grid_extent}; }
 
+    /// First and last point.
     const NT start, stop;
 
+    /// Same precision, parameters and number of points (and the same parent, for a prefix).
     template <typename NT2>
     friend bool operator==(const LinearCoordinates1D<NT> &lhs, const LinearCoordinates1D<NT2> &rhs)
     {
@@ -378,10 +385,12 @@ namespace DiFfRG
              lhs.parent_size() == rhs.parent_size();
     }
 
+    /// "LinearCoordinates1D(N, start, stop)"; identifies the grid, e.g. in HDF5 output.
     std::string to_string() const
     {
-      return "LinearCoordinates1D(" + std::to_string(parent_extent) + ", " + std::to_string(start) + ", " +
-             std::to_string(stop) + ")" + (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
+      return "LinearCoordinates1D(" + std::to_string(parent_extent) + ", " + internal::round_trip(start) + ", " +
+             internal::round_trip(stop) + ")" +
+             (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
     }
 
   private:
@@ -397,25 +406,27 @@ namespace DiFfRG
   };
 
   /**
-   * @brief Linear coordinates on a periodic axis of period (stop - start).
+   * @brief Equally spaced points on a periodic axis of period stop - start; stop itself is excluded.
    *
-   * In contrast to LinearCoordinates1D, the endpoint is *excluded*: the grid points are
-   * start, start + a, ..., stop - a with a = (stop - start) / grid_extent, because stop and start describe the same
-   * physical point. For an angle this means one full plane of grid points less than the naive [start, stop] grid, and
-   * no duplicated, unconstrained degrees of freedom.
+   * With N = grid_extent ≥ 1: \f$ x(i) = \mathrm{start} + i\,(\mathrm{stop} - \mathrm{start})/N \f$, i.e. the
+   * points start, ..., stop - (stop - start)/N, since start and stop are the same point (e.g. an angle).
+   * backward() folds into [0, N); interpolators wrap around between the last and the first point.
    *
-   * backward() folds the returned fractional index into [0, grid_extent); interpolators aware of
-   * is_periodic_coordinate_v additionally wrap the upper stencil index around to 0.
+   * @tparam NT Scalar type of the coordinates.
    */
   template <typename NT = double>
     requires std::is_floating_point_v<NT>
   class LinearPeriodicCoordinates1D
   {
   public:
+    /// Scalar type.
     using ctype = NT;
+    /// One axis.
     static constexpr size_t dim = 1;
+    /// Marks the axis as periodic.
     static constexpr bool periodic = true;
 
+    /// @p grid_extent points (≥ 1, throws otherwise) on the period [@p start, @p stop).
     LinearPeriodicCoordinates1D(size_t grid_extent, double start, double stop)
         : start(start), stop(stop), grid_extent(grid_extent), extent(static_cast<NT>(grid_extent))
     {
@@ -423,35 +434,30 @@ namespace DiFfRG
       a = (stop - start) / NT(grid_extent);
     }
 
+    /// Convert from another precision.
     template <typename NT2>
     LinearPeriodicCoordinates1D(const LinearPeriodicCoordinates1D<NT2> &other)
         : LinearPeriodicCoordinates1D(other.size(), other.start, other.stop)
     {
     }
 
+    /// The multi-index {i} of point i.
     device::array<size_t, 1> KOKKOS_FORCEINLINE_FUNCTION from_linear_index(size_t i) const
     {
       return device::array<size_t, 1>{i};
     }
 
-    /**
-     * @brief Transform from the grid to the physical space
-     *
-     * @param x grid coordinate
-     * @return NumberType physical coordinate
-     */
+    /// The coordinate \f$x(i)\f$ at grid index @p x (real values allowed).
     template <typename IT> NT KOKKOS_FORCEINLINE_FUNCTION forward(const IT &x) const { return start + a * x; }
 
+    /// As forward(x[0]).
     template <typename IT> device::array<NT, 1> KOKKOS_FORCEINLINE_FUNCTION forward(const device::array<IT, 1> &x) const
     {
       return {forward(x[0])};
     }
 
     /**
-     * @brief Transform from the physical space to the grid, folded into [0, grid_extent)
-     *
-     * @param y physical coordinate
-     * @return double grid coordinate
+     * @brief The inverse map: the (fractional) grid index of the coordinate @p y, folded into [0, N).
      */
     NT KOKKOS_FORCEINLINE_FUNCTION backward(const NT &y) const
     {
@@ -465,12 +471,16 @@ namespace DiFfRG
       return idx;
     }
 
+    /// Number of points N.
     size_t KOKKOS_FORCEINLINE_FUNCTION size() const { return grid_extent; }
 
+    /// {N}.
     device::array<size_t, 1> KOKKOS_FORCEINLINE_FUNCTION sizes() const { return {grid_extent}; }
 
+    /// Ends of the period.
     const NT start, stop;
 
+    /// Same precision, parameters and number of points.
     template <typename NT2>
     friend bool operator==(const LinearPeriodicCoordinates1D<NT> &lhs, const LinearPeriodicCoordinates1D<NT2> &rhs)
     {
@@ -478,10 +488,11 @@ namespace DiFfRG
       return lhs.start == rhs.start && lhs.stop == rhs.stop && lhs.grid_extent == rhs.grid_extent;
     }
 
+    /// "LinearPeriodicCoordinates1D(N, start, stop)"; identifies the grid.
     std::string to_string() const
     {
-      return "LinearPeriodicCoordinates1D(" + std::to_string(grid_extent) + ", " + std::to_string(start) + ", " +
-             std::to_string(stop) + ")";
+      return "LinearPeriodicCoordinates1D(" + std::to_string(grid_extent) + ", " + internal::round_trip(start) + ", " +
+             internal::round_trip(stop) + ")";
     }
 
   private:
@@ -490,23 +501,38 @@ namespace DiFfRG
     NT a;
   };
 
+  /**
+   * @brief Points on [start, stop], including both ends, with spacing growing exponentially in the index.
+   *
+   * With N = grid_extent ≥ 2, bias b ≠ 0 and grid index i (real values allowed):
+   * \f[ x(i) = \mathrm{start} + (\mathrm{stop} - \mathrm{start})\,\frac{e^{b\,i/(N-1)} - 1}{e^{b} - 1}\,. \f]
+   * For b > 0 the points cluster near start (consecutive spacings grow by the factor \f$e^{b/(N-1)}\f$), for b < 0
+   * near stop; b → 0 approaches LinearCoordinates1D.
+   *
+   * @tparam NT Scalar type of the coordinates.
+   */
   template <typename NT = double>
     requires std::is_floating_point_v<NT>
   class LogarithmicCoordinates1D
   {
   public:
+    /// Scalar type.
     using ctype = NT;
+    /// One axis.
     static constexpr size_t dim = 1;
 
-    /// The map constants are computed in double whatever NT is, and only then rounded to NT.
+    /// @p grid_extent points (≥ 2) from @p start to @p stop with @p bias (≠ 0); throws otherwise. Constants are
+    /// computed in double.
     LogarithmicCoordinates1D(size_t grid_extent, double start, double stop, double bias)
         : start(start), stop(stop), bias(bias), grid_extent(grid_extent), parent_extent(grid_extent),
           gem1(grid_extent - 1.), gem1inv(1. / (grid_extent - 1.)), a(bias), b((stop - start) / std::expm1(bias)),
           c(start)
     {
-      if (grid_extent == 0) throw std::runtime_error("LogarithmicCoordinates1D: grid_extent must be > 0");
+      if (grid_extent < 2) throw std::runtime_error("LogarithmicCoordinates1D: grid_extent must be > 1");
+      if (bias == 0.) throw std::runtime_error("LogarithmicCoordinates1D: bias must be != 0");
     }
 
+    /// Convert from another precision.
     template <typename NT2>
     LogarithmicCoordinates1D(const LogarithmicCoordinates1D<NT2> &other)
         : LogarithmicCoordinates1D(LogarithmicCoordinates1D(other.parent_size(), other.start, other.stop, other.bias),
@@ -515,23 +541,13 @@ namespace DiFfRG
     }
 
     /**
-     * @brief The first n points of this grid, as a grid of the same type.
+     * @brief The first @p n points of this grid, as a grid of the same type.
      *
-     * forward(i) of the result is bit-identical to forward(i) here for every i < n, and backward()
-     * is unchanged, so a kernel mapped over prefix(n) fills exactly the first n entries it would
-     * fill over the full grid. That is how to skip the upper end of a grid -- e.g. momenta p >> k
-     * whose loops have decoupled -- without a different coordinate type, and hence without
-     * regenerating kernels that take this type by name. (SubCoordinates is the general window,
-     * but a different type.)
+     * forward(i) is bit-identical to that of the full grid for i < n, and backward() is unchanged; use it to skip the
+     * upper end of a grid without changing the coordinate type. The prefix keeps the parameters and point count of the
+     * full grid (parent_size()); to_string() appends ".prefix(n)".
      *
-     * The spacing is copied, not re-derived: a grid rebuilt from n points and the prefix's last
-     * point would put its points elsewhere (by an ulp, or -- where the spacing depends on the
-     * point count -- entirely). A prefix therefore keeps its parent's parameters and point count
-     * (parent_size()), and to_string() renders it as "<parent>.prefix(n)", so the position caches
-     * and HDF5 datasets keyed on it never confuse it with the parent or with a genuine n-point
-     * grid. For a grid that is not a prefix, to_string() and operator== are unchanged.
-     *
-     * @param n number of points kept, 1 <= n <= size()
+     * @param n Number of points kept, 1 ≤ n ≤ size().
      */
     LogarithmicCoordinates1D prefix(size_t n) const
     {
@@ -542,48 +558,45 @@ namespace DiFfRG
     /// Number of points of the grid this one is a prefix() of; size() unless it is a prefix.
     size_t KOKKOS_FORCEINLINE_FUNCTION parent_size() const { return parent_extent; }
 
+    /// The multi-index {i} of point i.
     device::array<size_t, 1> KOKKOS_FORCEINLINE_FUNCTION from_linear_index(size_t i) const
     {
       return device::array<size_t, 1>{i};
     }
 
-    /**
-     * @brief Transform from the grid to the physical space
-     *
-     * @param x grid coordinate
-     * @return NumberType physical coordinate
-     */
+    /// The coordinate \f$x(i)\f$ at grid index @p x (real values allowed).
     template <typename IT> NT KOKKOS_FORCEINLINE_FUNCTION forward(const IT &x) const
     {
       using Kokkos::expm1;
       return b * expm1(a * x * gem1inv) + c;
     }
 
+    /// As forward(x[0]).
     template <typename IT> device::array<NT, 1> KOKKOS_FORCEINLINE_FUNCTION forward(const device::array<IT, 1> &x) const
     {
       return {forward(x[0])};
     }
 
-    /**
-     * @brief Transform from the physical space to the grid
-     *
-     * @param y physical coordinate
-     * @return double grid coordinate
-     */
+    /// The inverse map: the (fractional) grid index of the coordinate @p y.
     NT KOKKOS_FORCEINLINE_FUNCTION backward(const NT &y) const
     {
       using Kokkos::log1p;
       return log1p((y - c) / b) * gem1 / a;
     }
 
-    NT KOKKOS_FORCEINLINE_FUNCTION backward_derivative(const NT &y) const { return 1. / (y - c) * gem1 / a; }
+    /// \f$di/dx\f$ at the coordinate @p y.
+    NT KOKKOS_FORCEINLINE_FUNCTION backward_derivative(const NT &y) const { return gem1 / (a * (b + y - c)); }
 
+    /// Number of points N.
     size_t KOKKOS_FORCEINLINE_FUNCTION size() const { return grid_extent; }
 
+    /// {N}.
     device::array<size_t, 1> KOKKOS_FORCEINLINE_FUNCTION sizes() const { return {grid_extent}; }
 
+    /// The parameters.
     const NT start, stop, bias;
 
+    /// Same precision, parameters and number of points (and the same parent, for a prefix).
     template <typename NT2>
     friend bool operator==(const LogarithmicCoordinates1D<NT> &lhs, const LogarithmicCoordinates1D<NT2> &rhs)
     {
@@ -592,15 +605,16 @@ namespace DiFfRG
              lhs.parent_size() == rhs.parent_size();
     }
 
+    /// "LogarithmicCoordinates1D(start, stop, bias, N)"; identifies the grid.
     std::string to_string() const
     {
-      return "LogarithmicCoordinates1D(" + std::to_string(start) + ", " + std::to_string(stop) + ", " +
-             std::to_string(bias) + ", " + std::to_string(parent_extent) + ")" + (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
+      return "LogarithmicCoordinates1D(" + internal::round_trip(start) + ", " + internal::round_trip(stop) + ", " +
+             internal::round_trip(bias) + ", " + std::to_string(parent_extent) + ")" +
+             (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
     }
 
   private:
-    // prefix(): the parent's parameters and spacing -- gem1/gem1inv included, which is what fixes
-    // the spacing here, since forward() divides the index by the PARENT's point count -- fewer points
+    // prefix(): the parent's parameters and spacing (gem1 is the parent's N - 1), fewer points
     LogarithmicCoordinates1D(const LogarithmicCoordinates1D &parent, size_t n)
         : start(parent.start), stop(parent.stop), bias(parent.bias), grid_extent(n),
           parent_extent(parent.parent_extent), gem1(parent.gem1), gem1inv(parent.gem1inv), a(parent.a), b(parent.b),
@@ -615,44 +629,34 @@ namespace DiFfRG
   };
 
   /**
-   * @brief Logarithmic coordinates which cluster grid points around an interior scale.
+   * @brief Points on [start, stop] (start > 0), logarithmically spaced and clustered around an interior scale
+   * `center`.
    *
-   * In contrast to LogarithmicCoordinates1D, whose single `bias` knob can only pack points towards
-   * `start`, this coordinate spends its resolution around a freely chosen `center` and lets it fall
-   * off smoothly to both sides. That is what is needed when the interesting structure sits at an
-   * intermediate scale -- e.g. the ~1 GeV peak of a gluon dressing on a grid spanning 0.005 to 250
-   * GeV -- while the deep IR and the deep UV are flat.
+   * In \f$u = \ln x\f$, with \f$u_0 = \ln(\mathrm{center})\f$, \f$c\f$ = focus and grid index i (real values
+   * allowed):
+   * \f[
+   *   u(i) = u_0 + \frac{\sinh(s_{\min} + a\,i)}{c}\,, \qquad s(u) = \operatorname{asinh}\big(c\,(u - u_0)\big)\,,
+   * \f]
+   * with \f$s_{\min} = s(\ln \mathrm{start})\f$ and \f$a = (s(\ln \mathrm{stop}) - s_{\min})/(N - 1)\f$, N =
+   * grid_extent. The point density per unit \f$u\f$ is \f$\propto 1/\sqrt{1 + c^2 (u - u_0)^2}\f$: highest at
+   * center, falling off like \f$1/(c\,|u - u_0|)\f$. c = 0 gives a geometric grid; a center outside [start, stop]
+   * gives a one-sided stretch. forward(0) returns start exactly.
    *
-   * The construction works in u = log(p) and stretches it with a sinh, the standard interior-point
-   * clustering map. With u0 = log(center) and c = focus,
-   *
-   *     forward:  u(s) = u0 + sinh(s) / c,          s = s_min + a * i uniform in the index
-   *     backward: s(u) = asinh(c * (u - u0))
-   *
-   * where s_min = s(log(start)) and a = (s(log(stop)) - s_min) / (grid_extent - 1). forward(0)
-   * returns `start` exactly and forward(grid_extent - 1) returns `stop` to a few ulp, which matters
-   * for the common idiom of pairing grid element 0 with `start` directly rather than going through
-   * forward(). The node density is dindex/du ~ 1 / sqrt(1 + c^2 (u - u0)^2), i.e. peaked at
-   * `center` and decaying like 1/(c |u - u0|), so resolution is redistributed smoothly rather than
-   * cut off at the edge of a window.
-   *
-   * `focus == 0` reproduces a pure logarithmic (geometric) grid; larger values cluster harder. As a
-   * calibration point, 64 points on [0.005, 250] with center = 1 and focus = 2 give a cell width of
-   * 0.021 decades at the center and 32 points in [0.3, 3], against 0.076 decades and 13 points for
-   * LogarithmicCoordinates1D with bias = 11 on the same interval.
-   *
-   * `center` outside [start, stop] is allowed and degenerates to a one-sided stretch.
+   * Example: 64 points on [0.005, 250] with center = 1, focus = 2 have a spacing of 0.021 decades at 1 and 32 points
+   * in [0.3, 3].
    */
   template <typename NT = double>
     requires std::is_floating_point_v<NT>
   class FocusedLogCoordinates1D
   {
   public:
+    /// Scalar type.
     using ctype = NT;
+    /// One axis.
     static constexpr size_t dim = 1;
 
     /**
-     * @brief Construct a new FocusedLogCoordinates1D object
+     * @brief The grid; throws if a parameter is out of range.
      *
      * @param grid_extent number of grid points, must be at least 2
      * @param start first grid point, must be positive
@@ -700,6 +704,7 @@ namespace DiFfRG
       g_min = pure_log ? s_min : sinh(s_min);
     }
 
+    /// Convert from another precision.
     template <typename NT2>
     FocusedLogCoordinates1D(const FocusedLogCoordinates1D<NT2> &other)
         : FocusedLogCoordinates1D(
@@ -709,23 +714,13 @@ namespace DiFfRG
     }
 
     /**
-     * @brief The first n points of this grid, as a grid of the same type.
+     * @brief The first @p n points of this grid, as a grid of the same type.
      *
-     * forward(i) of the result is bit-identical to forward(i) here for every i < n, and backward()
-     * is unchanged, so a kernel mapped over prefix(n) fills exactly the first n entries it would
-     * fill over the full grid. That is how to skip the upper end of a grid -- e.g. momenta p >> k
-     * whose loops have decoupled -- without a different coordinate type, and hence without
-     * regenerating kernels that take this type by name. (SubCoordinates is the general window,
-     * but a different type.)
+     * forward(i) is bit-identical to that of the full grid for i < n, and backward() is unchanged; use it to skip the
+     * upper end of a grid without changing the coordinate type. The prefix keeps the parameters and point count of the
+     * full grid (parent_size()); to_string() appends ".prefix(n)".
      *
-     * The spacing is copied, not re-derived: a grid rebuilt from n points and the prefix's last
-     * point would put its points elsewhere (by an ulp, or -- where the spacing depends on the
-     * point count -- entirely). A prefix therefore keeps its parent's parameters and point count
-     * (parent_size()), and to_string() renders it as "<parent>.prefix(n)", so the position caches
-     * and HDF5 datasets keyed on it never confuse it with the parent or with a genuine n-point
-     * grid. For a grid that is not a prefix, to_string() and operator== are unchanged.
-     *
-     * @param n number of points kept, 1 <= n <= size()
+     * @param n Number of points kept, 1 ≤ n ≤ size().
      */
     FocusedLogCoordinates1D prefix(size_t n) const
     {
@@ -736,46 +731,30 @@ namespace DiFfRG
     /// Number of points of the grid this one is a prefix() of; size() unless it is a prefix.
     size_t KOKKOS_FORCEINLINE_FUNCTION parent_size() const { return parent_extent; }
 
+    /// The multi-index {i} of point i.
     device::array<size_t, 1> KOKKOS_FORCEINLINE_FUNCTION from_linear_index(size_t i) const
     {
       return device::array<size_t, 1>{i};
     }
 
-    /**
-     * @brief Transform from the grid to the physical space
-     *
-     * @param x grid coordinate
-     * @return NumberType physical coordinate
-     */
+    /// The coordinate \f$x(i)\f$ at grid index @p x (real values allowed).
     template <typename IT> NT KOKKOS_FORCEINLINE_FUNCTION forward(const IT &x) const
     {
       using Kokkos::exp, Kokkos::sinh;
       const NT s = s_min + a * x;
-      // Factored as start * exp(...) rather than exp(log(start) + ...) so that x == 0 gives back
-      // start bit-for-bit: the models pair grid element 0 with the p_grid_min parameter directly.
-      // The upper end is then accurate to a handful of ulp, which nothing reads that way.
-      //
-      // The subtraction MUST happen before the multiplication by c_inv. Written the other way
-      // round, `sinh(s) * c_inv - g_min` is a multiply-add, which the compiler is free to
-      // contract into an FMA: the product is then kept at infinite precision and the ALREADY
-      // ROUNDED g_min subtracted from it, so x == 0 yields that rounding error instead of zero
-      // and start comes back off by an ulp. As written, `sinh(s) - g_min` is exactly zero at
-      // x == 0 (identical argument, same function), and 0 * c_inv is exactly zero.
+      // start * exp(...) and subtracting g_min before scaling by c_inv (no FMA contraction) make x == 0 give start
+      // exactly.
       const NT d = pure_log ? (s - g_min) : (sinh(s) - g_min) * c_inv;
       return start * exp(d);
     }
 
+    /// As forward(x[0]).
     template <typename IT> device::array<NT, 1> KOKKOS_FORCEINLINE_FUNCTION forward(const device::array<IT, 1> &x) const
     {
       return {forward(x[0])};
     }
 
-    /**
-     * @brief Transform from the physical space to the grid
-     *
-     * @param y physical coordinate
-     * @return double grid coordinate
-     */
+    /// The inverse map: the (fractional) grid index of the coordinate @p y.
     NT KOKKOS_FORCEINLINE_FUNCTION backward(const NT &y) const
     {
       using Kokkos::log;
@@ -783,6 +762,7 @@ namespace DiFfRG
       return ((pure_log ? u : s_of_u(u, c, u0)) - s_min) * a_inv;
     }
 
+    /// \f$di/dx\f$ at the coordinate @p y.
     NT KOKKOS_FORCEINLINE_FUNCTION backward_derivative(const NT &y) const
     {
       using Kokkos::log, Kokkos::sqrt;
@@ -791,12 +771,16 @@ namespace DiFfRG
       return a_inv * c / (sqrt(v * v + NT(1)) * y);
     }
 
+    /// Number of points N.
     size_t KOKKOS_FORCEINLINE_FUNCTION size() const { return grid_extent; }
 
+    /// {N}.
     device::array<size_t, 1> KOKKOS_FORCEINLINE_FUNCTION sizes() const { return {grid_extent}; }
 
+    /// The parameters.
     const NT start, stop, center, focus;
 
+    /// Same precision, parameters and number of points (and the same parent, for a prefix).
     template <typename NT2>
     friend bool operator==(const FocusedLogCoordinates1D<NT> &lhs, const FocusedLogCoordinates1D<NT2> &rhs)
     {
@@ -805,43 +789,16 @@ namespace DiFfRG
              lhs.size() == rhs.size() && lhs.parent_size() == rhs.parent_size();
     }
 
+    /// "FocusedLogCoordinates1D(N, start, stop, center, focus)"; identifies the grid.
     std::string to_string() const
     {
-      return "FocusedLogCoordinates1D(" + std::to_string(parent_extent) + ", " + round_trip(start) + ", " +
-             round_trip(stop) + ", " + round_trip(center) + ", " + round_trip(focus) + ")" + (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
+      return "FocusedLogCoordinates1D(" + std::to_string(parent_extent) + ", " + internal::round_trip(start) + ", " +
+             internal::round_trip(stop) + ", " + internal::round_trip(center) + ", " + internal::round_trip(focus) +
+             ")" + (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
     }
 
   private:
-    /**
-     * @brief Format a parameter with the fewest digits that still identify it uniquely.
-     *
-     * to_string() is the identity key of a coordinate dataset in HDF5 output, and the key that
-     * HDF5Input::load_map compares against, so two grids that differ must render differently.
-     * std::to_string would not do: it emits six decimals, under which every start below 1e-6 --
-     * a perfectly ordinary IR cutoff here -- renders as "0.000000" and distinct grids would
-     * silently share one dataset. Widening the precision until the text parses back to the
-     * original value keeps the common cases readable ("0.005", not "0.0050000000000000001") while
-     * still separating values that genuinely differ.
-     */
-    static std::string round_trip(const NT value)
-    {
-      char buffer[40];
-      for (int precision = 6; precision < std::numeric_limits<NT>::max_digits10; ++precision) {
-        std::snprintf(buffer, sizeof(buffer), "%.*g", precision, double(value));
-        if (NT(std::strtod(buffer, nullptr)) == value) return std::string(buffer);
-      }
-      std::snprintf(buffer, sizeof(buffer), "%.*g", std::numeric_limits<NT>::max_digits10, double(value));
-      return std::string(buffer);
-    }
-
-    /**
-     * @brief asinh(c * (u - u0)), written out to pick the cancellation-free branch.
-     *
-     * Naively log(v + sqrt(v^2 + 1)) cancels catastrophically for v << 0 -- these grids reach
-     * v ~ -40, where it loses several digits. Using (v + D)(D - v) = 1 to rewrite the negative
-     * branch as -log(D - v) makes both sides exact to round-off. Static and templated on the
-     * precision, as the constructor evaluates it in double.
-     */
+    /// asinh(c (u - u0)), in a form without cancellation for negative arguments.
     template <typename T> static KOKKOS_FORCEINLINE_FUNCTION T s_of_u(const T u, const T c, const T u0)
     {
       using Kokkos::log, Kokkos::sqrt;
@@ -864,6 +821,7 @@ namespace DiFfRG
     bool pure_log;
   };
 
+  /// All grid points, in linear index order, as arrays of dim coordinates.
   template <typename Coordinates> auto make_grid(const Coordinates &coordinates)
   {
     using ctype = typename Coordinates::ctype;
@@ -878,20 +836,7 @@ namespace DiFfRG
     return grid;
   }
 
-  template <typename Coordinates> auto make_idx_grid(const Coordinates &coordinates) -> std::vector<double>
-  {
-    using ctype = typename Coordinates::ctype;
-    using cortype = device::array<ctype, Coordinates::dim>;
-    std::vector<cortype> grid(coordinates.size());
-    for (size_t i = 0; i < coordinates.size(); ++i) {
-      const auto forwarded = coordinates.from_linear_index(i);
-      for (size_t j = 0; j < Coordinates::dim; ++j) {
-        grid[i][j] = forwarded[j];
-      }
-    }
-    return grid;
-  }
-
+  /// All grid points, in linear index order, flattened: point i occupies entries [i dim, (i + 1) dim).
   template <typename Coordinates> std::vector<typename Coordinates::ctype> dump_grid(const Coordinates &coordinates)
   {
     using ctype = typename Coordinates::ctype;
@@ -929,7 +874,7 @@ namespace DiFfRG
   };
   template <typename Coordinates, typename NT> using rebind_ctype_t = typename rebind_ctype<Coordinates, NT>::type;
 
-  // Definitions of useful combined coordinates
+  // Common coordinate systems (double precision)
   using LogCoordinates = LogarithmicCoordinates1D<double>;
   using LinCoordinates = LinearCoordinates1D<double>;
   using LogLogCoordinates = CoordinatePackND<LogarithmicCoordinates1D<double>, LogarithmicCoordinates1D<double>>;

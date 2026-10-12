@@ -180,6 +180,9 @@ namespace DiFfRG
       auto model = root.create_group("model");
       for (const auto &[name, values] : data.model.data())
         model.create_dataset(name, hdf5::type_of<double>(), hdf5::Dataspace::simple({values.size()})).write(values);
+      auto adaptor = root.create_group("adaptor");
+      for (const auto &[name, values] : data.adaptor.data())
+        adaptor.create_dataset(name, hdf5::type_of<double>(), hdf5::Dataspace::simple({values.size()})).write(values);
 
       // The configuration twice: verbatim, which is what a restart diffs against, and as a
       // browsable tree, the same way the run's own .h5 file records it.
@@ -224,6 +227,12 @@ namespace DiFfRG
     auto model = root.open_group("model");
     for (const auto &name : model.child_names())
       data.model.set(name, read_doubles(model, name));
+    const auto groups = root.child_names();
+    if (std::find(groups.begin(), groups.end(), "adaptor") != groups.end()) {
+      auto adaptor = root.open_group("adaptor");
+      for (const auto &name : adaptor.child_names())
+        data.adaptor.set(name, read_doubles(adaptor, name));
+    }
 
     root.open_dataset("config_json").read(data.config_json);
 

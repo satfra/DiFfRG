@@ -34,23 +34,25 @@ namespace DiFfRG
   template <uint dim, typename VectorType> class OutputSession_impl;
 
   /**
-   * Scoped collection surface for one complete output event.
+   * @brief What a model or assembler writes into during one output frame; see OutputSession for the files.
    *
-   * Frames cannot be copied, stored, or committed independently. OutputSession_impl
-   * creates one inside write_frame() and validates the complete contribution
-   * before flushing the frame sinks. A contribution or flush error makes the
-   * session fail-stop so partially staged state can never leak into a later frame.
+   * Created by OutputSession::write_frame and handed to the callback; it cannot be copied or kept. Everything added
+   * to it is written when the callback returns. If the callback or the write throws, the session refuses all further
+   * frames.
    */
   template <uint dim, typename VectorType> class OutputFrame
   {
   public:
+    /// Adds FE fields to a field series; see FEOutput::attach.
     class FieldCollector
     {
     public:
+      /// Add a scalar field named @p name.
       void attach(const DoFHandler<dim> &dof_handler, const VectorType &solution, const std::string &name)
       {
         sink->attach(dof_handler, solution, name);
       }
+      /// Add a vector-valued field, one name per component.
       void attach(const DoFHandler<dim> &dof_handler, const VectorType &solution, const std::vector<std::string> &names)
       {
         sink->attach(dof_handler, solution, names);
@@ -62,10 +64,13 @@ namespace DiFfRG
       friend class OutputFrame;
     };
 
+    /// Adds one row to a CSV table; see CsvOutput.
     class TableRecord
     {
     public:
+      /// Set column @p name of this frame's row.
       void value(const std::string &name, double value) { sink->value(name, value); }
+      /// See CsvOutput::set_Lambda; by default the table uses `/physical/Lambda`.
       void set_Lambda(double Lambda) { sink->set_Lambda(Lambda); }
 
     private:
@@ -74,10 +79,13 @@ namespace DiFfRG
       friend class OutputFrame;
     };
 
+    /// Adds scalars and maps to an HDF5 file; see HDF5Output.
     class Hdf5Record
     {
     public:
+      /// See HDF5Output::scalar.
       template <typename... Args> void scalar(Args &&...args) { sink->scalar(std::forward<Args>(args)...); }
+      /// See HDF5Output::map.
       template <typename... Args> void map(Args &&...args) { sink->map(std::forward<Args>(args)...); }
 
     private:
@@ -91,19 +99,25 @@ namespace DiFfRG
     OutputFrame(OutputFrame &&) = delete;
     OutputFrame &operator=(OutputFrame &&) = delete;
 
-    /** Collect fields for the run's primary field series. */
+    /// The main field series (VTK `<run>.pvd`, HDF5 group `/FE`).
     FieldCollector fields() { return FieldCollector(session.fe_out); }
     /**
-     * Collect fields for an additional named series owned by this session.
+     * @brief An additional field series @p name, created on first use: VTK `<run>_<name>.pvd` (if `/output/vtk`),
+     * HDF5 group `/<name>` in the run's `.h5` file (if `/output/hdf5`).
      *
-     * The series is created on first use and automatically follows the run's
-     * `/output/vtk` and `/output/hdf5` settings. VTK uses `<run>_<name>.pvd`
-     * plus its VTU frames; HDF5 uses `/<name>/<frame>` in the run's single file.
+     * @p name is a single path component and not one of FE, potential, eom_potential, scalars, maps, coordinates.
      */
     FieldCollector fields(const std::string &name) { return FieldCollector(session.field_output(name)); }
+    /**
+     * @brief The CSV table `<run>_<name>`, e.g. table("data.csv") writes `<run>_data.csv`. Created on first use;
+     * from then on every frame must write the same columns.
+     */
     TableRecord table(const std::string &name) { return TableRecord(session.csv(name)); }
+    /// The extra HDF5 file `<run>_<name>.h5`, created on first use; written regardless of `/output/hdf5`.
     Hdf5Record hdf5(const std::string &name) { return Hdf5Record(session.hdf5(name)); }
+    /// The run's HDF5 file `<run>.h5`; throws std::logic_error if `/output/hdf5` is false.
     Hdf5Record hdf5() { return Hdf5Record(session.hdf5()); }
+    /// Handle for diagnostic CSV tables `<run>_<table>`, usable outside of frames.
     DiagnosticPort diagnostics() const { return session.diagnostic_port(); }
 
     template <typename Name>
@@ -136,24 +150,43 @@ namespace DiFfRG
       return session.fe_out;
     }
 
+    /// Write the reconstructed EoM potential of @p result (if any) to the `eom_potential` series.
     void attach_eom_potential(EoMResult<dim, typename VectorType::value_type> result)
     {
       session.attach_eom_potential(std::move(result));
     }
 
+    /// Write the raw potential to the `potential` series; at most once per frame.
     void attach_raw_potential(ReconstructedRawPotential<dim, typename VectorType::value_type> potential)
     {
       session.attach_raw_potential(std::move(potential));
     }
 
+    /// Whether a raw potential attached to this frame would be written anywhere (VTK or HDF5).
+    bool writes_raw_potential() const
+    {
+      if constexpr (dim > 0)
+        return !session.potential_fe_out.will_discard();
+      else
+        return false;
+    }
+
+    /**
+     * @brief Write @p values (one inner vector per row) as CSV to `<root>/<name>`, immediately.
+     *
+     * Unlike table(), the file name is not prefixed with the run name. @p header is written only if @p append is
+     * false.
+     */
     void dump_table(const std::string &name, const std::vector<std::vector<double>> &values, bool append = false,
                     const std::vector<std::string> &header = {})
     {
       session.dump_to_csv(name, values, append, header);
     }
 
+    /// The run name (`/output/name`).
     const std::string &run_name() const noexcept { return session.output_name; }
 
+    /// Declare a readout id for this frame; throws if it is empty or was already declared.
     void register_readout(const std::string &id)
     {
       if (id.empty()) throw std::invalid_argument("OutputFrame::register_readout: id must not be empty.");
@@ -168,26 +201,58 @@ namespace DiFfRG
     friend class OutputSession_impl<dim, VectorType>;
   };
 
+  // clang-format off
   /**
-   * Run-owned output coordinator.
+   * @brief All output of one run. Applications use the alias OutputSession<Assembler>.
    *
-   * Applications construct one session and inject it into the timestepper. All
-   * frame submissions are serialized; VTK writing remains bounded and
-   * asynchronous inside FEOutput. No process-global output state is used.
+   * Construct one and pass it to the timestepper, which calls write_frame at every output time; the assembler and
+   * model fill the frame (AbstractAssembler::attach_data_output, Model::readouts). Only MPI rank 0 writes. VTK and HDF5
+   * frames are written on background threads.
+   *
+   * ```cpp
+   * DiFfRG::OutputSession<Assembler> output(config); // files go to /output/folder
+   * ```
+   * A default-constructed session writes to a new temporary folder that is deleted at the end.
+   *
+   * ### Files
+   * With R = `/output/folder` (default "./"), N = `/output/name` (default "output") and F = `/output/field_directory`
+   * (default N):
+   *
+   * | File                                   | Content | Written if |
+   * |----------------------------------------|---------|------------|
+   * | `R/N.pvd`, `R/F/N_NNNNNN.vtu`          | FE fields, one .vtu per frame NNNNNN | `/output/vtk` |
+   * | `R/N_potential.pvd` (+ .vtu)           | raw potential (attach_raw_potential) | `/output/vtk` |
+   * | `R/N_eom_potential.pvd` (+ .vtu)       | EoM potential (attach_eom_potential) | `/output/vtk` |
+   * | `R/N_X.pvd` (+ .vtu)                   | field series fields("X") | `/output/vtk` |
+   * | `R/N.h5`                               | `/config`, `/scalars`, `/maps`, `/coordinates`, the field series `/FE`, `/potential`, `/eom_potential`, `/X`; see HDF5Output | `/output/hdf5` |
+   * | `R/N_X.h5`                             | hdf5("X"), same layout without field series | always |
+   * | `R/N_X` (e.g. `R/N_data.csv`)          | table("X"), see CsvOutput | always |
+   * | `R/N.log`                              | the run log, filtered by `/output/log_level` | always |
+   * | `R/N.log.json`                         | the parameters | `/output/json`, or `/output/hdf5` false |
+   * | `R/N_snapshot_nnn.h5`                  | flow snapshots, see SnapshotData | snapshots requested |
+   * | `R/N_output_timings.csv`               | cost of each output frame | `/output/verbosity` ≥ 3 |
+   *
+   * The output keys are listed in Config::OutputSettings.
    */
+  // clang-format on
   template <uint dim, typename VectorType> class OutputSession_impl
   {
   public:
+    /// Output into a temporary folder that is deleted at the end, with default settings.
     OutputSession_impl() : OutputSession_impl(OutputPath::temporary(), Config::OutputSettings{}) {}
+    /// Paths (OutputPath) and settings (Config::OutputSettings) from the parameters.
     explicit OutputSession_impl(const ConfigTree &config)
-        : OutputSession_impl(path_from(config), Config::OutputSettings(config))
+        : OutputSession_impl(OutputPath(config), Config::OutputSettings(config))
     {
     }
+    /// Explicit paths and settings.
     explicit OutputSession_impl(OutputPath path, Config::OutputSettings settings = {});
+    /// Explicit paths, settings from the parameters.
     OutputSession_impl(OutputPath path, const ConfigTree &config)
         : OutputSession_impl(std::move(path), Config::OutputSettings(config))
     {
     }
+    /// finish(); the HDF5 files get `crashed` = 1 if an exception is propagating.
     ~OutputSession_impl() noexcept;
 
     OutputSession_impl(const OutputSession_impl &) = delete;
@@ -195,6 +260,12 @@ namespace DiFfRG
     OutputSession_impl(OutputSession_impl &&) = delete;
     OutputSession_impl &operator=(OutputSession_impl &&) = delete;
 
+    /**
+     * @brief Write one frame at RG time @p time: call `contributor(OutputFrame &)`, then write what it added.
+     *
+     * A second frame at the same time as the previous one is skipped. Does nothing on ranks other than 0. After an
+     * error, every further call rethrows it.
+     */
     template <typename Contributor> void write_frame(const double time, Contributor &&contributor)
     {
       std::scoped_lock lock(submission_mutex);
@@ -202,16 +273,15 @@ namespace DiFfRG
       if (terminal_error) std::rethrow_exception(terminal_error);
       if (finished) throw std::logic_error("OutputSession::write_frame: session has already been finished.");
       if (!active) return;
-      // A run split into segments (flow snapshots) ends one segment and starts the next at the same
-      // time, and both write that frame. Keep the first: the state is the same.
+      // Consecutive run segments (snapshots) both write the frame at their common time; keep the first.
       if (last_frame_time && std::abs(time - *last_frame_time) <= 1e-12 * std::max(1., std::abs(time))) return;
 
       try {
-        current_frame = FrameTimings{};
-        ScopedTimer total_timer(current_frame.total);
+        current_frame = internal::FrameTimings{};
+        internal::ScopedTimer total_timer(current_frame.total);
         {
           const auto solves_before = internal::potential_solve_stats();
-          ScopedTimer contributor_timer(current_frame.contributor);
+          internal::ScopedTimer contributor_timer(current_frame.contributor);
           OutputFrame<dim, VectorType> frame(*this);
           std::forward<Contributor>(contributor)(frame);
           contributor_timer.stop();
@@ -229,27 +299,26 @@ namespace DiFfRG
       }
     }
 
+    /// See OutputFrame::diagnostics.
     DiagnosticPort diagnostic_port() const { return diagnostics_port; }
+    /// The run's logger.
     ReportPort report_port() const { return run_reporter.port(); }
 
-    /** Join pending writers and surface their first error without closing the session. */
+    /// Wait for all pending writes; rethrow the first error. The session stays open.
     void drain();
 
-    /** Drain pending writers and permanently close the session, marking its HDF5 files finished. */
+    /// Wait for all pending writes, mark the HDF5 files finished, and close the session.
     void finish() { finish_impl(/* crashed = */ false); }
+    /// Set \f$\Lambda\f$ of the CSV tables' `k [GeV]` column (default: `/physical/Lambda`); before the first frame.
     void set_Lambda(double Lambda);
+    /// The run name.
     const std::string &run_name() const noexcept { return output_name; }
+    /// The output paths.
     const OutputPath &path() const noexcept { return output_path; }
+    /// Whether this rank writes (rank 0).
     bool is_writer_rank() const noexcept { return active; }
 
   private:
-    static OutputPath path_from(const ConfigTree &config)
-    {
-      if (config.contains("/output/folder")) return OutputPath(config);
-      const auto name = config.get_string("/output/name", "output");
-      return OutputPath::temporary(TemporaryRetention::remove_on_destruction, name,
-                                   config.get_string("/output/field_directory", name));
-    }
 
     FEOutput<dim, VectorType> &fe_output() { return fe_out; }
     FEOutput<dim, VectorType> &field_output(const std::string &name);
@@ -261,7 +330,7 @@ namespace DiFfRG
     HDF5Output &hdf5(const std::string &name);
     HDF5Output &hdf5();
     void flush_frame(double time);
-    /** Fold `current_frame` into the run totals and, at verbosity >= 3, report it. */
+    /// Add `current_frame` to the run totals and, at verbosity >= 3, report it.
     void record_frame(double time);
     void dump_to_csv(const std::string &name, const std::vector<std::vector<double>> &values, bool append,
                      const std::vector<std::string> &header);
@@ -269,8 +338,7 @@ namespace DiFfRG
 
     OutputPath output_path;
     Config::OutputSettings settings;
-    /** Shared by finish() and the destructor. `crashed` only selects the value recorded in the
-     * HDF5 files' `crashed` attribute; everything else happens either way. */
+    /// finish() and the destructor; @p crashed is recorded in the HDF5 files.
     void finish_impl(bool crashed);
 
     const std::string top_folder;
@@ -284,10 +352,8 @@ namespace DiFfRG
     mutable std::mutex submission_mutex;
 
     RunReporter run_reporter;
-    /** Declared before every sink that submits to it, so it is destroyed last. finish() joins
-     * it explicitly before h5_files goes away, because ~HDF5Output closes the file and that
-     * must not race the worker. */
-    HDF5FrameWriter hdf5_writer;
+    /// Declared before the sinks that use it, so it is destroyed after them.
+    internal::HDF5FrameWriter hdf5_writer;
     FEOutput<dim, VectorType> fe_out;
     std::optional<ReconstructedRawPotential<dim, typename VectorType::value_type>> pending_raw_potential;
     FEOutput<dim, dealii::Vector<typename VectorType::value_type>> potential_fe_out;
@@ -304,26 +370,18 @@ namespace DiFfRG
     std::optional<double> last_frame_time;
     DiagnosticPort diagnostics_port;
 
-    /** Cost split of the frame currently being written; folded into `timings` by flush_frame. */
-    FrameTimings current_frame;
-    OutputTimings timings;
+    /// Timings of the frame being written.
+    internal::FrameTimings current_frame;
+    internal::OutputTimings timings;
 
     friend class OutputFrame<dim, VectorType>;
   };
 
-  // ##############################################################################
-  // Application-facing spelling
-  // ##############################################################################
-  //
-  // The class above takes the linear algebra spelled out because it is compiled out of line: the
-  // set of valid arguments is closed by the explicit instantiations in src/. Applications name
-  // the assembler instead and let this alias project it onto that fixed parameter list. That
-  // projection is also what keeps the session in step with the timestepper, which holds an
-  // OutputSession_impl<dim, VectorType> * taken from the very same assembler.
-  //
-  // The argument is anything exposing dim and VectorType -- an Assembler, or a Discretization
-  // where the assembler type is not a single type (e.g. a test running one discretization
-  // against several models).
+  /**
+   * @brief The output session of a run, see OutputSession_impl.
+   *
+   * @tparam AssemblerOrDiscretization Any type with `dim` and `VectorType`, usually the Assembler.
+   */
   template <typename AssemblerOrDiscretization>
   using OutputSession =
       OutputSession_impl<AssemblerOrDiscretization::dim, typename AssemblerOrDiscretization::VectorType>;

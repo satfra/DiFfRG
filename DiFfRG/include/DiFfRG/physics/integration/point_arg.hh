@@ -29,9 +29,11 @@ namespace DiFfRG
     using value_type = std::remove_const_t<T>;
 
     PointSpan() = default;
+    /// A view of @p size elements starting at @p data.
     PointSpan(T *data, const size_t size) : m_data(data), m_size(size) {}
     /// A view of all of @p v.
     PointSpan(std::vector<value_type> &v) : m_data(v.data()), m_size(v.size()) {}
+    /// A read-only view of all of @p v.
     PointSpan(const std::vector<value_type> &v)
       requires std::is_const_v<T>
         : m_data(v.data()), m_size(v.size())
@@ -44,10 +46,15 @@ namespace DiFfRG
     {
     }
 
+    /// Element @p i, unchecked.
     T &operator[](const size_t i) const { return m_data[i]; }
+    /// Pointer to the first element.
     T *data() const { return m_data; }
+    /// Number of elements.
     size_t size() const { return m_size; }
+    /// Iterator to the first element.
     T *begin() const { return m_data; }
+    /// Iterator past the last element.
     T *end() const { return m_data + m_size; }
 
   private:
@@ -88,7 +95,9 @@ namespace DiFfRG
     {
     }
 
+    /// Whether this argument holds one value per point (true) or one shared value (false).
     bool per_point() const { return values != nullptr; }
+    /// The value at point @p i: the @p i-th element if per point, otherwise the shared value.
     const T &operator[](const size_t i) const { return values != nullptr ? values[i] : value; }
 
     /// Throws unless the argument is shared or holds exactly @p n values.
@@ -103,8 +112,11 @@ namespace DiFfRG
     std::shared_ptr<const std::vector<T>> owned;
 
   public:
+    /// Per-point values, or nullptr for a shared value.
     const T *values = nullptr;
+    /// Number of per-point values (0 for a shared value).
     size_t size = 0;
+    /// The shared value (unused if per_point()).
     T value{};
   };
 

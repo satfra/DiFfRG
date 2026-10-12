@@ -15,7 +15,7 @@ int main(int argc, char *argv[])
 
   // Initialize DiFfRG (MPI + Kokkos) and read the parameter file / CLI overrides
   const auto config_helper = DiFfRG::Init(argc, argv).get_configuration_helper();
-  const auto json = config_helper.get_json();
+  const auto json = config_helper.get_config();
 
   // Define the objects needed to run the simulation
   Model model(json);
@@ -40,7 +40,7 @@ int main(int argc, char *argv[])
   HDF5Input hdf5_input(data_out.path().run_file(".h5").string());
   const auto m2A = hdf5_input.load_scalar<double>("m2A").back();
   std::vector<double> Zc(p_grid_size);
-  hdf5_input.load_map("Zc", Zc.data());
+  hdf5_input.load_map("Zc", Zc);
 
   log.info("Simulation finished after {}. m2A = {}, Zc(0) = {}", time_format(timer.wall_time()), m2A, Zc[0]);
   return 0;

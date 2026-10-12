@@ -77,7 +77,7 @@ which vanishes identically at $\rho = 0$. Evaluated at the EoM in this phase, $\
 
 ## Step 3: `extractor_point`
 
-A shock is not a pointwise property. The EoM machinery in `discretization/common/eom.hh` builds a scalar potential from the pointwise field `Model::EoM(x, u)` and minimises it, which can express "where does $u$ vanish" but not "where does $\partial_\rho u$ jump" -- that is a statement about a cell and its neighbours. So the model is handed the whole discrete solution, as a {cpp:class}`DiFfRG::SolutionSample`: one entry per active cell, at the cell centre, sorted by coordinate, carrying values, gradients and the local grid spacing. Building it is cheap by construction -- for a finite-volume solution the values are the cell averages, read straight off the dofs, and the gradients are central differences. It is emphatically not the scheme's limited reconstruction: that would mean a stencil fill over the whole mesh on every residual evaluation, and it stays where it belongs, in the flux path.
+A shock is not a pointwise property. The EoM machinery in `discretization/common/eom.hh` builds a scalar potential from the pointwise field `Model::EoM(x, u)` and minimises it, which can express "where does $u$ vanish" but not "where does $\partial_\rho u$ jump" -- that is a statement about a cell and its neighbours. So the model is handed the whole discrete solution, as a {doc}`SolutionSample </doxygen/DiFfRG/html/classDiFfRG_1_1SolutionSample>`: one entry per active cell, at the cell centre, sorted by coordinate, carrying values, gradients and the local grid spacing. Building it is cheap by construction -- for a finite-volume solution the values are the cell averages, read straight off the dofs, and the gradients are central differences. It is emphatically not the scheme's limited reconstruction: that would mean a stencil fill over the whole mesh on every residual evaluation, and it stays where it belongs, in the flux path.
 
 ```cpp
 template <int d, typename NT> Point<d> extractor_point(const Point<d> &EoM, const SolutionSample<d, NT> &sample) const
@@ -88,7 +88,7 @@ template <int d, typename NT> Point<d> extractor_point(const Point<d> &EoM, cons
 }
 ```
 
-Defining this method is the whole opt-in. There is deliberately **no default implementation** in {cpp:class}`DiFfRG::def::AbstractModel`: its absence is what the {cpp:concept}`DiFfRG::HasExtractorPoint` concept detects, so models that do not need it never pay for building the sample.
+Defining this method is the whole opt-in. There is deliberately **no default implementation** in {doc}`def::AbstractModel </doxygen/DiFfRG/html/classDiFfRG_1_1def_1_1AbstractModel>`: its absence is what the {doc}`HasExtractorPoint </doxygen/DiFfRG/html/conceptDiFfRG_1_1HasExtractorPoint>` concept detects, so models that do not need it never pay for building the sample.
 
 The detector itself is ordinary numerics, and the tutorial's version is cut down, but three of its choices are worth stating because they are easy to get wrong:
 

@@ -6,10 +6,9 @@ You can find the full code as described here also in `Tutorials/tut1`.
 
 ## File structure
 
-We will start by creating a new directory in the `Tutorials` directory just below the `DiFfRG` top directory (the full code for this tutorial also lives in `Tutorials/tut1`). This directory will contain all the files necessary for the simulation.
+We start by creating a new directory for the application. It can live anywhere: the application finds the installed library through CMake, not through its location in the source tree.
 
 ```bash
-$ cd Tutorials
 $ mkdir tut1
 $ cd tut1
 $ touch CMakeLists.txt
@@ -93,29 +92,27 @@ The actual program logic starts with the entry point, the `main` function. The v
   // Initialize DiFfRG and thus the MPI and Kokkos environments
   const auto config_helper = DiFfRG::Init(argc, argv).get_configuration_helper();
   // get all needed parameters and parse from the CLI
-  const auto json = config_helper.get_json();
+  const auto json = config_helper.get_config();
 ```
-`DiFfRG::Init(argc, argv)` sets up the runtime environment - in particular it initializes [Kokkos](https://kokkos.org/) (which provides the CPU/GPU parallelization) and, if enabled, MPI. It must be called once at the start of `main` before any `DiFfRG` object is constructed, and the returned object owns these environments for the lifetime of the program. From it we obtain a `ConfigurationHelper`.
+`DiFfRG::Init(argc, argv)` sets up the runtime environment - in particular it initializes [Kokkos](https://kokkos.org/) (which provides the CPU/GPU parallelization) and, if enabled, MPI. It must be called once at the start of `main` before any `DiFfRG` object is constructed. The environments then stay up until the program exits; they are shut down at exit, not when the `Init` object goes out of scope, so a temporary `Init` as above is fine. From it we obtain a `ConfigurationHelper`.
 
 The `ConfigurationHelper` class automatically chooses the correct parameter file; if the executable is invoked with the `-p` parameter, i.e. `./tut1 -p parameter.json`, the argument of `-p` is chosen as the parameter file. Otherwise, `ConfigurationHelper` will try to open a file called `parameter.json` in the current working directory, falling back to `parameter.toml` if that does not exist. The parameters can be specified either in the [JSON](https://www.json.org/json-en.html) or in the [TOML](https://toml.io/) format; files ending in `.toml` are read as TOML, everything else as JSON. This tutorial ships both `parameter.json` and the equivalent, commented `parameter.toml`.
 
 The `argc, argv` parameters are forwarded so that command line flags and arguments can be parsed.
-Afterwards, we load the entire parameter structure into the `json` variable, a `ConfigTree` which has the same structure as the original parameter file. `ConfigTree` used to be called `JSONValue`; that name still works, but is deprecated.
+Afterwards, we load the entire parameter structure into the `json` variable, a `ConfigTree` which has the same structure as the original parameter file.
 
 After setting up the configuration, we choose the algorithms used in our simulation. To do so, we make some convenient type aliases with the chosen class types:
 ```cpp
   // Choices for types
   using Model = Tut1;
   constexpr uint dim = Model::dim;
-  using Discretization = CG::Discretization<Model::Components, double, RectangularMesh<dim>>;
-  using VectorType = typename Discretization::VectorType;
-  using SparseMatrixType = typename Discretization::SparseMatrixType;
-  using Assembler = CG::Assembler<Discretization, Model>;
-  using TimeStepper = TimeStepperSUNDIALS_IDA<VectorType, SparseMatrixType, dim, UMFPack>;
+  using Discretization = CG::Discretization<Model, RectangularMesh<dim>>;
+  using Assembler = CG::Assembler<Discretization>;
+  using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
 ```
-After making an alias for the numerical model, which we will specify in a moment, we choose a spatial (field space) dimension, which is here simply taken from the Model.
+After making an alias for the numerical model, which we will specify in a moment, we take the field-space dimension from it.
 
-The `Discretization` gives a prescription to discretize the field space. Here, we choose the `CG`, i.e. *Continuous Galerkin* discretization and accordingly a fitting `Assembler`. The assembler, as the name implies, assembles the system of equations to be solved. In practice, the differential equation you specify in the `Model` is discretized by the `Assembler` using the `Discretization` and brought into the form of a time-dependent, nonlinear ODE (ordinary differential equation)
+The `Discretization` gives a prescription to discretize the field space on a mesh, here a `RectangularMesh`. We choose the `CG`, i.e. *Continuous Galerkin* discretization and accordingly a fitting `Assembler`; both are told which model they discretize through their template arguments. The assembler, as the name implies, assembles the system of equations to be solved. In practice, the differential equation you specify in the `Model` is discretized by the `Assembler` using the `Discretization` and brought into the form of a time-dependent, nonlinear ODE (ordinary differential equation)
 
 ```{math}
 F(\partial_t v_i, v_i) = 0\,,
@@ -137,19 +134,21 @@ G(v_i) = 0\,.
 ```
 
 We will show the utility of this in a later tutorial.
-Note that the TimeStepper takes an additional argument, where we can choose the linear solver. The direct solver `UMFPack` is a simple but good choice, as it solves any linear system exactly. However, with large systems, e.g. in $d\geq2$, `GMRES` or another iterative solver is usually much faster and thus preferred.
+The timestepper also takes an optional second template argument, the linear solver for its Newton steps. It defaults to the direct solver `UMFPack`, which solves any linear system exactly and is a good choice in one field dimension. For large systems, e.g. in $d\geq2$, an iterative solver such as `GMRES` (`TimeStepperSUNDIALS_IDA<Assembler, GMRES>`) is usually much faster; see [Timesteppers and linear solvers](../getting_started/timesteppers.md).
 
 ```cpp
   // Define the objects needed to run the simulation
   Model model(json);
-  RectangularMesh<dim> mesh(json);
-  OutputSession<Assembler> output(json);
-  const auto log = output.report_port();
+  RectangularMesh<dim> mesh{Config::ConfigurationMesh<dim>(json)};
+  OutputSession<Assembler> data_out(json);
+  const auto log = data_out.report_port();
   Discretization discretization(mesh, json, log);
   Assembler assembler(discretization, model, json);
-  TimeStepper time_stepper(json, assembler, output);
+  TimeStepper time_stepper(json, assembler, data_out);
 ```
-We now use the types we defined above to construct objects of all the classes described above.
+We now construct an object of each of the types above. Two of them deserve a word:
+- The mesh reads its extent and cell sizes from the `/discretization/grid` section of the parameter file, through `Config::ConfigurationMesh`.
+- The `OutputSession` owns everything the run writes to disk (see [Output](../getting_started/output.md)). `log` is a handle to its run log, which every component uses for messages; we use it ourselves at the end of `main`.
 
 With everything prepared, we are now ready to set up and run the equation system. To do so, we create an initial condition on the discretization (i.e. FEM space) we set up before,
 ```cpp
@@ -167,7 +166,6 @@ and use it to run the time-stepper from RG-time 0 to the final RG-time, which we
     log.error("Simulation finished with exception {}", e.what());
     return -1;
   }
-  auto time = timer.wall_time();
 ```
 Note here, that RG-time is defined on the level of the code as positive, i.e.
 
@@ -183,9 +181,10 @@ t_- = \ln k / \Lambda
 
 Furthermore, we recorded the time the simulation took using the `dealii::Timer` class.
 
-We finish the program by reporting the elapsed time. The timestepper automatically emits the assembler's compact performance summary when it drains the run output.
+We finish the program by reporting the elapsed time. The timestepper itself already writes a short performance summary of the assembler to the log at the end of the run.
 ```cpp
   // We print a bit of exit information.
+  auto time = timer.wall_time();
   log.info("Simulation finished after " + time_format(time));
   return 0;
 }
@@ -284,17 +283,19 @@ Here, we have only written the constructor, communicated $\Lambda$ to the `def::
 The `initial_condition` method is invoked by the `initial_condition.interpolate(model)` call from above. We use the parameters `a,b,c,d` to set up a polynomial initial condition. Here, we also use the indexing provided by the `FEFunctionDescriptor` class, to retrieve the position of "u" within the array of FE functions. In this case, it is of course trivial, as `idxf("u")` always evaluates to `0`. Note however, that the lookup is done statically at compile time and is thus much faster than dynamic lookup, such as with a `std::map`.
 
 ```cpp
-  template <typename NT, typename Solution> void flux(std::array<Tensor<1, dim, NT>, Components::count_fe_functions(0)> &F_i, const Point<dim> &/*x*/, const Solution &sol) const
+  template <typename NT, typename Solution>
+  void flux(std::array<Tensor<1, dim, NT>, Components::count_fe_functions(0)> &flux, const Point<dim> & /*pos*/,
+            const Solution &sol) const
   {
     const auto &fe_functions = get<"fe_functions">(sol);
 
     const auto u = fe_functions[idxf("u")];
 
-    F_i[idxf("u")][0] = 0.5 * powr<2>(u);
+    flux[idxf("u")][0] = 0.5 * powr<2>(u);
   }
 };
 ```
-The `flux` method implements the actual equation. If we don't specify anything else, the `Assembler` will construct the equation
+The `flux` method implements the actual equation. `sol` bundles the solution at the evaluation point; its entries are addressed by name, here `"fe_functions"`, the values of all FE functions. If we don't specify anything else, the `Assembler` will construct the equation
 
 ```{math}
 \partial_t u + \partial_x (F_i(u)) = 0
@@ -304,19 +305,19 @@ so that our choice of $F_i(u) = \frac12 u^2$ exactly implements Burgers' equatio
 
 ## parameter.json
 
-The parameter file contains usually user-defined quantities in a "physical" subsection and further paramters for the backend. It can be written either as JSON or, as in the equivalent `parameter.toml` shipped alongside it, as TOML:
+The parameter file holds the user-defined quantities in a `physical` section, plus the settings of the library's components. It can be written as JSON or, as in the equivalent `parameter.toml` shipped alongside it, as TOML. This section walks through the file of this tutorial; every key the library reads, with its default, is listed in the [parameter reference](../getting_started/parameters.md).
 
 ```json
 {
   "physical": {
-    "Lambda" : 1.0,
-    "a" : 0.0,
-    "b" : 1.0,
-    "c" : 0.0,
-    "d" : 0.0
+    "Lambda": 1.0,
+    "a": 0.0,
+    "b": 1.0,
+    "c": 0.0,
+    "d": 0.0
   },
 ```
-These sections are just the parameters we also use in the numerical model, i.e. user-space parmeters.
+These are the parameters our model reads: the initial scale $\Lambda$ for `def::fRG` and the coefficients of the initial condition.
 ```json
   "discretization": {
     "fe_order": 3,
@@ -325,11 +326,7 @@ These sections are just the parameters we also use in the numerical model, i.e. 
     "output_subdivisions": 2,
 
     "EoM_abs_tol": 1e-10,
-    "EoM_max_iter": 100,
-    "EoM_smoothing_length": -1,
-    "EoM_bound_tolerance": 1e-12,
-    "EoM_armijo_coefficient": 1e-4,
-    "EoM_max_backtracks": 20,
+    "EoM_max_iter": 200,
 
     "grid": {
       "x_grid": "0:1e-2:1",
@@ -339,35 +336,24 @@ These sections are just the parameters we also use in the numerical model, i.e. 
     },
 ```
 The discretization section configures the FEM setup of our simulation:
-- `fe_order` sets the polynomial order of the local function space on the finite elements
-- `threads` sets the CPU thread limit, covering FEM assembly and TBB momentum integration alike -- there is a single TBB pool and this sizes it. `0` means "decide from the CPUs this process actually has". It is read by `DiFfRG::Init` before the libraries come up.
-  It is not the only thing that can set the count. In decreasing precedence: `DiFfRG_NUM_THREADS`, then the launcher's allocation (the CPU affinity mask, or `SLURM_*` where the job did not pin its tasks), then this key, then `OMP_NUM_THREADS` / `DEAL_II_NUM_THREADS`. DiFfRG prints a loud warning when several of these disagree, naming each one and which it used. See `documentation/multi_gpu.md` for the full table.
-  The assemblers run their cell and face loops as plain parallel loops over this pool. The former keys `mesh_workers` and `batch_size` are ignored, and DiFfRG warns if it finds them.
-- `overintegration` can be used to increase the order of the quadratures used in assembly when constructing the [weak form](https://en.wikipedia.org/wiki/Weak_formulation) of the PDE. It is seldom necessary to increase beyond 0.
-- `output_subdivisions` gives the precision with which the grids in the output data are written. This goes exponentially, so don't choose it too high.
-- `EoM_abs_tol` sets the projected equation-of-motion/potential-gradient tolerance used to refine the EoM position within a cell. DiFfRG can be instructed to solve the EoM at every timestep and perform additional computations at this point.
-- `EoM_max_iter` sets the maximum number of in-cell minimizer iterations used in determining the position of the EoM.
-- `EoM_smoothing_length` controls damping of normal-gradient jumps in the reconstructed CG2 potential. A value of `-1` captures twice the smallest initial face-normal cell width as a fixed physical smoothing length, `0` disables smoothing, and a positive value sets the physical length explicitly. On a uniform mesh, the effective smoothing range in cells is approximately `EoM_smoothing_length / h`; a fixed physical length therefore spans more cells after refinement.
-- `EoM_bound_tolerance` determines when a reference-cell coordinate is treated as lying on an active lower or upper bound.
-- `EoM_armijo_coefficient` is the sufficient-decrease coefficient used by the Newton line search and must lie strictly between zero and one.
-- `EoM_max_backtracks` limits the number of line-search step halvings and must be positive.
-
-These three values are collected in `Config::EoMConfig`. JSON is the application-boundary adapter; the EoM reconstruction and assemblers consume the typed configuration. This mirrors `Config::ConfigurationMesh` and lets a future application-level configuration object forward only its EoM settings.
-
-- `x_grid` this works in a python-like slice syntax and sets the  used in a `RectangularMesh`. The parameter also supports locally different cell sizes: "0:1e-4:1e-2, 1e-2:1e-3:1" creates 100 cells between 0 and 1e-2, and 100 cells between 1e-2 and 1.
+- `fe_order` sets the polynomial order of the local function space on each cell.
+- `threads` limits the number of CPU threads; `0` lets DiFfRG decide from the CPUs available to the process. Environment variables and batch schedulers can override it, see [Running with MPI and several GPUs](../getting_started/mpi.md#cpu-threads).
+- `overintegration` increases the order of the quadrature used to assemble the [weak form](https://en.wikipedia.org/wiki/Weak_formulation) of the PDE. It is seldom necessary to go beyond 0.
+- `output_subdivisions` sets how many sub-cells each cell is split into when the FE solution is written out. The number of output points grows exponentially with it in higher dimensions, so keep it small.
+- `EoM_abs_tol` and `EoM_max_iter` control the search for the equation of motion (the minimum of the potential), at which readouts and extractors are evaluated. This tutorial does not use it.
+- `x_grid` defines the cells of the `RectangularMesh` along the first axis, in a slice syntax `start:step:stop`. Several blocks with different cell sizes can be joined: `"0:1e-4:1e-2, 1e-2:1e-3:1"` creates 100 cells between 0 and 1e-2 and 990 cells between 1e-2 and 1.
 - `y_grid` and `z_grid` work identically, but are only used in 2D / 3D simulations.
-- `refine` can be used to quickly increase the cell count by $2^\textrm{refine}$.
+- `refine` splits every cell `refine` times, i.e. multiplies the cell count by $2^{d\cdot\textrm{refine}}$.
 ```json
     "adaptivity": {
       "start_adapt_at": 0E0,
-      "adapt_dt": 1E-1,
+      "adapt_dt": 2E-1,
       "level": 0,
-      "refine_percent": 1E-1,
-      "coarsen_percent": 5E-2
+      "tolerance": 3E-4
     }
   },
 ```
-The adaptivity section sets parameters for adaptive refinement of the discretization mesh. As we have not set this up in the numerical model, we will postpone the explanation of this section to a later tutorial.
+The adaptivity section controls adaptive refinement of the mesh during the flow: every `adapt_dt` in RG time, cells whose estimated relative resolution error exceeds `tolerance` are refined, up to `level` refinements; `level = 0` switches it off. It only takes effect if `main` hands the timestepper a mesh adaptor; [Tutorial 7](tut7.md) does and explains it.
 ```json
   "timestepping": {
     "final_time": 10.0,
@@ -376,8 +362,8 @@ The adaptivity section sets parameters for adaptive refinement of the discretiza
       "dt": 1E-4,
       "minimal_dt": 1E-6,
       "maximal_dt": 1E-1,
-      "abs_tol": 0.0,
-      "rel_tol": 1E-3
+      "abs_tol": 1E-12,
+      "rel_tol": 1E-4
     },
     "implicit": {
       "dt": 1E-4,
@@ -388,27 +374,28 @@ The adaptivity section sets parameters for adaptive refinement of the discretiza
     }
   },
 ```
-The timestepping section controls the behavior of the `Timestepper` class:
-- `final_time` sets the end-time of the simulation - this is actually not a required parameter, but one we use in our call to `timestepper.run(...)`
-- `output_dt` sets the intervals within which we write the solution to disk. Note, that the timesteppers do not necessarily step exactly onto `output_dt` intervals, but interpolate the solution to the output times.
-- The `explicit` and `implicit` sections control the behavior of explicit and implicit timesteppers respectively. The disctinction exists, because some timesteppers actually run part of the equation system explicitly and another implicitly. Usually, the FEM part is always implicit and further components of the expansion can be chosen to evolve explicitly.
+The timestepping section controls the timestepper:
+- `final_time` is the RG time at which the simulation ends. The library does not read it itself; we pass it to `time_stepper.run(...)` in `main`.
+- `output_dt` sets the interval at which the solution is written to disk. The timesteppers do not step exactly onto these times, but interpolate the solution to them.
+- The `explicit` and `implicit` sections configure explicit and implicit timesteppers respectively. Both exist because some timesteppers evolve one part of the system implicitly (usually the FE functions) and another explicitly (e.g. momentum-dependent couplings).
   - `dt` is the initial timestep for adaptive timesteppers and the fixed timestep for non-adaptive ones.
-  - `minimal_dt` and `maximal_dt` set the bounds for the timestep size - if an adpative stepper goes above or below, the step is adjusted to the bound, if the timestepper gets stuck below `mminimal_dt`, time evolution is aborted.
-  - `abs_tol` and `rel_tol` set absolute and relative error tolerance for the timestepping. While the FE parts of the system usually require a higher precision (< 1e-7 relative precision), especially in the presence of spontaneaous symmetry breaking, explicit tolerances can be chosen much more freely.
-For more information about timesteppers and their relationship with spontaneous symmetry breaking in fRG, see also [this paper](https://arxiv.org/abs/2302.04736).
+  - `minimal_dt` and `maximal_dt` bound the step size of adaptive steppers. If a stepper gets stuck below `minimal_dt`, the run is aborted.
+  - `abs_tol` and `rel_tol` set the absolute and relative error tolerances. The FE part usually needs a tight relative tolerance (below 1e-7), especially with spontaneous symmetry breaking; the explicit part can be much looser.
+
+For more on timesteppers and spontaneous symmetry breaking in fRG flows, see [this paper](https://arxiv.org/abs/2302.04736).
 
 ```json
   "output": {
-    "verbosity": 0,
+    "verbosity": 1,
     "folder": "./",
     "name": "output"
   }
 }
 ```
 The `output` section defines:
-- `verbosity` controls structured runtime progress. At 0 no progress is shown; 1 reports residual/timestep work; 2 adds Jacobian, linear-solver, and solver diagnostics; 3 adds factorization and output work. Levels 1--4 are aggregated to at most one update per operation per second. Level 5 prints every event and is intended only for debugging because it can slow the run substantially. The same setting gates plain log messages on the console: at 0 only warnings and errors appear, at 1 also info messages, from 2 upwards also debug records. The `.log` file always receives everything.
-- `folder` sets the base folder where data is stored. This is useful to not clutter your current directory ("./") with output, or if you run a large amount of simulations.
-- `name` sets the beginning of all filenames of the output, i.e. in this case all files created by the simulation start with "output".
+- `verbosity`: how much progress is printed to the console, from 0 (only warnings and errors) to 3 (detailed solver diagnostics). The levels are described in [Output](../getting_started/output.md#verbosity).
+- `folder`: the directory all output goes to.
+- `name`: the prefix of all output files, i.e. here all files created by the simulation start with "output".
 
 ## Running it
 
@@ -417,45 +404,43 @@ To run the simulation, first build it,
 $ make
 ```
 and then directly run it through
-```
+```bash
 $ ./tut1 -p ../parameter.json -si /output/verbosity=1
 ```
-We made use here of a mechanism to override the parameters of a simulation. The flag -p selects the parameter file to be used.
-By default it looks for a parameter.json in the current directory, falling back to parameter.toml. One can use the flags `-si` to set an integer, `-ss`
-to set a string and `-sd` to set a double (floating-point) value, followed by the full path to the parameter and its
-value after an equality symbol.
+The flag `-p` selects the parameter file. Without it, the program looks for `parameter.json` in the current directory, falling back to `parameter.toml`. Any parameter can be overridden on the command line: `-sd` sets a double, `-si` an integer, `-sb` a boolean and `-ss` a string, each followed by the full path of the parameter, an equals sign and the value.
 
-After the simulation has run, which should take (depending on your computer) a few seconds, a few files have been created in the current folder, which you can look up by
-```bash
-$ ls -l
+```{tip}
+`./tut1 --generate-parameter-file` writes a `parameter.toml` with every library parameter at its default value, a good starting point for a new application.
 ```
-- `output.log` contains the same structured progress (aggregated every second), severity messages, and final assembler summaries:
-```bash
-$ cat output.log
-[YYYY-MM-DD HH:MM:SS.sss] [run.file] [info] FEM: Number of active cells: 100
-[YYYY-MM-DD HH:MM:SS.sss] [run.file] [info] FEM: Number of degrees of freedom: 301
-[YYYY-MM-DD HH:MM:SS.sss] [run.file] [info] FEM: Using 8 mesh workers for assembly.
-[YYYY-MM-DD HH:MM:SS.sss] [run.file] [info] [sum] CG reinit=...ms(1) residual=...ms(...) jac=...ms(...)
-[YYYY-MM-DD HH:MM:SS.sss] [run.file] [info] Simulation finished after ...
-[YYYY-MM-DD HH:MM:SS.sss] [run.file] [info] Output timings over ... frames:
-  ...
-[YYYY-MM-DD HH:MM:SS.sss] [run.file] [info] [res ] t=10.00000 k=4.540e-05 wall=... implicit n=... avg=...ms
-```
-- `output.h5` contains the simulation data, and the parameters used under its `/config` group. Its
-  root `finished` and `crashed` attributes say how the run ended: `(1, 0)` ran to completion,
-  `(1, 1)` stopped early on an error but closed its output cleanly, `(0, 0)` was killed outright
-  (or is still running).
-- `output.log.json` contains a copy of the JSON parameters used. It is only written when HDF5
-  output is off -- with HDF5 on, `/config` already records the parameters. Set `/output/json` to
-  `true` to get it in either case.
-- `output.pvd` contains links to the FEM output data of the simulation and can be now visualized in `Paraview`.
+
+The simulation takes about a second. Afterwards, the current folder contains
+- `output.log`, the run log: progress, messages and a final performance summary.
+  ```text
+  [run] [info] FEM: Number of active cells: 100
+  [run] [info] FEM: Number of degrees of freedom: 301
+  [run] [info] IDA: steps=1612 residuals=3234 setups=17 newton_iters=3232 newton_fails=1 error_test_fails=1
+  [run] [info] [sum] CG reinit=1.11131ms(1) residual=0.07187ms(3234) jac=0.11244ms(17) jac eval=0.05650ms(17)
+  [run] [info] Simulation finished after 0s
+  [run] [info] [res ] t=10.00000 k=4.540e-05 wall=568ms implicit n=3234 avg=0.07604ms
+  ```
+  (each line is additionally prefixed with a time stamp).
+- `output.h5`, the simulation data in HDF5 format, including the parameters used under its `/config` group. Its root attributes `finished` and `crashed` tell how the run ended: `(1, 0)` ran to completion, `(1, 1)` stopped on an error but closed its output cleanly, `(0, 0)` was killed (or is still running).
+- `output.pvd` and the folder `output/`, the FE solution as VTK files for [ParaView](https://www.paraview.org/).
+- `output_potential.pvd` and `output_eom_potential.pvd`, a reconstruction of the potential whose derivative the FE functions describe. They are not meaningful for Burgers' equation and can be ignored here.
+
+The full list of files and their layout is in [Output](../getting_started/output.md).
 
 After invoking `$ paraview output.pvd`, we open a new tab and choose line chart view:
 
-![Paraview interface](images/paraview_FEM.jpg){html: width=80%, latex: width=5cm}
+```{figure} images/paraview_FEM.jpg
+:width: 80%
+:alt: ParaView line chart of the FE solution
+
+The FE solution of Burgers' equation in ParaView's line chart view.
+```
 
 - At the red marked field, one can change the currently displayed time of the FEM function.
-- The field marked in blue defines what the x-axis is. The default sets this to indices, but this does not work well in general and especially for irregularily spaced grids. Therefore, one would usually set this to `Points_Magnitude` for a 1D FEM simulation.
+- The field marked in blue defines what the x-axis is. The default sets this to indices, but this does not work well in general and especially for irregularly spaced grids. Therefore, one would usually set this to `Points_Magnitude` for a 1D FEM simulation.
 - In the green marked part you see that we have the FE functions `u`, `residual` and `u_dot` which we can look at. `u` of course is just the solution to Burgers' equation, `u_dot` is its time derivative, and `residual` is the local error of the equation.
 
 Feel free to play around also with the parameters `a,b,c,d` and other parts of the parameters in order to get acquainted with the basics of the framework.

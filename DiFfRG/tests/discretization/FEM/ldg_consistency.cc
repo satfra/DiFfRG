@@ -22,6 +22,17 @@ TEST_CASE("LDG residual matches a plain mesh_loop assembly", "[discretization][l
     Setup<Model3<true>> s(fe_order);
     require_residual_matches_reference(s);
   }
+  // Level 2 is linear in level 1, but level 1 is not linear in u: level 2 cannot be a fixed matrix times u.
+  SECTION("two levels, constant second level on a nonlinear first level")
+  {
+    Setup<Model3<false, false, true>> s(fe_order);
+    require_residual_matches_reference(s);
+    // and again at another state, after the level jacobians have been built once
+    s.jacobian();
+    for (uint i = 0; i < s.u.size(); ++i)
+      s.u[i] += 0.05 * std::cos(0.9 * i);
+    require_residual_matches_reference(s);
+  }
 }
 
 // With a constant level jacobian the level is built as J_gu * u; every FE component has to reach it, not just
@@ -78,6 +89,15 @@ TEST_CASE("LDG jacobian matches finite differences of the residual", "[discretiz
     Setup<Model3<false>> s(fe_order);
     require_jacobian_matches_finite_differences(s);
   }
+  SECTION("two levels, constant second level on a nonlinear first level")
+  {
+    Setup<Model3<false, false, true>> s(fe_order);
+    require_jacobian_matches_finite_differences(s);
+    s.jacobian();
+    for (uint i = 0; i < s.u.size(); ++i)
+      s.u[i] += 0.05 * std::cos(0.9 * i);
+    require_jacobian_matches_finite_differences(s);
+  }
 }
 
 // A level that is not constant is rebuilt on every jacobian call; the composite level jacobians must be rebuilt,
@@ -94,4 +114,12 @@ TEST_CASE("Repeated LDG jacobians at the same state agree", "[discretization][ld
   REQUIRE(scale > 0.);
   INFO("worst deviation " << worst << ", scale " << scale);
   REQUIRE(worst <= 1e-12 * scale);
+}
+
+// A level declared constant in the level below but not linear in it is detected when its jacobian is reused.
+TEST_CASE("LDG rejects a level wrongly declared constant", "[discretization][ldg]")
+{
+  DiFfRG::Init();
+  Setup<Model3<false, false, false, true>> s(1);
+  REQUIRE_THROWS_WITH(s.jacobian(), Catch::Matchers::ContainsSubstring("was declared constant"));
 }

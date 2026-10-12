@@ -9,7 +9,7 @@ int main(int argc, char *argv[])
   // Initialize DiFfRG and thus the MPI and Kokkos environments
   const auto config_helper = DiFfRG::Init(argc, argv).get_configuration_helper();
   // get all needed parameters and parse from the CLI
-  const auto json = config_helper.get_json();
+  const auto json = config_helper.get_config();
 
   // Choices for types
   using Model = Tut5;
@@ -28,7 +28,7 @@ int main(int argc, char *argv[])
   const auto log = data_out.report_port();
   Discretization discretization(mesh, json, log);
   Assembler assembler(discretization, model, json);
-  // Kurganov-Tadmor requires a fixed rectangular mesh; no h-adaptivity.
+  // The kink detector in model.hh relies on the piecewise-uniform grid, so no h-adaptivity.
   NoAdaptivity mesh_adaptor(assembler);
   TimeStepper time_stepper(json, assembler, data_out, mesh_adaptor);
 

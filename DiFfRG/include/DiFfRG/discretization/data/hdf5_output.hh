@@ -20,46 +20,58 @@
 namespace DiFfRG
 {
   /**
-   * @brief Mirror a JSON configuration value into `group` as a browsable tree: one subgroup per
-   * object, one attribute per leaf.
+   * @brief Write a JSON configuration into @p group: one subgroup per object, one attribute per leaf.
    *
-   * This is how a run's configuration is recorded in its HDF5 file, so that it reads with the same
-   * tools as its data. HDF5 has no boolean type, so booleans become 0/1 ints, arrays are stored as
-   * their serialized JSON, and nulls are skipped; set /output/json to also get the verbatim
-   * `<name>.log.json` copy alongside.
-   *
-   * @throws std::runtime_error if an object key contains '/', which is not a legal HDF5 link name.
+   * Booleans become 0/1 integers, arrays are stored as their JSON text, nulls are skipped. Throws if an object key
+   * contains '/'.
    */
   void write_config_tree(DiFfRG::hdf5::Group &group, const json::value &value);
 
+  // clang-format off
   /**
-   * @brief A class to output data to a CSV file.
+   * @brief One HDF5 output file, written frame by frame. Obtained through OutputFrame::hdf5.
    *
-   * In every time step, the user can add values to the output, which will be written to the file when flush is called.
-   * Every timestep has to contain the same values, but the order in which they are added can change.
+   * Values added with scalar() and map() during a frame are written together at flush(), possibly on a background
+   * thread. Layout of the file:
+   *
+   * | Path                                   | Content |
+   * |----------------------------------------|---------|
+   * | attributes `finished`, `crashed`       | 0 / 0 while running; at the end `finished` = 1, `crashed` = 1 if the run ended with an exception |
+   * | `/config`                              | the run's parameters, see write_config_tree |
+   * | `/scalars/<name>`                      | 1D dataset, one entry per frame; `/scalars/time` holds the RG time and is added automatically |
+   * | `/maps/<name>/<series>/data`           | one array per call of map(name, ...), numbered 0, 1, ...; attributes `time`, `series_number` |
+   * | `/maps/<name>/<series>/coordinates`    | soft link to the grid in `/coordinates` |
+   * | `/coordinates/<coordinates>`           | the grid points, an array of shape sizes() with one tuple per point; named by the coordinates' to_string() unless a name is given |
+   * | `/FE/NNNNNN`, `/<series>/NNNNNN`       | FE fields of frame NNNNNN (main run file only, see FEOutput): `nodes` and one dataset per field |
+   *
+   * The scalars written in the first frame fix the set: every later frame must write exactly the same names, each
+   * with the same type, or scalar()/flush() throws.
    */
+  // clang-format on
   class HDF5Output
   {
   public:
     /**
-     * @brief Construct a new Csv Output object
+     * @brief Create (truncate) the file @p top_folder / @p output_name (".h5" is appended if missing).
      *
-     * @param top_folder The top folder to store the output in.
-     * @param output_name The name of the output file.
-     * @param config The ConfigTree object containing the parameters.
+     * @param top_folder Folder of the file; created if needed.
+     * @param output_name File name.
+     * @param configuration_json The parameters as JSON text, written to `/config`.
      */
     HDF5Output(const std::string top_folder, const std::string output_name,
                const std::string &configuration_json = "{}");
 
+    /// Configuration taken from @p config.
     [[deprecated("Use HDF5Output(top_folder, output_name, Config::OutputSettings(config).configuration_json) instead")]]
     HDF5Output(const std::string top_folder, const std::string output_name, const ConfigTree &config)
         : HDF5Output(std::move(top_folder), std::move(output_name), Config::OutputSettings(config).configuration_json)
     {
     }
 
+    /// Close the file.
     ~HDF5Output();
 
-    /** Append the series number, as text, to a per-series-group dataset. Runs on the writer. */
+    /// Append @p series_number (as text) to the dataset `series_numbers` of @p group.
     static void write_series_record(DiFfRG::hdf5::Group &group, const int series_number)
     {
       const std::string value = std::to_string(series_number);
@@ -79,14 +91,10 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Add a value to the output.
+     * @brief Append @p value to `/scalars/<name>` in this frame.
      *
-     * Validates and copies here, on the calling thread, so that a rejected value still fails at
-     * the call site with the context that produced it -- but performs no HDF5 call. The write
-     * itself is staged and happens when the frame is flushed.
-     *
-     * @param name The name of the value.
-     * @param value The value to add.
+     * Throws if @p name was already written in this frame, was not written in the first frame, or had a different
+     * type before. @p T is any type with an HDF5 counterpart (see hdf5.hh), e.g. double, int, std::string.
      */
     template <typename T> void scalar(const std::string &name, const T value)
     {
@@ -119,7 +127,7 @@ namespace DiFfRG
       const bool create = info->second.count == 0;
       const hsize_t offset = static_cast<hsize_t>(info->second.count++);
 
-      staged.actions.emplace_back([name, v = value_type(value), create, offset](HDF5FrameContext &context) {
+      staged.actions.emplace_back([name, v = value_type(value), create, offset](internal::HDF5FrameContext &context) {
         auto &group = context.group("scalars");
         auto type = DiFfRG::hdf5::type_of<value_type>();
         if (create) {
@@ -133,15 +141,14 @@ namespace DiFfRG
         }
       });
     }
+    /// A string scalar.
     void scalar(const std::string &name, const char *value) { scalar<std::string>(name, std::string(value)); }
 
+    /// Write the grid points of @p coordinates to `/coordinates/<name>`. Once per name; throws if it already exists.
     template <typename COORD>
       requires is_coordinates<COORD>
     void map(const std::string &name, const COORD &coordinates)
     {
-      // In-memory, because staging must not touch the file at all. It also fixes the original:
-      // this asked has_dataset() on a group handle that was closed between frames, which
-      // silently answered "no" and turned the diagnostic into a raw H5Dcreate2 failure.
       if (coord_identifiers.find(name) != coord_identifiers.end()) {
         throw std::runtime_error("HDF5Output::map: The coordinates '" + name +
                                  "' have already been written to the file '" + output_name + "'.");
@@ -158,21 +165,22 @@ namespace DiFfRG
 
       coord_identifiers[name] = coordinates.to_string();
 
-      staged.actions.emplace_back([name, dims, grid = std::move(grid_data)](HDF5FrameContext &context) {
+      staged.actions.emplace_back([name, dims, grid = std::move(grid_data)](internal::HDF5FrameContext &context) {
         auto space = DiFfRG::hdf5::Dataspace::simple(dims);
         auto dataset = context.group("coordinates").create_dataset(name, DiFfRG::hdf5::type_of<coord_type>(), space);
         dataset.write(grid);
       });
     }
 
+    /**
+     * @brief Write a new series `/maps/<name>/<n>/data` from @p data, which holds coordinates.size() values in the
+     * linear index order of @p coordinates. The grid is written to `/coordinates/<coordinates.to_string()>` on
+     * first use.
+     */
     template <typename COORD, typename T>
       requires is_coordinates<COORD>
     void map(const std::string &name, const COORD &coordinates, T *data)
     {
-      // Note the asymmetry with the interpolator overload below: that one takes the coordinate
-      // dataset's name from the caller, this one derives it from the coordinates themselves.
-      // Both spellings therefore appear under /coordinates. Preserved deliberately -- the
-      // golden layout test pins it.
       const std::string coord_name = coordinates.to_string();
       if (coord_identifiers.find(coord_name) == coord_identifiers.end()) map(coord_name, coordinates);
 
@@ -187,6 +195,7 @@ namespace DiFfRG
       stage_map(name, coord_name, dims, std::move(payload));
     }
 
+    /// Write a new series `/maps/<name>/<n>/data` with the interpolator's values on its grid points.
     template <typename INTERP>
       requires is_interpolator<INTERP>
     void map(const std::string &name, const INTERP &_interpolator)
@@ -194,6 +203,10 @@ namespace DiFfRG
       map(name, _interpolator.get_coordinates().to_string(), _interpolator);
     }
 
+    /**
+     * @brief As above, with the grid stored as `/coordinates/<coord_name>`. Throws if a different grid was already
+     * stored under that name.
+     */
     template <typename INTERP>
       requires is_interpolator<INTERP>
     void map(const std::string &name, const std::string &coord_name, const INTERP &_interpolator)
@@ -221,10 +234,7 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Stage the node coordinates and nodal values of one finite-element frame.
-     *
-     * Called by FEOutput, which owns the DataOut and the filtering, but not the file. The
-     * arrays are moved in; nothing here touches HDF5.
+     * @brief Add the nodes and nodal values of one FE frame, as group `<group_name>/<series_number>`. Used by FEOutput.
      */
     void stage_fe_frame(unsigned int series_number, double time, const std::string &group_name,
                         const std::string &fe_output_name, unsigned int dim, std::size_t n_nodes,
@@ -232,65 +242,49 @@ namespace DiFfRG
                         std::vector<std::pair<std::string, std::vector<double>>> data_sets);
 
     /**
-     * @brief Open the file for setup work performed before any frame is written.
-     *
-     * Not for per-frame writes -- those go through scalar()/map()/stage_fe_frame() and are
-     * executed together when the frame is flushed. Callers must close_file() when done, so the
-     * lock is not held into the run.
+     * @brief Open the file for setup before the first frame; call close_file() afterwards. Not for per-frame writes.
      */
     DiFfRG::hdf5::File &get_file();
 
+    /// End the frame at RG time @p time: add `/scalars/time` (if any scalar was written), check the scalars, write.
     void flush(const double time);
 
-    /**
-     * @brief Execute and clear whatever is staged, without the per-frame scalar bookkeeping.
-     *
-     * flush() is the normal entry point. This exists for the standalone FEOutput case, where
-     * nobody flushes the HDF5Output at all and the staged field data would otherwise be
-     * discarded at destruction.
-     */
+    /// Write what is staged, without the scalar checks of flush(). For an FEOutput used on its own.
     void run_staged_frame(double time);
 
     /**
-     * @brief Route staged frames through a writer thread instead of writing them inline.
+     * @brief Write frames on the background thread @p writer (not owned) instead of the calling thread (nullptr).
      *
-     * Not owned. Every HDF5Output of one run must share the same writer, because HDF5 is not
-     * thread safe here and two writers would call into it concurrently. Passing nullptr (the
-     * default) keeps everything on the calling thread.
+     * All HDF5Outputs of a run must share one writer, since the HDF5 library is not thread-safe.
      */
-    void set_writer(HDF5FrameWriter *writer) { this->writer = writer; }
+    void set_writer(internal::HDF5FrameWriter *writer) { this->writer = writer; }
 
-    /** Wait for this sink's queued frames to reach disk and surface any writer error. */
+    /// Wait until the queued frames are written; rethrow a writer error.
     void drain();
 
     /**
-     * @brief Record how the run ended: sets the root `finished` attribute to 1, and `crashed` to
-     * whether it ended by throwing.
+     * @brief Set the root attributes `finished` = 1 and `crashed` = @p crashed. Call once, after the last frame.
      *
-     * Call once, after the last frame. Files start at `finished = 0`, so a run that never gets
-     * here -- SIGKILL, OOM, a node eviction -- stays marked unfinished. A run that threw still
-     * reaches this and is marked finished, with `crashed = 1`: its output was flushed and closed
-     * properly, it just stopped early.
+     * A run killed from outside never gets here and keeps `finished` = 0.
      */
     void mark_finished(bool crashed);
 
+    /// Open the file for direct access (see get_file()).
     void open_file();
+    /// Close a file opened by open_file().
     void close_file();
 
-    /** Timing buckets accumulated since the last call, and reset by it. */
-    FrameTimings take_frame_timings()
+    /// The timings accumulated since the last call.
+    internal::FrameTimings take_frame_timings()
     {
-      const FrameTimings taken = frame_timings;
-      frame_timings = FrameTimings{};
+      const internal::FrameTimings taken = frame_timings;
+      frame_timings = internal::FrameTimings{};
       return taken;
     }
 
   private:
     /**
      * @brief Stage one map series: the group, its series record, its data and its coordinate link.
-     *
-     * Shared by the raw-pointer and interpolator overloads, which differ only in how they
-     * produce the dense payload and how the coordinate dataset gets its name.
      */
     template <typename T>
     void stage_map(const std::string &name, const std::string &coord_name, const DiFfRG::hdf5::Dims &dims,
@@ -302,19 +296,19 @@ namespace DiFfRG
       const bool create_parent = created_map_groups.insert(name).second;
 
       written_map_series.emplace_back(name, series);
-      staged.actions.emplace_back(
-          [name, coord_name, dims, series, create_parent, data = std::move(payload)](HDF5FrameContext &context) {
-            auto &maps_group = context.group("maps");
-            auto parent = create_parent ? maps_group.create_group(name) : maps_group.open_group(name);
-            auto group = parent.create_group(std::to_string(series));
-            write_series_record(group, static_cast<int>(series));
+      staged.actions.emplace_back([name, coord_name, dims, series, create_parent,
+                                   data = std::move(payload)](internal::HDF5FrameContext &context) {
+        auto &maps_group = context.group("maps");
+        auto parent = create_parent ? maps_group.create_group(name) : maps_group.open_group(name);
+        auto group = parent.create_group(std::to_string(series));
+        write_series_record(group, static_cast<int>(series));
 
-            auto space = DiFfRG::hdf5::Dataspace::simple(dims);
-            auto dataset = group.create_dataset("data", DiFfRG::hdf5::type_of<T>(), space);
-            dataset.write(data);
+        auto space = DiFfRG::hdf5::Dataspace::simple(dims);
+        auto dataset = group.create_dataset("data", DiFfRG::hdf5::type_of<T>(), space);
+        dataset.write(data);
 
-            group.create_soft_link("coordinates", "/coordinates/" + coord_name);
-          });
+        group.create_soft_link("coordinates", "/coordinates/" + coord_name);
+      });
     }
 
     const std::string top_folder;
@@ -333,9 +327,9 @@ namespace DiFfRG
     std::set<std::string> created_map_groups;
 
     /** Writes accumulated for the frame in progress; executed by flush(). */
-    HDF5Frame staged;
+    internal::HDF5Frame staged;
     /** Not owned; shared with every other HDF5Output of the same run. */
-    HDF5FrameWriter *writer = nullptr;
+    internal::HDF5FrameWriter *writer = nullptr;
 
     std::list<std::string> written_scalars;
     /** (name, series) of every map written this frame. Carries the series number rather than
@@ -366,6 +360,6 @@ namespace DiFfRG
 
     std::filesystem::path path;
 
-    FrameTimings frame_timings;
+    internal::FrameTimings frame_timings;
   };
 } // namespace DiFfRG

@@ -22,31 +22,70 @@ namespace DiFfRG
     using namespace dealii;
     using std::array;
 
-    template <typename... T> auto i_tie(T &&...t)
+    namespace internal
     {
-      return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "fe_derivatives", "fe_hessians">>(
-          std::tie(t...));
-    }
+      template <typename... T> auto i_tie(T &&...t)
+      {
+        return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "fe_derivatives", "fe_hessians">>(
+            std::tie(t...));
+      }
+    } // namespace internal
 
+    // clang-format off
     /**
-     * @brief The CG assembler for models with flux and source.
+     * @brief Assembles the continuous Galerkin discretization (CG::Discretization) of
+     * \f$m(u, \partial_t u) + \nabla\cdot F + s = 0\f$.
      *
+     * ### Residual
+     * With \f$\phi_i\f$ the shape function of dof \f$i\f$, the residual of dof \f$i\f$ is the weak form of the
+     * equation, the flux integrated by parts:
+     * \f[
+     *   R_i = \sum_K \int_K \Big[ w_m\, \phi_i\, m(u, \partial_t u) - w\, \nabla\phi_i \cdot F + w\, \phi_i\, s \Big]
+     *       + w \sum_{f \subset \partial\Omega} \int_f \phi_i\, \hat F_b \cdot n\,.
+     * \f]
+     * \f$K\f$ runs over the cells and \f$f\f$ over the faces on the domain boundary (periodic faces are not among
+     * them), \f$n\f$ is the outward unit normal, \f$w\f$ and \f$w_m\f$ are the residual and mass weights the
+     * timestepper passes. \f$F\f$ and \f$s\f$ are evaluated at the Gauss points, as functions of
+     * \f$x, u, \nabla u, \nabla^2 u\f$, the extractors and the variables. \f$\hat F_b\f$ is Model::boundary_numflux;
+     * def::FlowBoundaries takes the model's own flux there. There is no flux term on interior faces, since \f$u\f$ is
+     * continuous.
+     *
+     * ### Constraints
+     * Hanging-node constraints and the model's affine constraints (Model::affine_constraints, e.g. Dirichlet values)
+     * are applied to \f$u\f$, and their homogeneous part to \f$\partial_t u\f$, before every evaluation. Constrained
+     * dofs have an empty residual row and are algebraic for IDA (get_differential_indices), so the values a
+     * timestepper stores for them never matter.
+     *
+     * ### Model hooks
+     * mass, flux and source, or evaluate_batch (all quadrature points in one call; the default calls flux and source
+     * per point, a model can override it to evaluate its momentum integrals in one map() call, on the CPU or GPU);
+     * boundary_numflux; cell_indicator for mesh adaptation; the extractor and readout hooks. A model whose flux and
+     * source read no derivatives declares `static constexpr bool batch_reads_derivatives = false`, one that reads
+     * gradients but no hessians `batch_reads_hessians = false`; the assembler then neither gathers nor differentiates
+     * them.
+     *
+     * ### Parameters
+     * | Key                                          | Type | Default              | Meaning |
+     * |----------------------------------------------|------|----------------------|---------|
+     * | `/discretization/overintegration`            | uint | 0                    | quadrature QGauss(\f$p + 1 +\f$ overintegration) on cells and faces |
+     * | `/discretization/batched/max_stacked_points` | uint | 256 MiB / point size | points per automatic-differentiation evaluation of the jacobian |
+     *
+     * ### Implementation
      * Residual and jacobian are assembled in three phases:
-     *  1. gather: the FE solution at every quadrature point of the locally owned cells and boundary
-     *     faces, into a PointBatch;
-     *  2. evaluate: the model's evaluate_batch (and boundary numflux) over the whole batch, or their
-     *     jacobians, see model/batch.hh. The default evaluate_batch calls the per-point flux and
-     *     source in a flat parallel loop; a model can override it to evaluate its momentum integrals
-     *     with one map_points() call per batch, on the CPU or the GPU;
-     *  3. scatter: the contraction with the shape functions, in a parallel loop over cell colors, see
-     *     internal::ColoredCells.
+     *  1. gather: the FE solution at every quadrature point of the locally owned cells and boundary faces, into a
+     *     PointBatch;
+     *  2. evaluate: the model's evaluate_batch and boundary numflux over the whole batch, or their jacobians (see
+     *     model/batch.hh);
+     *  3. scatter: the contraction with the shape functions, in a parallel loop over cell colors (see
+     *     DiFfRG::internal::ColoredCells).
      *
-     * Each MPI rank batches its own cells and phase 2 communicates nothing. The results do not depend on
-     * the thread count: contributions to a global entry are summed in color order.
+     * Each MPI rank batches its own cells and phase 2 communicates nothing. The results do not depend on the thread
+     * count: contributions to a global entry are summed in color order.
      *
-     * Config: /discretization/batched/max_stacked_points bounds the size of one AD evaluation of the
-     * jacobian (default: 256 MB of AD inputs and outputs), see DiFfRG::internal::seed_stacked_jacobian.
+     * @tparam Discretization_ A CG::Discretization.
+     * @tparam Model_ The model; by default that of the discretization.
      */
+    // clang-format on
     template <typename Discretization_,
               typename Model_ = typename DiFfRG::internal::assembler_model_of<Discretization_>::type>
     class Assembler : public FEMAssembler<Discretization_, Model_>
@@ -65,13 +104,16 @@ namespace DiFfRG
       static constexpr size_t n_fe = Components::count_fe_functions();
       static constexpr size_t n_extr = Components::count_extractors();
       using Extractors = std::array<NumberType, n_extr>;
-      /// Which inputs the model reads, and hence which the batches hold.
+      /// Which inputs the model reads (batch_reads_derivatives / batch_reads_hessians), and hence which the batches
+      /// hold.
       static constexpr bool reads_derivatives = batch_reads_derivatives<Model>();
       static constexpr bool reads_hessians = reads_derivatives && batch_reads_hessians<Model>();
       using Batch = PointBatch<dim, NumberType, n_fe, Extractors, VectorType, reads_derivatives, reads_hessians>;
 
       using PhaseTimes = AssemblyPhaseTimes;
 
+      /// Set up quadrature, constraints, mass matrix and jacobian sparsity; @p discretization and @p model must
+      /// outlive the assembler.
       Assembler(Discretization &discretization, Model &model, const ConfigTree &config)
           : Base(discretization, model, config, "CG"),
             quadrature(fe.degree + 1 + config.get_uint("/discretization/overintegration", 0)),
@@ -82,6 +124,7 @@ namespace DiFfRG
         reinit();
       }
 
+      /// Rebuild constraints, mass matrix, sparsity and cell lists after the mesh changed.
       virtual void reinit() override
       {
         Timer timer;
@@ -92,6 +135,7 @@ namespace DiFfRG
         timings_reinit.push_back(timer.wall_time());
       }
 
+      /// Rebuild the jacobian sparsity: the FE couplings, plus a full column per dof the extractors read.
       virtual void rebuild_jacobian_sparsity() override
       {
         DynamicSparsityPattern dsp(discretization.get_locally_relevant_dofs());
@@ -100,14 +144,19 @@ namespace DiFfRG
         for (const auto &row : discretization.get_locally_relevant_dofs())
           for (const auto &col : extractor_dof_indices)
             dsp.add(row, col);
-        finalize_la_sparsity<SparseMatrixType>(dsp, sparsity_pattern_jacobian, discretization.get_locally_owned_dofs(),
-                                               discretization.get_locally_relevant_dofs(),
-                                               discretization.get_communicator());
+        DiFfRG::internal::finalize_la_sparsity<SparseMatrixType>(
+            dsp, sparsity_pattern_jacobian, discretization.get_locally_owned_dofs(),
+            discretization.get_locally_relevant_dofs(), discretization.get_communicator());
       }
 
-      /// The model's cell_indicator integrated over each cell; CG has no face contribution.
-      void refinement_indicator(Vector<double> &indicator, const VectorType &solution_global)
+      /**
+       * @brief Add to @p indicator, per active cell \f$K\f$, \f$\int_K \eta\f$ with \f$\eta\f$ = Model::cell_indicator.
+       * CG has no face contribution.
+       */
+      void refinement_indicator(Vector<double> &indicator, const VectorType &solution)
       {
+        const auto state = this->constrained(solution);
+        const VectorType &solution_global = state.u();
         tbb::enumerable_thread_specific<CellScratch> scratch([this]() {
           return CellScratch(mapping, fe, quadrature, quadrature_face, gather_flags() | update_hessians);
         });
@@ -123,7 +172,8 @@ namespace DiFfRG
             fe_v.get_function_hessians(solution_global, s.hessians);
             double value = 0., local = 0.;
             for (const auto &q : fe_v.quadrature_point_indices()) {
-              model.cell_indicator(local, fe_v.quadrature_point(q), i_tie(s.values[q], s.gradients[q], s.hessians[q]));
+              model.cell_indicator(local, fe_v.quadrature_point(q),
+                                   internal::i_tie(s.values[q], s.gradients[q], s.hessians[q]));
               value += fe_v.JxW(q) * local;
             }
             indicator[cells[k]->active_cell_index()] += value;
@@ -131,9 +181,12 @@ namespace DiFfRG
         });
       }
 
-      virtual void mass(VectorType &mass, const VectorType &solution_global, const VectorType &solution_global_dot,
+      /// \f$w_m \int \phi_i\, m(u, \partial_t u)\f$, see AbstractAssembler::mass.
+      virtual void mass(VectorType &mass, const VectorType &solution, const VectorType &solution_dot,
                         NumberType weight) override
       {
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         scatter_residual(mass, [&](const size_t, CellScratch &s, Vector<NumberType> &r) {
           const auto &fe_v = s.fe_values;
           fe_v.get_function_values(solution_global, s.values);
@@ -147,10 +200,13 @@ namespace DiFfRG
         });
       }
 
-      virtual void residual(VectorType &residual, const VectorType &solution_global, NumberType weight,
-                            const VectorType &solution_global_dot, NumberType weight_mass,
+      /// The residual \f$R_i\f$ of the class documentation, added to @p residual; see AbstractAssembler::residual.
+      virtual void residual(VectorType &residual, const VectorType &solution, NumberType weight,
+                            const VectorType &solution_dot, NumberType weight_mass,
                             const VectorType &variables = VectorType()) override
       {
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         DiFfRG::internal::PhaseTimer phase(residual_times);
         Extractors extracted_data{{}};
         if constexpr (n_extr > 0) this->extract(extracted_data, solution_global, variables, true, false, true);
@@ -162,7 +218,7 @@ namespace DiFfRG
           cell_result.reinit(cell_batch.size(), Term::flux | Term::source);
           model.evaluate_batch(cell_result, cell_batch);
           face_result.reinit(face_batch.size(), Term::flux);
-          evaluate_boundary_numflux(model, face_result, face_normals, face_batch);
+          DiFfRG::internal::evaluate_boundary_numflux(model, face_result, face_normals, face_batch);
         }
         phase.lap(&PhaseTimes::evaluate);
         scatter_residual(residual, [&](const size_t k, CellScratch &s, Vector<NumberType> &r) {
@@ -204,9 +260,13 @@ namespace DiFfRG
         timings_residual.push_back(phase.finish());
       }
 
-      virtual void jacobian_mass(SparseMatrixType &jacobian, const VectorType &solution_global,
-                                 const VectorType &solution_global_dot, NumberType alpha, NumberType beta) override
+      /// \f$\alpha\, \partial m/\partial(\partial_t u) + \beta\, \partial m / \partial u\f$, contracted with the shape
+      /// functions; see AbstractAssembler::jacobian_mass.
+      virtual void jacobian_mass(SparseMatrixType &jacobian, const VectorType &solution, const VectorType &solution_dot,
+                                 NumberType alpha, NumberType beta) override
       {
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         Timer timer;
         scatter_jacobian(jacobian, [&](const size_t, CellScratch &s, LocalData &out) {
           add_mass_jacobian(s, out.jacobian, solution_global, solution_global_dot, alpha, beta);
@@ -214,10 +274,17 @@ namespace DiFfRG
         timings_jacobian.push_back(timer.wall_time());
       }
 
-      virtual void jacobian(SparseMatrixType &jacobian, const VectorType &solution_global, NumberType weight,
-                            const VectorType &solution_global_dot, NumberType alpha, NumberType beta,
+      /**
+       * @brief \f$\partial R / \partial u\f$: \f$w\f$ times the derivative of the flux, source and boundary terms
+       * (including their dependence on the extractors), plus the mass terms as in jacobian_mass. See
+       * AbstractAssembler::jacobian.
+       */
+      virtual void jacobian(SparseMatrixType &jacobian, const VectorType &solution, NumberType weight,
+                            const VectorType &solution_dot, NumberType alpha, NumberType beta,
                             const VectorType &variables = VectorType()) override
       {
+        const auto state = this->constrained(solution, solution_dot);
+        const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         DiFfRG::internal::PhaseTimer phase(jacobian_times);
         Extractors extracted_data{{}};
         if constexpr (n_extr > 0) {
@@ -228,9 +295,10 @@ namespace DiFfRG
         phase.lap(&PhaseTimes::gather);
         {
           const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
-          evaluate_flux_source_jacobian(model, cell_jacobians, cell_batch, max_stacked_points, cell_workspace);
-          evaluate_boundary_numflux_jacobian(model, face_jacobians, face_normals, face_batch, max_stacked_points,
-                                             face_workspace);
+          DiFfRG::internal::evaluate_flux_source_jacobian(model, cell_jacobians, cell_batch, max_stacked_points,
+                                                          cell_workspace);
+          DiFfRG::internal::evaluate_boundary_numflux_jacobian(model, face_jacobians, face_normals, face_batch,
+                                                               max_stacked_points, face_workspace);
         }
         phase.lap(&PhaseTimes::evaluate);
         scatter_jacobian(jacobian, [&](const size_t k, CellScratch &s, LocalData &out) {
@@ -409,7 +477,7 @@ namespace DiFfRG
       }
 
       /// Phase 3: assemble(k, scratch, local) every owned cell, after reinit of its FEValues and dof indices,
-      /// and insert(local) the result; see internal::ColoredCells::scatter.
+      /// and insert(local) the result; see DiFfRG::internal::ColoredCells::scatter.
       template <typename Global, typename Assemble, typename Insert>
       void scatter(Global &global, const Assemble &assemble, const Insert &insert)
       {
@@ -541,8 +609,8 @@ namespace DiFfRG
       Batch cell_batch, face_batch;
       std::vector<Tensor<1, dim>> face_normals;
       BatchOutput<dim, NumberType, n_fe> cell_result, face_result;
-      std::vector<PointJacobian<dim, n_fe, n_fe, n_extr>> cell_jacobians, face_jacobians;
-      SeedStackWorkspace<Batch, n_fe> cell_workspace, face_workspace;
+      std::vector<DiFfRG::internal::PointJacobian<dim, n_fe, n_fe, n_extr>> cell_jacobians, face_jacobians;
+      DiFfRG::internal::SeedStackWorkspace<Batch, n_fe> cell_workspace, face_workspace;
     };
   } // namespace CG
 } // namespace DiFfRG

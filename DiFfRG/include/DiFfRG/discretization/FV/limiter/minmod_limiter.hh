@@ -16,17 +16,14 @@ namespace DiFfRG
   namespace def
   {
     /**
-     * @brief MinMod slope limiter.
+     * @brief MinMod limiter, \f$\tfrac12(\mathrm{sgn}\,a + \mathrm{sgn}\,b)\min(|a|, |b|)\f$ for the backward and
+     * forward slopes \f$a, b\f$.
      *
-     * Implements the classic minmod TVD limiter:
-     *   slope_limit(a, b) = 0.5 * (sgn(a) + sgn(b)) * min(|a|, |b|)
+     * Same signs: the smaller slope in magnitude; opposite signs (a local extremum): zero. The most dissipative TVD
+     * limiter, and the default of FV::KurganovTadmor::Assembler. It is not differentiable where \f$|a| = |b|\f$; there
+     * its automatic-differentiation derivative is the mean of both branches.
      *
-     * When the two one-sided slopes have the same sign, the limiter returns the
-     * smaller one (in absolute value). When they have opposite signs (indicating
-     * a local extremum), it returns zero.
-     *
-     * Satisfies the @c HasSlopeLimiter concept so it can be passed as the
-     * @c Limiter template parameter of the TVDReconstructor:
+     * Usage:
      * @code
      * using Assembler = FV::KurganovTadmor::Assembler<Discretization, Model,
      *                       def::TVDReconstructor<Discretization::dim, def::MinModLimiter, double>>;
@@ -56,6 +53,7 @@ namespace DiFfRG
       }
 
     public:
+      /// \f$\tfrac12(\mathrm{sgn}\,a + \mathrm{sgn}\,b)\min(|a|, |b|)\f$.
       template <typename NumberType> static NumberType slope_limit(const NumberType &du_1, const NumberType &du_2)
       {
         // Use the algebraic identity min(a,b) = 0.5*(a+b-|a-b|) instead of std::min so that

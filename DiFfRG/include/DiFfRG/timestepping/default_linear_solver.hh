@@ -49,19 +49,21 @@ namespace DiFfRG
   } // namespace internal
 
   /**
-   * @brief The build-configuration-dependent default linear solver.
+   * @brief The linear solver the implicit timesteppers use unless one is named.
    *
-   * The indirection through _default_solver is load-bearing and must not be "simplified" to
-   * `using DefaultLinearSolver = UMFPack<...>`. As a template template argument, a *simple*
-   * alias is collapsed to the template it names by GCC but not by Clang; an indirect one is
-   * kept distinct by both. Since the timesteppers are compiled out of line, a spelling that
-   * collapses on one compiler and not the other would match the explicit instantiations in
-   * src/ only where it collapses, and produce undefined references everywhere else.
+   * - serial linear algebra: UMFPack (direct);
+   * - PETSc linear algebra: PETScDirect (direct, MUMPS) if PETSc was built with MUMPS, otherwise PETScKrylov
+   *   (iterative). A flow tuned against a direct solve may need its tolerances revisited with the iterative one.
    *
-   * The consequence of staying distinct is worth knowing: TimeStepperSUNDIALS_IDA_impl<Assembler>
-   * and TimeStepperSUNDIALS_IDA_impl<Assembler, UMFPack> are different types even in a serial
-   * build, and both need their own explicit instantiation.
+   * `TimeStepperSUNDIALS_IDA<Assembler>` and `TimeStepperSUNDIALS_IDA<Assembler, UMFPack>` are different types even
+   * in a serial build, which matters only for explicit instantiations.
    */
+  // The indirection through _default_solver is load-bearing and must not be "simplified" to
+  // `using DefaultLinearSolver = UMFPack<...>`. As a template template argument, a *simple*
+  // alias is collapsed to the template it names by GCC but not by Clang; an indirect one is
+  // kept distinct by both. Since the timesteppers are compiled out of line, a spelling that
+  // collapses on one compiler and not the other would match the explicit instantiations in
+  // src/ only where it collapses, and produce undefined references everywhere else.
   template <typename SparseMatrixType, typename VectorType>
   using DefaultLinearSolver = typename internal::_default_solver<SparseMatrixType, VectorType>::type;
 } // namespace DiFfRG

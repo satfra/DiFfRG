@@ -12,6 +12,15 @@
 
 namespace DiFfRG
 {
+  /**
+   * @brief Serial restarted GMRES (deal.II, restart length 30), Jacobi-preconditioned by default.
+   *
+   * solve() stops once \f$\|A x - b\|_2 \le\f$ `tol` (an absolute tolerance), or throws after
+   * \f$\max(1000, n/10)\f$ iterations for an \f$n \times n\f$ matrix. See abstract_linear_solver.hh for the
+   * interface.
+   *
+   * @tparam PreconditionerType a deal.II preconditioner, initialized from the matrix in init().
+   */
   template <typename SparseMatrixType, typename VectorType,
             typename PreconditionerType = dealii::PreconditionJacobi<SparseMatrixType>>
   class GMRES : public AbstractLinearSolver<SparseMatrixType, VectorType>

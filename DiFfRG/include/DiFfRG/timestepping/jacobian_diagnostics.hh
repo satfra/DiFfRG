@@ -12,8 +12,20 @@
 #include <string>
 #include <vector>
 
+/**
+ * @file jacobian_diagnostics.hh
+ * @brief Records about every Jacobian an implicit timestepper builds, for /timestepping/implicit/jacobian_diagnostics.
+ *
+ * With the key set, every Jacobian build appends one row to `<run>_jacobian_diagnostics.csv`: which stepper and stage
+ * built it, the step size, the weights of the mass and residual parts of the matrix (for IDA, \f$\alpha\f$ in
+ * \f$\partial F/\partial u + \alpha\, \partial F/\partial \dot u\f$), matrix norms and diagonal statistics, the
+ * factorization time and, for factorizing solvers, an estimate of the reciprocal condition number. Useful to find
+ * where a flow becomes ill-conditioned.
+ */
+
 namespace DiFfRG
 {
+  /// Norms and diagonal statistics of one Jacobian; counts are stored as double for the CSV table.
   struct JacobianMatrixDiagnostics {
     double n_rows = 0.;
     double nnz = 0.;
@@ -31,6 +43,7 @@ namespace DiFfRG
     double max_column_max_abs = 0.;
   };
 
+  /// The stepper that built a Jacobian (column `stepper_kind`).
   enum class ImplicitTimestepperKind : unsigned int {
     ida = 0,
     ida_boost_rk = 1,
@@ -39,8 +52,10 @@ namespace DiFfRG
     trbdf2 = 4
   };
 
+  /// The stage of the step a Jacobian was built for (column `stage`); only TR-BDF2 has two.
   enum class ImplicitTimestepperStage : unsigned int { main = 0, trapezoidal = 1, bdf2 = 2 };
 
+  /// Where and for which step a Jacobian was built; NaN marks fields the stepper does not know.
   struct TimestepperJacobianBuildDiagnostics {
     std::size_t jacobian_build_id = 0;
     ImplicitTimestepperKind stepper_kind = ImplicitTimestepperKind::ida;
@@ -55,6 +70,7 @@ namespace DiFfRG
     double current_h = std::numeric_limits<double>::quiet_NaN();
   };
 
+  /// Counts accepted steps and retries of a stepper, to label its Jacobian records.
   class TimestepperJacobianDiagnosticsState
   {
   public:
@@ -95,6 +111,7 @@ namespace DiFfRG
     double last_accepted_h = std::numeric_limits<double>::quiet_NaN();
   };
 
+  /// Timing and outcome of a factorization; NaN for solvers that do not factorize.
   struct JacobianFactorizationDiagnostics {
     double factorization_ms = std::numeric_limits<double>::quiet_NaN();
     double factorization_success = std::numeric_limits<double>::quiet_NaN();
@@ -142,6 +159,7 @@ namespace DiFfRG
     }
   } // namespace internal
 
+  /// Norms and diagonal statistics of a square matrix; collective for distributed matrices.
   template <typename MatrixType> JacobianMatrixDiagnostics analyze_jacobian_matrix(const MatrixType &matrix)
   {
     if (matrix.m() != matrix.n()) throw std::invalid_argument("analyze_jacobian_matrix: Jacobian must be square");
@@ -222,6 +240,7 @@ namespace DiFfRG
     return result;
   }
 
+  /// Append one row to the diagnostics table @p table.
   inline void record_jacobian_diagnostics(const DiagnosticPort &diagnostics, const std::string &table, const double t,
                                           const TimestepperJacobianBuildDiagnostics &build,
                                           const JacobianMatrixDiagnostics &matrix,
@@ -258,9 +277,10 @@ namespace DiFfRG
                         {"scaled_rcond_estimate", factorization.scaled_rcond_estimate}});
   }
 
-  /** Factorizes and records how it went. The condition estimate costs several extra triangular
-   * solves per call, so `estimate_condition` switches it off when the diagnostics are not written;
-   * the success flag and the timing are always filled, as callers branch on them. */
+  /** Calls `solver.invert()` and records how it went. For solvers that factorize, the success flag and the timing
+   * are always filled, as callers branch on them; the condition estimate costs several extra triangular solves, so
+   * `estimate_condition` switches it off when the diagnostics are not written. For other solvers nothing is
+   * recorded. */
   template <typename LinearSolver, typename MatrixType>
   void factorize_with_diagnostics(LinearSolver &solver, const MatrixType &matrix,
                                   JacobianFactorizationDiagnostics &diagnostics, const bool estimate_condition)

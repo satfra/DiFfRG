@@ -107,7 +107,7 @@ TEST_CASE("Test HDF5 input", "[input][hdf5]")
       std::vector<double> loaded_data(coords2d.size());
 
       // Test loading map with matching coordinates
-      REQUIRE_NOTHROW(hdf5_input.load_map("test_map", loaded_data.data(), coords2d));
+      REQUIRE_NOTHROW(hdf5_input.load_map("test_map", loaded_data, coords2d));
 
       // Verify the data matches
       for (size_t i = 0; i < coords2d.size(); ++i)
@@ -115,7 +115,9 @@ TEST_CASE("Test HDF5 input", "[input][hdf5]")
 
       // Test loading map without coordinate checking
       std::vector<double> loaded_data2(coords2d.size());
-      REQUIRE_NOTHROW(hdf5_input.load_map("test_map", loaded_data2.data()));
+      REQUIRE_NOTHROW(hdf5_input.load_map("test_map", loaded_data2));
+      std::vector<double> too_small(coords2d.size() - 1);
+      REQUIRE_THROWS_AS(hdf5_input.load_map("test_map", too_small), std::runtime_error);
 
       // Verify the data matches
       for (size_t i = 0; i < coords2d.size(); ++i)
@@ -123,7 +125,7 @@ TEST_CASE("Test HDF5 input", "[input][hdf5]")
 
       // Test error when map doesn't exist
       std::vector<double> dummy_data(coords2d.size());
-      REQUIRE_THROWS_AS(hdf5_input.load_map("nonexistent_map", dummy_data.data()), std::runtime_error);
+      REQUIRE_THROWS_AS(hdf5_input.load_map("nonexistent_map", dummy_data), std::runtime_error);
     }
   }
 
@@ -152,15 +154,15 @@ TEST_CASE("Test HDF5 input", "[input][hdf5]")
     {
       HDF5Input hdf5_input(hdf5_file.string());
       std::vector<double> loaded_data(coords.size());
-      REQUIRE_NOTHROW(hdf5_input.load_map("focused_map", loaded_data.data(), coords));
+      REQUIRE_NOTHROW(hdf5_input.load_map("focused_map", loaded_data, coords));
       for (size_t i = 0; i < coords.size(); ++i)
         CHECK(loaded_data[i] == Catch::Approx(test_data[i]));
 
       // a grid with a different center or focus must be rejected
       std::vector<double> dummy_data(coords.size());
-      REQUIRE_THROWS_AS(hdf5_input.load_map("focused_map", dummy_data.data(), coords_other_center),
+      REQUIRE_THROWS_AS(hdf5_input.load_map("focused_map", dummy_data, coords_other_center),
                         std::runtime_error);
-      REQUIRE_THROWS_AS(hdf5_input.load_map("focused_map", dummy_data.data(), coords_other_focus), std::runtime_error);
+      REQUIRE_THROWS_AS(hdf5_input.load_map("focused_map", dummy_data, coords_other_focus), std::runtime_error);
     }
   }
 
@@ -200,16 +202,16 @@ TEST_CASE("Test HDF5 input", "[input][hdf5]")
       std::vector<double> loaded_data(coords2d.size());
 
       // This should work with matching coordinates
-      REQUIRE_NOTHROW(hdf5_input.load_map("test_map_validation", loaded_data.data(), coords2d));
+      REQUIRE_NOTHROW(hdf5_input.load_map("test_map_validation", loaded_data, coords2d));
 
       // This should fail with wrong size coordinates
       std::vector<double> wrong_size_data(wrong_coords2d.size());
-      REQUIRE_THROWS_AS(hdf5_input.load_map("test_map_validation", wrong_size_data.data(), wrong_coords2d),
+      REQUIRE_THROWS_AS(hdf5_input.load_map("test_map_validation", wrong_size_data, wrong_coords2d),
                         std::runtime_error);
 
       // This should fail with wrong range coordinates
       std::vector<double> wrong_range_data(wrong_range_coords2d.size());
-      REQUIRE_THROWS_AS(hdf5_input.load_map("test_map_validation", wrong_range_data.data(), wrong_range_coords2d),
+      REQUIRE_THROWS_AS(hdf5_input.load_map("test_map_validation", wrong_range_data, wrong_range_coords2d),
                         std::runtime_error);
     }
   }
@@ -237,7 +239,7 @@ TEST_CASE("Test HDF5 input", "[input][hdf5]")
       std::vector<double> loaded_data(missing_coords.size());
 
       // This should throw because the coordinates for missing_coords haven't been written
-      REQUIRE_THROWS_AS(hdf5_input.load_map("test_map_missing_coords", loaded_data.data(), missing_coords),
+      REQUIRE_THROWS_AS(hdf5_input.load_map("test_map_missing_coords", loaded_data, missing_coords),
                         std::runtime_error);
     }
   }

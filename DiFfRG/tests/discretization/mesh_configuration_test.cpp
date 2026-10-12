@@ -81,8 +81,8 @@ TEST_CASE("Mesh Configuration exists", "[MeshConfiguration]")
          }},
     });
     ConfigurationMesh<1> mesh_config(json);
-    REQUIRE(size(mesh_config.get_step_withs_for_triangulation()[0]) == 4);
-    REQUIRE(mesh_config.get_step_withs_for_triangulation()[0] == std::vector<double>{0.5, 0.5, 0.5, 0.5});
+    REQUIRE(size(mesh_config.get_step_widths_for_triangulation()[0]) == 4);
+    REQUIRE(mesh_config.get_step_widths_for_triangulation()[0] == std::vector<double>{0.5, 0.5, 0.5, 0.5});
   }
   SECTION("check a correct step size array in 2D")
   {
@@ -93,10 +93,10 @@ TEST_CASE("Mesh Configuration exists", "[MeshConfiguration]")
          }},
     });
     ConfigurationMesh<2> mesh_config(json);
-    REQUIRE(size(mesh_config.get_step_withs_for_triangulation()[0]) == 4);
-    REQUIRE(mesh_config.get_step_withs_for_triangulation()[0] == std::vector<double>{0.5, 0.5, 0.5, 0.5});
-    REQUIRE(size(mesh_config.get_step_withs_for_triangulation()[1]) == 4);
-    REQUIRE(mesh_config.get_step_withs_for_triangulation()[1] == std::vector<double>(4, 1.0));
+    REQUIRE(size(mesh_config.get_step_widths_for_triangulation()[0]) == 4);
+    REQUIRE(mesh_config.get_step_widths_for_triangulation()[0] == std::vector<double>{0.5, 0.5, 0.5, 0.5});
+    REQUIRE(size(mesh_config.get_step_widths_for_triangulation()[1]) == 4);
+    REQUIRE(mesh_config.get_step_widths_for_triangulation()[1] == std::vector<double>(4, 1.0));
   }
   SECTION("check a correct step size array in 3D")
   {
@@ -107,12 +107,12 @@ TEST_CASE("Mesh Configuration exists", "[MeshConfiguration]")
          }},
     });
     ConfigurationMesh<3> mesh_config(json);
-    REQUIRE(size(mesh_config.get_step_withs_for_triangulation()[0]) == 4);
-    REQUIRE(mesh_config.get_step_withs_for_triangulation()[0] == std::vector<double>{0.5, 0.5, 0.5, 0.5});
-    REQUIRE(size(mesh_config.get_step_withs_for_triangulation()[1]) == 4);
-    REQUIRE(mesh_config.get_step_withs_for_triangulation()[1] == std::vector<double>(4, 1.0));
-    REQUIRE(size(mesh_config.get_step_withs_for_triangulation()[2]) == 2);
-    REQUIRE(mesh_config.get_step_withs_for_triangulation()[2] == std::vector<double>(2, 2.0));
+    REQUIRE(size(mesh_config.get_step_widths_for_triangulation()[0]) == 4);
+    REQUIRE(mesh_config.get_step_widths_for_triangulation()[0] == std::vector<double>{0.5, 0.5, 0.5, 0.5});
+    REQUIRE(size(mesh_config.get_step_widths_for_triangulation()[1]) == 4);
+    REQUIRE(mesh_config.get_step_widths_for_triangulation()[1] == std::vector<double>(4, 1.0));
+    REQUIRE(size(mesh_config.get_step_widths_for_triangulation()[2]) == 2);
+    REQUIRE(mesh_config.get_step_widths_for_triangulation()[2] == std::vector<double>(2, 2.0));
   }
 
   SECTION("Get lower_left and upper_right of grid in 3D", "[MeshConfiguration]")
@@ -154,7 +154,7 @@ TEST_CASE("Mesh Configuration computes origin-centered triangulation data", "[Me
 
     CHECK(data.lower_left == mesh_config.get_lower_left());
     CHECK(data.upper_right == mesh_config.get_upper_right());
-    CHECK(data.step_sizes == mesh_config.get_step_withs_for_triangulation());
+    CHECK(data.step_sizes == mesh_config.get_step_widths_for_triangulation());
   }
 
   SECTION("adjusts bounds and first subrange widths coherently")
@@ -218,28 +218,28 @@ TEST_CASE("GridAxis tests", "[MeshConfiguration]")
   SECTION("returns array of steps")
   {
     GridAxis grid_axis("0.0:0.5:2");
-    REQUIRE(size(grid_axis.get_stepwiths()) == 4);
-    REQUIRE(grid_axis.get_stepwiths() == std::vector<double>{0.5, 0.5, 0.5, 0.5});
+    REQUIRE(size(grid_axis.get_step_widths()) == 4);
+    REQUIRE(grid_axis.get_step_widths() == std::vector<double>{0.5, 0.5, 0.5, 0.5});
   }
 
   SECTION("returns array of steps if step does not add up exactly to max")
   {
     GridAxis grid_axis("0.0:0.6:2");
-    REQUIRE(size(grid_axis.get_stepwiths()) == 4);
-    REQUIRE(grid_axis.get_stepwiths() == std::vector<double>{0.5, 0.5, 0.5, 0.5});
+    REQUIRE(size(grid_axis.get_step_widths()) == 4);
+    REQUIRE(grid_axis.get_step_widths() == std::vector<double>{0.5, 0.5, 0.5, 0.5});
   }
 
   SECTION("returns array of steps if step does not add up exactly to max, with one step")
   {
     GridAxis grid_axis("0:2.0:2");
-    REQUIRE(size(grid_axis.get_stepwiths()) == 1);
-    REQUIRE(grid_axis.get_stepwiths() == std::vector<double>{2.0});
+    REQUIRE(size(grid_axis.get_step_widths()) == 1);
+    REQUIRE(grid_axis.get_step_widths() == std::vector<double>{2.0});
   }
 
   SECTION("chooses the smallest origin-centered cell count with a smaller step width")
   {
     const GridAxis grid_axis(0.0, 0.3, 5.0);
-    const auto step_widths = grid_axis.get_stepwiths(true);
+    const auto step_widths = grid_axis.get_step_widths(true);
 
     constexpr double expected_width = 5.0 / 17.5;
     REQUIRE(step_widths.size() == 18);
@@ -251,7 +251,7 @@ TEST_CASE("GridAxis tests", "[MeshConfiguration]")
   SECTION("accounts for global refinement when choosing the smallest origin-centered cell count")
   {
     const GridAxis grid_axis(0.0, 0.3, 5.0);
-    const auto step_widths = grid_axis.get_stepwiths(true, 1u);
+    const auto step_widths = grid_axis.get_step_widths(true, 1u);
 
     constexpr double expected_width = 5.0 / 16.75;
     REQUIRE(step_widths.size() == 17);

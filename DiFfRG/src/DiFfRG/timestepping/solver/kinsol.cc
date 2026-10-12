@@ -14,7 +14,8 @@ namespace DiFfRG
   KINSOL<VectorType_>::KINSOL(double abstol_, double reltol_, double assemble_threshold_, uint max_steps_,
                               uint n_stepsize_iterations_)
       : abstol(abstol_), reltol(reltol_), assemble_threshold(assemble_threshold_), max_steps(max_steps_),
-        n_stepsize_iterations(n_stepsize_iterations_), ignore_nonconv(false)
+        n_stepsize_iterations(n_stepsize_iterations_), converged(false), ignore_nonconv(false), resnorm(0.), step(0),
+        jacobians(0)
   {
     typename SUNDIALS::KINSOL<VectorType>::AdditionalData add_data;
     add_data.strategy = SUNDIALS::KINSOL<VectorType>::AdditionalData::SolutionStrategy::linesearch;
@@ -36,6 +37,8 @@ namespace DiFfRG
     Timer timer;
 
     initial_vector = iterate;
+    step = 0;
+    jacobians = 0;
 
     kinsol->reinit_vector = [&](VectorType &x) { x.reinit(iterate); };
 
@@ -47,6 +50,7 @@ namespace DiFfRG
 
     kinsol->setup_jacobian = [&](const VectorType &current_u, const VectorType & /*current_f*/) {
       this->update_jacobian(current_u);
+      ++jacobians;
       return 0;
     };
 
@@ -76,7 +80,7 @@ namespace DiFfRG
     // user opted into ignore_nonconv) and re-throw genuine failures.
     auto robust_solve = [&](VectorType &it) {
       try {
-        kinsol->solve(it);
+        step += kinsol->solve(it);
       } catch (const dealii::ExceptionBase &) {
         if (!ignore_nonconv && !residual_converged(it)) throw;
       }

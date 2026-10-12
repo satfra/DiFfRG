@@ -62,6 +62,7 @@ namespace
             {{"start_adapt_at", 0.},
              {"adapt_dt", 1e-1},
              {"level", adapt_level},
+             {"marking", "fraction"},
              {"refine_percent", 1e-1},
              {"coarsen_percent", 5e-2}}}}},
          {"timestepping", {{"final_time", 1.}, {"output_dt", 1e-1}}},

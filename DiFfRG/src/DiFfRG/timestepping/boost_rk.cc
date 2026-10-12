@@ -64,10 +64,10 @@ namespace DiFfRG
 
       sol_save = sol;
 
-      while (n_saves <= uint((t - t_start) / output_dt)) {
+      while (n_saves <= uint((t - t_start) / output_dt + 1e-3)) {
         // Interpolate the solution to the output time
         double t_save = t_start + output_dt * n_saves;
-        if (t_save > t) break;
+        if (!is_close(t_save, t, 1e-6 * output_dt) && t_save > t) break;
         n_saves++;
         if (ring_count >= 2) {
           const uint cur = (ring_count - 1) % 2;
@@ -112,7 +112,7 @@ namespace DiFfRG
       inverse_mass_matrix.solve(dy_dealii);
 
       if (!std::isfinite(dy_dealii.l2_norm()))
-        throw std::runtime_error("TimeStepperBoostRK_impl::run_vars: dy is not finite!");
+        throw std::runtime_error("TimeStepperBoostRK_impl::run: dy is not finite!");
 
       dealii_to_eigen(dy_dealii, dxdt);
 
@@ -164,10 +164,10 @@ namespace DiFfRG
 
       sol_save = sol;
 
-      while (n_saves <= uint((t - t_start) / output_dt)) {
+      while (n_saves <= uint((t - t_start) / output_dt + 1e-3)) {
         // Interpolate the solution to the output time
         double t_save = t_start + output_dt * n_saves;
-        if (t_save > t) break;
+        if (!is_close(t_save, t, 1e-6 * output_dt) && t_save > t) break;
         n_saves++;
         if (ring_count >= 2) {
           const uint cur = (ring_count - 1) % 2;
@@ -213,7 +213,7 @@ namespace DiFfRG
       inverse_mass_matrix.solve(dy_dealii.block(0));
 
       if (!std::isfinite(dy_dealii.l2_norm()))
-        throw std::runtime_error("TimeStepperBoostRK_impl::run_vars: dy is not finite!");
+        throw std::runtime_error("TimeStepperBoostRK_impl::run: dy is not finite!");
 
       dealii_to_eigen(dy_dealii, dxdt);
 
@@ -241,7 +241,8 @@ namespace DiFfRG
                                                                                   const double t_stop)
   {
     if (initial_data.size() == 0)
-      throw std::runtime_error("TimeStepperRK_impl::run: y contains no variables, use a different timestepper!");
+      throw std::runtime_error(
+          "TimeStepperBoostRK_impl::run_vars: y contains no variables, use a different timestepper!");
 
     // At output_dt intervals this function saves intermediate solutions
     dealii::Vector<double> output_dealii(initial_data.size());
@@ -257,10 +258,10 @@ namespace DiFfRG
 
       sol_save = sol;
 
-      while (n_saves <= uint((t - t_start) / output_dt)) {
+      while (n_saves <= uint((t - t_start) / output_dt + 1e-3)) {
         // Interpolate the solution to the output time
         double t_save = t_start + output_dt * n_saves;
-        if (t_save > t) break;
+        if (!is_close(t_save, t, 1e-6 * output_dt) && t_save > t) break;
         n_saves++;
         if (ring_count >= 2) {
           const uint cur = (ring_count - 1) % 2;
@@ -324,7 +325,6 @@ namespace DiFfRG
 
     using namespace boost::numeric::odeint;
     auto stepper = make_controlled<error_stepper_type>(expl.abs_tol, expl.rel_tol);
-    // integrate_adaptive(stepper, residual, y_eigen, t_start, t_stop, expl.dt, output_step);
 
     uint step = 0;
     double cur_dt = expl.dt;

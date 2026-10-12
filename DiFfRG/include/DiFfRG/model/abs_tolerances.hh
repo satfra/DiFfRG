@@ -12,18 +12,19 @@ namespace DiFfRG
   namespace def
   {
     /**
-     * @brief A model that sets per-component absolute tolerances for the implicit time stepper.
+     * @brief Whether a model provides per-component absolute tolerances for the IDA timesteppers.
      *
-     * The hook is called once per dof location (cell centre for FV, support point for LDG) with the solution
-     * there, and fills one absolute tolerance per FE function:
-     *
-     *     template <int dim, typename Solution, size_t n>
-     *     void abs_tolerances(std::array<double, n> &atol, const Point<dim> &x, const Solution &sol,
-     *                         double abs_tol, double rel_tol) const;
-     *
-     * `sol` is a named tuple with "fe_functions" (values), "fe_derivatives" (Tensor<1, dim> per component) and
-     * "fe_hessians" (Tensor<2, dim> per component). abs_tol and rel_tol are the stepper's uniform tolerances.
-     * @see AbstractAssembler::local_abs_tolerances
+     * Optional hook, for components that live on very different scales:
+     * @code
+     * template <int dim, typename Solution, size_t n>
+     * void abs_tolerances(std::array<double, n> &atol, const Point<dim> &x, const Solution &sol, double abs_tol,
+     *                     double rel_tol) const;
+     * @endcode
+     * It is called once per dof location (LDG: support point; KT: cell centre) and fills one absolute tolerance per
+     * FE function; @p atol is pre-filled with the uniform @p abs_tol, @p rel_tol is the stepper's relative tolerance.
+     * `sol` is a named tuple with `"fe_functions"`, `"fe_derivatives"`, `"fe_hessians"` (LDG: of the FE functions,
+     * not the LDG levels; KT: reconstructed gradient and curvature). Used by the LDG and KT assemblers with serial
+     * vectors only; elsewhere the uniform `abs_tol` applies. @see AbstractAssembler::local_abs_tolerances
      */
     template <typename Model, int dim, typename Solution, size_t n>
     concept HasAbsTolerances =

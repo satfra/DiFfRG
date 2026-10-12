@@ -11,6 +11,16 @@
 
 namespace DiFfRG
 {
+  /**
+   * @brief Forward Euler with a fixed step.
+   *
+   * \f[
+   *   u_{n+1} = u_n - \Delta t\, M^{-1} R(u_n)\,, \qquad \Delta t = \text{/timestepping/explicit/dt}\,,
+   * \f]
+   * with the last step shortened to end on the final time. Only the FE part is integrated; a flow with variables
+   * throws. Frames are written at \f$t_\text{start} + n\,\f$output_dt, and at the final time, linearly interpolated
+   * within the step that reaches them. Serial only; the mesh adaptor is called before every step.
+   */
   template <typename VectorType, typename SparseMatrixType = dealii::SparseMatrix<get_type::NumberType<VectorType>>,
             uint dim = 0>
   class TimeStepperExplicitEuler_impl : public AbstractTimestepper<VectorType, SparseMatrixType, dim>
@@ -32,17 +42,21 @@ namespace DiFfRG
     using Base::assembler, Base::data_out, Base::config, Base::adaptor;
 
     /// The public entry point, which handles snapshots and restarts; see AbstractTimestepper::run.
-
     using Base::run;
-    /// Forwards to the base with this stepper's kind. Not `using Base::Base;`: the base needs to
-    /// know which /timestepping/ section to read, and it cannot ask a virtual function for that
-    /// from inside its own constructor.
-    TimeStepperExplicitEuler_impl(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
+
+    // Not `using Base::Base;`: the base needs to know which /timestepping/ section to read, and it
+    // cannot ask a virtual function for that from inside its own constructor.
+
+    /// Construct without mesh adaptation; see AbstractTimestepper.
+    TimeStepperExplicitEuler_impl(const ConfigTree &config,
+                                  AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                                   OutputSession_impl<dim, VectorType> &data_out)
         : Base(config, assembler, data_out, /*implicit=*/false, /*explicit=*/true)
     {
     }
-    TimeStepperExplicitEuler_impl(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
+    /// Construct with a mesh adaptor; see AbstractTimestepper.
+    TimeStepperExplicitEuler_impl(const ConfigTree &config,
+                                  AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                                   OutputSession_impl<dim, VectorType> &data_out, AbstractAdaptor<VectorType> &adaptor)
         : Base(config, assembler, data_out, adaptor, /*implicit=*/false, /*explicit=*/true)
     {
@@ -61,10 +75,8 @@ namespace DiFfRG
   // set of valid arguments is closed by the explicit instantiations in src/, and keying it on the
   // assembler would explode that set into one instantiation per model. Applications name the
   // assembler instead and let these aliases project it onto that fixed parameter list.
-  //
-  // The argument is anything exposing VectorType, SparseMatrixType and dim -- an Assembler, or a
-  // Discretization where the assembler type is not a single type (e.g. a test that runs one
-  // discretization against several models).
+
+  /// Forward-Euler timestepper for an assembler; see TimeStepperExplicitEuler_impl.
   template <typename Assembler>
   using TimeStepperExplicitEuler = TimeStepperExplicitEuler_impl<typename Assembler::VectorType,
                                                                  typename Assembler::SparseMatrixType, Assembler::dim>;

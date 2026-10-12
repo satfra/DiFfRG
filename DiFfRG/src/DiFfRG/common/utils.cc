@@ -25,7 +25,7 @@ namespace DiFfRG
     return f.good();
   }
 
-  std::string make_folder(const std::string &path) { return path.back() != '/' ? path + '/' : path; }
+  std::string make_folder(const std::string &path) { return path.empty() || path.back() != '/' ? path + '/' : path; }
 
   bool create_folder(const std::string &path_)
   {
@@ -51,22 +51,22 @@ namespace DiFfRG
     return to_string(hours) + "h" + to_string(minutes) + "min" + to_string(seconds) + "s";
   }
 
-  std::string time_format_ms(size_t time_in_miliseconds)
+  std::string time_format_ms(size_t time_in_milliseconds)
   {
     using std::to_string;
-    if (time_in_miliseconds < 1000) {
-      return to_string(time_in_miliseconds) + "ms";
-    } else if (time_in_miliseconds / 1000. < 60.) {
-      const auto seconds = size_t(time_in_miliseconds / 1000.);
-      const auto miliseconds = size_t(time_in_miliseconds - seconds * 1000);
-      return to_string(seconds) + "s" + to_string(miliseconds) + "ms";
-    } else if (time_in_miliseconds / 60000. < 60.) {
-      const auto minutes = size_t(time_in_miliseconds / 60000.);
-      const auto seconds = size_t(time_in_miliseconds / 1000. - minutes * 60);
+    if (time_in_milliseconds < 1000) {
+      return to_string(time_in_milliseconds) + "ms";
+    } else if (time_in_milliseconds / 1000. < 60.) {
+      const auto seconds = size_t(time_in_milliseconds / 1000.);
+      const auto milliseconds = size_t(time_in_milliseconds - seconds * 1000);
+      return to_string(seconds) + "s" + to_string(milliseconds) + "ms";
+    } else if (time_in_milliseconds / 60000. < 60.) {
+      const auto minutes = size_t(time_in_milliseconds / 60000.);
+      const auto seconds = size_t(time_in_milliseconds / 1000. - minutes * 60);
       return to_string(minutes) + "min" + to_string(seconds) + "s";
     }
-    const auto hours = size_t(time_in_miliseconds / 3600000.);
-    const auto minutes = size_t(time_in_miliseconds / 60000. - hours * 60);
+    const auto hours = size_t(time_in_milliseconds / 3600000.);
+    const auto minutes = size_t(time_in_milliseconds / 60000. - hours * 60);
     return to_string(hours) + "h" + to_string(minutes) + "min";
   }
 

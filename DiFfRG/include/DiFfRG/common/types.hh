@@ -18,32 +18,31 @@
 
 namespace DiFfRG
 {
+  /// Types that can be indexed with `[0]`.
   template <typename T>
   concept is_container = requires(T x) { x[0]; };
 
-  template <size_t N, typename T>
-  concept is_sized_container = requires(T x) {
-    x[0];
-    requires x.size() == N;
-  };
-
-  // we need a concept to check if a type has an operator() with N arguments of type ValueType
-  template <typename T, typename ValueType, size_t N> struct has_n_call_operator_helper {
-    template <size_t... Is> static constexpr bool tryit(std::integer_sequence<size_t, Is...>)
-    {
-      if constexpr (requires(T t, ValueType v) { t.operator()((ValueType{} * Is)...); }) {
-        return true;
-      } else {
-        return false;
+  namespace internal
+  {
+    template <typename T, typename ValueType, size_t N> struct has_n_call_operator_helper {
+      template <size_t... Is> static constexpr bool tryit(std::integer_sequence<size_t, Is...>)
+      {
+        if constexpr (requires(T t, ValueType v) { t.operator()((ValueType{} * Is)...); }) {
+          return true;
+        } else {
+          return false;
+        }
       }
-    }
 
-    static constexpr bool value = tryit(std::make_index_sequence<N>{});
-  };
+      static constexpr bool value = tryit(std::make_index_sequence<N>{});
+    };
+  } // namespace internal
 
+  /// Types callable with \f$N\f$ arguments of type `ValueType`.
   template <typename T, typename ValueType, size_t N>
-  concept has_n_call_operator = has_n_call_operator_helper<T, ValueType, N>::value;
+  concept has_n_call_operator = internal::has_n_call_operator_helper<T, ValueType, N>::value;
 
+  /// Type maps between number types.
   namespace get_type
   {
     namespace internal
@@ -73,6 +72,8 @@ namespace DiFfRG
       template <size_t N, typename U> inline constexpr bool _is_autodiff<autodiff::Real<N, U>> = true;
     } // namespace internal
 
+    /// The underlying real type: `double` for `double`, `complex<double>` and `autodiff::Real<N, double>`, and
+    /// likewise for `float`.
     template <typename CT> using ctype = typename internal::_ctype<CT>::value;
 
     namespace internal
@@ -118,6 +119,7 @@ namespace DiFfRG
     /// complex<double> -> complex<float>); every other type maps to itself.
     template <typename T> using single_precision = typename internal::_single_precision<T>::value;
 
+    /// True if `T` is an `autodiff::Real<N, U>`.
     template <typename T> inline constexpr bool is_autodiff = internal::_is_autodiff<T>;
   } // namespace get_type
 } // namespace DiFfRG

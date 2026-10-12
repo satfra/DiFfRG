@@ -465,8 +465,7 @@ namespace
              {"minimal_dt", 1e-14},
              {"maximal_dt", 1.0},
              {"abs_tol", 1e-7},
-             {"rel_tol", 1e-7},
-             {"max_steps", 5000000}}}}},
+             {"rel_tol", 1e-7}}}}},
          {"output", {{"verbosity", 1}, {"vtk", false}, {"hdf5", false}}}});
   }
 

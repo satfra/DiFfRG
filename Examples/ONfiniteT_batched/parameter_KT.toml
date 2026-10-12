@@ -1,0 +1,46 @@
+[physical]
+Lambda = 1
+N = 2
+lambda2 = -0.5
+lambda4 = 50
+lambda6 = 0
+T = 0.002
+
+[integration]
+x_order = 32
+x_extent_tolerance = 1e-4
+jacobian_quadrature_factor = 1.0
+
+[discretization.grid]
+x_grid = "0:1e-4:1.5e-2"
+refine = 0
+
+[discretization.adaptivity]
+start_adapt_at = 0
+adapt_dt = 0.2
+level = 0   # maximal refinement level; 0 = no adaptation
+refine_percent = 0.2
+coarsen_percent = 0.2
+
+[timestepping]
+final_time = 5
+output_dt = 0.1
+
+[timestepping.implicit]
+dt = 1e-3
+minimal_dt = 1e-8
+maximal_dt = 0.1
+abs_tol = 1e-13
+rel_tol = 1e-7
+
+[output]
+vtk = true
+hdf5 = true
+verbosity = 1
+folder = "./"
+name = "output"
+
+[batched]
+  # see flow_batched.cc
+  assembler = "kt"
+  backend = "tbb"

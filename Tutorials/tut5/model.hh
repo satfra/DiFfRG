@@ -147,9 +147,6 @@ public:
    *     smooth shoulder leading up to it; the shoulder alone tilts the two sides against each other
    *     and fakes a step, but only a fraction of it is realised locally. This second test is the one
    *     that does the work.
-   *
-   * The full detector this is cut down from carries a few more guards; see the LPA' model in the
-   * shock-scaling project for it.
    */
   template <int d, typename NT> Point<d> extractor_point(const Point<d> &EoM, const SolutionSample<d, NT> &sample) const
   {

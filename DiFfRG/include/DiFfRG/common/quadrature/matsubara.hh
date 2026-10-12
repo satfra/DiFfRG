@@ -10,180 +10,151 @@
 namespace DiFfRG
 {
   /**
-   * @brief A quadrature rule for (bosonic) Matsubara frequencies, based on the method of Monien [1]. This class
-   * provides nodes and weights for the summation
+   * @brief Nodes and weights for bosonic Matsubara sums at temperature \f$T\f$.
+   *
+   * All rules share one convention: with positive nodes \f$x_i\f$ and weights \f$w_i\f$, \f$i = 1 \dots N\f$,
    * \f[
-   * T \sum_{n=\in \mathbb{Z}} f(2\pi n T) \approx \sum_{n=1}^{N} w_i (f(x_i) + f(-x_i)) + T f(0)
+   *   T \sum_{n \in \mathbb{Z}} f(2\pi n T) \approx T f(0) + \sum_{i=1}^{N} w_i \big(f(x_i) + f(-x_i)\big)\,,
    * \f]
+   * the weights include the factor \f$T\f$. sum() evaluates this on the host. For kernels, sum_nodes() and
+   * sum_weights() append the zero mode as a node \f$x = 0\f$ with weight \f$T/2\f$, so that the sum is just
+   * \f$\sum_i w_i (f(x_i) + f(-x_i))\f$ over that list.
+   *
+   * Which rule is built:
+   * - \f$T > 0\f$, reinit(): the Gauss rule for sums of Monien [1]. Its \f$N\f$ nodes resolve frequencies up to
+   *   about \f$\pi^2 T N^2/4\f$; \f$N\f$ is chosen (predict_size()) so that this reaches \f$200\, c\, E\f$, with
+   *   \f$E\f$ = `typical_E` the largest scale of the summand and \f$c\f$ = `precision_factor`, then rounded up to a
+   *   multiple of `step` and clamped to [`min_size`, `max_size`].
+   * - \f$T = 0\f$: the sum becomes \f$\int dp_0/(2\pi)\, f(p_0)\f$, and the same formula holds without the zero mode.
+   *   Nodes are \f$x_i = E \tan\theta_i\f$ with Gauss-Legendre points \f$\theta_i \in [0, \pi/2)\f$, weights
+   *   \f$w_i = E\, w^\text{GL}_i / (4\cos^2\theta_i)\f$ (\f$w^\text{GL}_i\f$ the Gauss-Legendre weights on
+   *   \f$[0, 1]\f$). This integrates \f$1/(p_0^2 + E^2)\f$ exactly and covers \f$1/p_0^2\f$ tails; `vacuum_quad_size`
+   *   nodes (at least 16).
+   * - reinit_exact_sum(): the exact sum over all modes below a cutoff, for summands that vanish beyond it.
+   * - reinit_finite_interval(): Gauss-Legendre on \f$[-P, P]\f$, replacing the sum by an integral.
+   *
+   * @code
+   * MatsubaraQuadrature<double> rule(T, k);
+   * const double s = rule.sum([&](double p0) { return 1. / (p0 * p0 + m2); }); // = coth(sqrt(m2)/(2T))/(2 sqrt(m2))
+   * @endcode
    *
    * [1] H. Monien, "Gaussian quadrature for sums: a rapidly convergent summation scheme", Math. Comp. 79, 857 (2010).
-   * doi:10.1090/S0025-5718-09-02289-3
    *
-   * @tparam NT numeric type to be used for all calculations
+   * @tparam NT the number type of nodes and weights.
    */
   template <typename NT> class MatsubaraQuadrature
   {
   public:
     /**
-     * @brief Nodes the Monien rule needs to reach past `typical_E` at this temperature.
+     * @brief Number of nodes the Monien rule needs: \f$N = 5 + \lfloor\sqrt{4 \cdot 200\, c E / (\pi^2 T)}\rfloor\f$,
+     * rounded up to a multiple of `step`.
      *
-     * The sizing law and nothing else: no ceiling, no floor, and no choice of rule. Which rule a
-     * summand deserves depends on its whole spectrum, and `typical_E` is only the top of it --
-     * that decision belongs to the caller, which is QuadratureIntegrator_fT::refresh_matsubara.
+     * No clamping to a minimum or maximum. Note the argument order differs from the constructor.
      *
-     * @param T The temperature. Zero returns zero: the vacuum rule is an integral, not a sum.
-     * @param typical_E The LARGEST scale the rule has to cover; the reach is a fixed multiple of it.
-     * @param precision_factor Multiplies the reach; the user-facing dial.
-     * @param step The step size of considered node sizes (e.g. step=2 implies only even numbers of nodes).
+     * @param T the temperature; 0 returns 0.
+     * @param typical_E the largest scale \f$E\f$ the summand contains.
+     * @param precision_factor the factor \f$c\f$ multiplying the reach.
+     * @param step only multiples of `step` are used (e.g. 2: even sizes).
      */
     static int predict_size(const NT T, const NT typical_E = 1., const double precision_factor = 1.,
                             const int step = 2);
 
     /**
-     * @brief Create a new quadrature rule for Matsubara frequencies.
-     *
-     * @param T The temperature. Zero selects the vacuum rule; this is the only thing that does.
-     * @param typical_E The largest scale to cover, which determines the number of nodes.
-     * @param step The step size of considered node sizes (e.g. step=2 implies only even numbers of nodes).
-     * @param min_size Minimum number of nodes.
-     * @param max_size Node ceiling. A rule that wants more is clamped to it, and warns once.
-     * @param vacuum_quad_size Size of the vacuum rule, which a T of zero selects.
-     * @param precision_factor Multiplies the reach; the user-facing dial.
-     *
-     * @note These defaults are kept equal to the ConfigTree defaults read by QuadratureProvider
-     * (/integration/{min,max}_matsubara_size, vacuum_quad_size, matsubara_precision_factor), so
-     * that a directly constructed rule behaves like one a production run would build.
+     * @brief Build the rule for temperature `T`; see reinit().
      */
     MatsubaraQuadrature(const NT T, const NT typical_E = 1., const int step = 2, const int min_size = 8,
                         const int max_size = 128, const int vacuum_quad_size = 64, const double precision_factor = 1);
 
+    /// An empty rule at \f$T = 0\f$; call reinit() before use.
     MatsubaraQuadrature();
 
     /**
-     * @brief Update the quadrature rule with new parameters.
+     * @brief Rebuild the rule: the Monien rule for \f$T > 0\f$, the vacuum rule for \f$T = 0\f$.
      *
-     * @param T  The temperature.
-     * @param typical_E A typical energy scale, which determines the number of nodes in the quadrature rule.
-     * @param step The step size of considered node sizes (e.g. step=2 implies only even numbers of nodes).
-     * @param min_size Minimum number of nodes.
-     * @param max_size Node ceiling. A rule that wants more is clamped to it, and warns once.
-     * @param vacuum_quad_size Size of the vacuum rule, which a T of zero selects.
-     * @param precision_factor Multiplies the reach; the user-facing dial.
+     * The defaults equal those of the parameter file (`/integration/min_matsubara_size`, `max_matsubara_size`,
+     * `vacuum_quad_size`, `matsubara_precision_factor`).
      *
-     * @note These defaults are kept equal to the ConfigTree defaults read by QuadratureProvider
-     * (/integration/{min,max}_matsubara_size, vacuum_quad_size, matsubara_precision_factor), so
-     * that a directly constructed rule behaves like one a production run would build.
+     * @param T the temperature; \f$T = 0\f$ (to machine precision) selects the vacuum rule.
+     * @param typical_E the largest scale \f$E\f$ of the summand; sets the number of nodes (or, at \f$T = 0\f$, the
+     * scale of the tangent map).
+     * @param step only multiples of `step` nodes are used.
+     * @param min_size minimal number of nodes.
+     * @param max_size maximal number of nodes; a larger request is clamped (with a one-time warning), which reduces
+     * the frequency reach.
+     * @param vacuum_quad_size number of nodes of the vacuum rule; values below 16 are raised to 16.
+     * @param precision_factor the factor \f$c\f$ multiplying the reach; non-positive values mean 1.
      */
     void reinit(const NT T, const NT typical_E = 1., const int step = 2, const int min_size = 8,
                 const int max_size = 128, const int vacuum_quad_size = 64, const double precision_factor = 1);
 
     /**
-     * @brief Build a rule with an explicitly prescribed number of nodes, bypassing predict_size().
+     * @brief Build the rule with exactly `size` nodes instead of predict_size(), e.g. for convergence tests.
      *
-     * This is the entry point for convergence studies: it answers "what accuracy does N nodes
-     * buy at this (T, typical_E)", which is the question predict_size() encodes an answer to.
-     * A T of zero selects the vacuum (T=0) rule with `size` nodes, exactly as reinit() would.
-     *
-     * @param size The number of nodes to use. Must be positive.
-     * @param T The temperature.
-     * @param typical_E A typical energy scale. Only sets the scale of the vacuum rule; the
-     * Monien rule's nodes depend on T alone once the size is fixed.
+     * @param size the number of nodes, positive.
+     * @param T the temperature; 0 selects the vacuum rule with `size` nodes.
+     * @param typical_E only sets the scale of the vacuum rule; the Monien rule depends on \f$T\f$ alone once its
+     * size is fixed.
      */
     void reinit_with_size(const int size, const NT T, const NT typical_E = 1.);
 
     /**
-     * @brief Number of positive Matsubara modes strictly inside a frequency cutoff.
+     * @brief Number of positive Matsubara frequencies \f$2\pi n T \leq\f$ `freq_cutoff`, i.e.
+     * \f$\lfloor \mathrm{freq\_cutoff} / (2\pi T) \rfloor\f$.
      *
-     * `2 pi n T <= freq_cutoff`, i.e. `floor(freq_cutoff / (2 pi T))`. Zero is a legitimate
-     * answer: below `freq_cutoff = 2 pi T` the whole sum is the zero mode.
+     * May be 0, in which case only the zero mode contributes.
      */
     static int modes_below(const NT T, const NT freq_cutoff);
 
     /**
-     * @brief Build the EXACT Matsubara sum for a summand of finite extent in the frequency.
+     * @brief The exact Matsubara sum for a summand that vanishes for \f$|p_0| > \omega_c\f$ = `freq_cutoff`.
      *
-     * When every term carries a `dR/dt` insertion whose argument confines the loop frequency, the
-     * summand is identically zero for `|p0| > freq_cutoff` and
-     * \f[ T \sum_{n\in\mathbb Z} f(2\pi n T) = T f(0) + T \sum_{n=1}^{N} (f(\omega_n)+f(-\omega_n)) \f]
-     * with \f$N = \f$ modes_below() is not an approximation but the sum itself. Nodes are the true
-     * frequencies and every weight is \f$T\f$, which is what the caller convention of sum()
-     * already expects -- so this is a drop-in replacement for the Monien rule, differing only in
-     * how many nodes it needs.
+     * Then
+     * \f[ T \sum_{n\in\mathbb Z} f(2\pi n T) = T f(0) + T \sum_{n=1}^{N} \big(f(2\pi n T)+f(-2\pi n T)\big) \f]
+     * with \f$N\f$ = modes_below(), i.e. nodes \f$2\pi n T\f$ and weights \f$T\f$. With \f$k\f$ the RG scale, at low
+     * \f$k/T\f$ this needs far fewer nodes than the Monien rule; at high \f$k/T\f$ more, so pick the smaller one.
+     * Example: a summand that carries \f$\partial_t R_k(p^2)\f$ of a 4D regulator with support
+     * \f$p^2 < x_\text{extent} k^2\f$ has \f$\omega_c = \sqrt{x_\text{extent}}\, k\f$.
      *
-     * Below the crossover this is dramatically cheaper (at k/T ~ 10 it is one node against a
-     * 44-node Monien rule) AND exact; above it, it is more expensive, so the caller is expected
-     * to pick whichever rule is smaller. The cutoff is a property of the regulator's support, not
-     * of the temperature: for a 4D regulator with extent `x_extent` in `q^2/k^2` it is
-     * `sqrt(x_extent) * k`.
-     *
-     * @param T The temperature. Must be positive; at T=0 there is nothing to sum.
-     * @param freq_cutoff The frequency beyond which the summand vanishes.
+     * @param T the temperature, positive.
+     * @param freq_cutoff the frequency \f$\omega_c\f$ beyond which the summand vanishes.
      */
     void reinit_exact_sum(const NT T, const NT freq_cutoff);
 
     /**
-     * @brief Gauss-Legendre over the FINITE interval the summand actually lives on.
+     * @brief Replace the sum by \f$\frac{1}{2\pi}\int_{-P}^{P} dp_0\, f(p_0)\f$ for a summand that vanishes for
+     * \f$|p_0| > P\f$, using Gauss-Legendre on \f$[0, P]\f$.
      *
-     * The third rule, for a summand of finite extent in a regime where the caller has decided the
-     * sum may be replaced by an integral. The T=0 rule reaches that regime by the
-     * tangent map `p0 = E tan(theta)`, which is built to cover an algebraic `1/p0^2` tail out to
-     * ~1e15 E -- and for a summand that dies out past `R = sqrt(x_extent) k` that is a
-     * poor use of nodes twice over: only `atan(R/E) / (pi/2) = 57%` of the theta range carries any
-     * integrand at all (28 of 64 nodes evaluate an exact zero), and the ones that are wasted are
-     * the HEAVY ones, since the tangent map's weights `~ 1/cos^2(theta)` grow towards the end it is
-     * throwing away. It also converges badly, being asked to resolve a near-discontinuity at the
-     * support edge with the ~36 nodes that remain.
+     * Nodes \f$x_i = P u_i\f$ and weights \f$w_i = P v_i/(2\pi)\f$ for Gauss-Legendre points \f$(u_i, v_i)\f$ on
+     * \f$[0, 1]\f$; no zero mode. For such summands this is cheaper and more accurate than the \f$T = 0\f$ tangent
+     * map, which spends nodes on a tail that is not there. If \f$P\f$ is a numerically determined support radius
+     * (e.g. from optimize_x_extent()), cutting there is a small systematic error.
      *
-     * Over `[-R, R]` there is no tail worth covering, so plain Gauss-Legendre is both cheaper and
-     * more accurate, and the frequency direction becomes just another radial direction: for a 4D
-     * regulator `p0` and `|q|` enter the support on the same footing, which is why the natural
-     * order for this rule is the SPATIAL `x_order` rather than `vacuum_quad_size`.
-     *
-     * `R` is not a true support boundary but the radius `optimize_x_extent()` converged to, so
-     * cutting there is a systematic error in its own right. Measured on the assembled 3+1D
-     * integrand (Part 13 of the convergence study): 3.5e-10 for `PolynomialExp<8>`, 3.0e-10 for
-     * `Exponential<2>`, at the shipped `x_extent_tolerance`. That is well below the aliasing error
-     * this rule exists to avoid, but it is not zero.
-     *
-     * Caller convention as in sum(): \f$\sum_i w_i (f(x_i)+f(-x_i)) = \frac{1}{2\pi}\int_{-R}^{R} f\,dp_0\f$,
-     * i.e. \f$x_i = R u_i\f$ and \f$w_i = R v_i / 2\pi\f$ for Gauss-Legendre nodes/weights
-     * \f$(u_i, v_i)\f$ on [0,1]. No zero mode: like the T=0 rule this integrates rather than sums.
-     *
-     * @param cutoff The frequency R beyond which the summand vanishes. Must be positive.
-     * @param gl_nodes Gauss-Legendre nodes on [0,1] -- passed in so the (cached) rule is not
-     * rebuilt for every cutoff; only the scaling depends on R.
-     * @param gl_weights The matching weights, summing to 1.
+     * @param cutoff \f$P\f$, positive.
+     * @param gl_nodes Gauss-Legendre nodes \f$u_i\f$ on \f$[0, 1]\f$.
+     * @param gl_weights the matching weights \f$v_i\f$, summing to 1.
      */
     void reinit_finite_interval(const NT cutoff, const Kokkos::View<const NT *, CPU_memory> gl_nodes,
                                 const Kokkos::View<const NT *, CPU_memory> gl_weights);
 
-    /**
-     * @brief Get the size of the quadrature rule, NOT counting the zero mode.
-     */
+    /// Number of nodes \f$N\f$, not counting the zero mode.
     size_t size() const;
 
     /**
-     * @brief Size of the node list returned by sum_nodes()/sum_weights(): size() plus the zero
-     * mode, where there is one (i.e. everywhere but the T=0 rule).
+     * @brief Length of sum_nodes(): size() plus one for the zero mode, except for the \f$T = 0\f$ and
+     * finite-interval rules, which have none.
      */
     size_t sum_size() const;
 
-    /**
-     * @brief Get the temperature of the quadrature rule.
-     */
+    /// The temperature \f$T\f$ (0 after reinit_finite_interval()).
     NT get_T() const;
 
-    /**
-     * @brief Get the typical energy scale of the quadrature rule.
-     */
+    /// The scale \f$E\f$ the rule was built for; the cutoff after reinit_exact_sum() or reinit_finite_interval().
     NT get_typical_E() const;
 
     /**
-     * @brief Compute a matsubara sum of a given function.
+     * @brief \f$T f(0) + \sum_i w_i (f(x_i) + f(-x_i))\f$, evaluated on the host.
      *
-     * @tparam F The function type.
-     * @param f The function to be summed. Must have signature NT f(NT x).
-     * @return NT The Matsubara sum of the function.
+     * @param f callable as `f(NT p0)`.
      */
     template <typename F> auto sum(const F &f) const
     {
@@ -201,6 +172,7 @@ namespace DiFfRG
       return Kokkos::subview(raw_nodes<MemorySpace>(), Kokkos::make_pair(size_t(0), size_t(m_size)));
     }
 
+    /// The weights \f$w_i\f$ belonging to nodes(). Length size().
     template <typename MemorySpace> Kokkos::View<const NT *, MemorySpace> weights() const
     {
       return Kokkos::subview(raw_weights<MemorySpace>(), Kokkos::make_pair(size_t(0), size_t(m_size)));
@@ -209,20 +181,16 @@ namespace DiFfRG
     /**
      * @brief Node list for a device-side sum: the positive frequencies followed by the zero mode.
      *
-     * The zero mode is appended as a node like any other -- `x = 0` with weight `T/2` -- so that
-     * the `w * (f(+x) + f(-x))` body that evaluates every other node reproduces `T f(0)` exactly,
-     * with no branch. That matters twice over: a `idx == 0 ? T*f(0) : 0` guard around a kernel
-     * call costs the whole warp a full extra kernel evaluation for one active lane, and the exact
-     * exact sum can legitimately have ZERO positive modes in the deep IR, where a rule that carries
-     * its zero mode outside the node list would integrate to nothing at all.
-     *
-     * Empty for the T=0 rule, where there is no zero mode to add (it has weight zero).
+     * The zero mode is appended as a node \f$x = 0\f$ with weight \f$T/2\f$, so that
+     * \f$\sum_i w_i (f(x_i) + f(-x_i))\f$ over this list is the whole sum, without a special case for the zero mode.
+     * Length sum_size(); equal to nodes() for the rules without a zero mode (\f$T = 0\f$, finite interval).
      */
     template <typename MemorySpace> Kokkos::View<const NT *, MemorySpace> sum_nodes() const
     {
       return Kokkos::subview(raw_nodes<MemorySpace>(), Kokkos::make_pair(size_t(0), sum_size()));
     }
 
+    /// The weights belonging to sum_nodes().
     template <typename MemorySpace> Kokkos::View<const NT *, MemorySpace> sum_weights() const
     {
       return Kokkos::subview(raw_weights<MemorySpace>(), Kokkos::make_pair(size_t(0), sum_size()));

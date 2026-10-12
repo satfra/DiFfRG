@@ -1,8 +1,12 @@
 #pragma once
 
 // standard library
+#include <algorithm>
 #include <array>
+#include <stdexcept>
+#include <string>
 #include <utility>
+#include <vector>
 
 // external libraries
 #include <deal.II/dofs/dof_tools.h>
@@ -10,13 +14,35 @@
 // DiFfRG
 #include <DiFfRG/common/utils.hh>
 
+/**
+ * @file component_descriptor.hh
+ * @brief Declaring the unknowns of a model: FE functions, variables, extractors and LDG levels, with named access.
+ *
+ * Each entry has a compile-time name and is a single number (Scalar) or an array (FunctionND). Entries are grouped
+ * into an FEFunctionDescriptor, VariableDescriptor or ExtractorDescriptor, and these into a ComponentDescriptor,
+ * which is the `Components` argument of def::AbstractModel:
+ * @code
+ * using FEFunctionDesc = FEFunctionDescriptor<Scalar<"u">, FunctionND<"A", 3>>;  // u, A_0, A_1, A_2
+ * using VariableDesc = VariableDescriptor<Scalar<"Z">>;
+ * using ExtractorDesc = ExtractorDescriptor<Scalar<"eta">, Scalar<"m2">>;
+ * using LDG1Desc = FEFunctionDescriptor<Scalar<"du">>;                              // optional LDG level 1
+ * using Components = ComponentDescriptor<FEFunctionDesc, VariableDesc, ExtractorDesc, LDG1Desc>;
+ *
+ * constexpr auto idxf = FEFunctionDesc{};
+ * constexpr auto idxv = VariableDesc{};
+ * // in the model: u_i[idxf("u")], u_i[idxf("A") + 2], v_a[idxv["Z"]]
+ * @endcode
+ * The index lookup runs at compile time; an unknown name is a compile error, and names within one descriptor must be
+ * unique. An array entry occupies consecutive indices starting at `idx("name")`.
+ */
+
 namespace DiFfRG
 {
   /**
-   * @brief A class to describe a function with a compile-time name and a fixed number of dimensions.
+   * @brief An array-valued entry named @p _str with \f$n_1 \times n_2 \times \dots\f$ components, stored flat.
    *
-   * @tparam _str The name of the function.
-   * @tparam _val The dimensions of the function.
+   * @tparam _str the name.
+   * @tparam _val the extents \f$n_1, n_2, \dots\f$.
    */
   template <FixedString _str, size_t... _val> struct FunctionND {
     static constexpr FixedString name = _str;
@@ -25,28 +51,24 @@ namespace DiFfRG
     static constexpr std::array<size_t, dim> nd_sizes{{_val...}};
   };
 
-  /*
-   * @brief A class to describe a scalar variable.
+  /**
+   * @brief A single-number entry named @p _str.
    *
-   * @tparam _str The name of the variable.
+   * @tparam _str the name.
    */
   template <FixedString _str> struct Scalar {
-    /*
-    You're probably wondering why this is not a specialization of FunctionND.
-    Well, depending on your compiler, this may end up in a wierd bug, where it messes up the internals of the array in
-    FixedString. I was not able to fully debug this, and therefore we circumvent the problem by very explicitly defining
-    the Scalar class.
-    */
+    // Not an alias of FunctionND<_str, 1>: with some compilers that corrupts the FixedString name.
     static constexpr FixedString name = _str;
     static constexpr size_t size = 1;
     static constexpr size_t dim = 1;
     static constexpr std::array<size_t, dim> nd_sizes{{1}};
   };
 
+  /**
+   * @brief A list of named entries (Scalar, FunctionND) with compile-time index lookup. Use it through the aliases
+   * FEFunctionDescriptor, VariableDescriptor, ExtractorDescriptor.
+   */
   template <typename... _descriptors> struct SubDescriptor {
-    // tuple of all FixedString names
-    static constexpr auto names_tuple = std::tie(_descriptors::name...);
-
     static constexpr std::array<const char *, sizeof...(_descriptors)> names{{_descriptors::name...}};
     static constexpr std::array<size_t, sizeof...(_descriptors)> sizes{{_descriptors::size...}};
     using descriptor_tuple = std::tuple<_descriptors...>;
@@ -59,17 +81,17 @@ namespace DiFfRG
           if constexpr (sizeof...(_descriptors) > 1)
             for (size_t i : {I...})
               for (size_t j : {I...})
-                if (i != j && strings_equal(names[i], names[j])) return false;
+                if (i != j && internal::strings_equal(names[i], names[j])) return false;
           return true;
         }(std::make_index_sequence<sizeof...(_descriptors)>{}),
         "Names of a SubDescriptor must be unique!");
 
+    /// Index of the first component of entry @p name; unknown names do not compile.
     template <unsigned N> consteval size_t get(FixedString<N> name) const
     {
       size_t running_sum = 0;
       for (size_t i = 0; i < names.size(); ++i) {
-        // if (0 == std::strcmp(names[i], name)) return running_sum;
-        if(strings_equal(names[i], name)) return running_sum;
+        if (internal::strings_equal(names[i], name)) return running_sum;
         running_sum += sizes[i];
       }
       // produce a compile-time error if the name is not found in the list
@@ -78,14 +100,23 @@ namespace DiFfRG
           "\" not found. Available names are: " + ((std::string(_descriptors::name) + "; ") + ...));
     }
 
+    /// Same as get(): `idx["u"]` and `idx("u")` are the index of entry "u".
     template <unsigned N> consteval size_t operator[](FixedString<N> name) const { return get(name); }
     template <unsigned N> consteval size_t operator()(FixedString<N> name) const { return get(name); }
 
-    template <unsigned N> consteval size_t operator[](char const(&arr)[N]) const { return get( FixedString<N-1>(arr) ); }
-    template <unsigned N> consteval size_t operator()(char const(&arr)[N]) const { return get( FixedString<N-1>(arr) ); }
+    template <unsigned N> consteval size_t operator[](char const (&arr)[N]) const
+    {
+      return get(FixedString<N - 1>(arr));
+    }
+    template <unsigned N> consteval size_t operator()(char const (&arr)[N]) const
+    {
+      return get(FixedString<N - 1>(arr));
+    }
 
+    /// Name of the entry at position @p index in the list (not a component index).
     consteval char const *name(size_t index) const { return names[index]; }
 
+    /// Names of the entries, one per entry.
     consteval std::array<const char *, sizeof...(_descriptors)> get_names() const { return names; }
     /**
      * @brief One name per component: a descriptor of size n > 1 contributes name_0, ..., name_{n-1}.
@@ -103,27 +134,35 @@ namespace DiFfRG
       return result;
     }
 
-    template<unsigned N>
-    consteval size_t size(char const(&arr)[N]) const
+    /// Number of components of entry @p arr.
+    template <unsigned N> consteval size_t size(char const (&arr)[N]) const
     {
       for (size_t i = 0; i < names.size(); ++i)
-        if(strings_equal(names[i], arr)) return sizes[i];
+        if (internal::strings_equal(names[i], arr)) return sizes[i];
       throw std::invalid_argument(
           "SubDescriptor::size: Name \"" + std::string(arr) +
           "\" not found. Available names are: " + ((std::string(_descriptors::name) + "; ") + ...));
     }
   };
 
+  /// The FE functions (also the components of an LDG level), see component_descriptor.hh.
   template <typename... descriptors> using FEFunctionDescriptor = SubDescriptor<descriptors...>;
+  /// The variables, see component_descriptor.hh.
   template <typename... descriptors> using VariableDescriptor = SubDescriptor<descriptors...>;
+  /// The extractors, see component_descriptor.hh.
   template <typename... descriptors> using ExtractorDescriptor = SubDescriptor<descriptors...>;
 
   /**
-   * @brief A class to describe how many FE functions, additional variables and extractors are used in a model.
+   * @brief All unknowns of a model: FE functions, variables, extractors and the LDG levels; the `Components`
+   * argument of def::AbstractModel. See component_descriptor.hh for an example.
    *
-   * @tparam components_ A DiFfRG::NumberFEFunctions object, which describes how many FE functions are used.
-   * @tparam variables_ A DiFfRG::NumberVariables object, which describes how many additional variables are used.
-   * @tparam extractors_ A DiFfRG::NumberExtractors object, which describes how many extractors are used.
+   * An object of it also stores the LDG coupling declarations (add_dependency, set_jacobian_constant), made in the
+   * model's constructor through def::AbstractModel::components().
+   *
+   * @tparam _FEFunctionDescriptor an FEFunctionDescriptor: the FE functions (level 0).
+   * @tparam _VariableDescriptor a VariableDescriptor; default none.
+   * @tparam _ExtractorDescriptor an ExtractorDescriptor; default none.
+   * @tparam LDGDescriptors one FEFunctionDescriptor per LDG level 1, 2, 3 (at most three); default none.
    */
   template <typename _FEFunctionDescriptor, typename _VariableDescriptor = VariableDescriptor<>,
             typename _ExtractorDescriptor = ExtractorDescriptor<>, typename... LDGDescriptors>
@@ -144,6 +183,7 @@ namespace DiFfRG
     static constexpr uint n_extractors = Extractor_Descriptor::total_size;
 
   public:
+    /// No LDG couplings, nothing declared constant.
     ComponentDescriptor()
     {
       for (auto &dep : j_const)
@@ -152,67 +192,83 @@ namespace DiFfRG
     }
 
     /**
-     ** @brief Add a dependency between two FE subsystems, i.e. for LDG constructions.
+     * @brief LDG: component @p dependent of level @p dependent_subsystem depends on component @p independent of level
+     * @p independent_subsystem. Level 0 holds the FE functions.
      *
-     * @param dependent_subsystem The subsystem that depends on the other.
-     * @param dependent The index of the dependent variable in the dependent subsystem.
-     * @param independent_subsystem The subsystem that is independent.
-     * @param independent The index of the independent variable on which the dependent depends.
+     * Only adjacent levels (independent_subsystem = dependent_subsystem - 1) may be declared, otherwise this throws.
+     * Couplings across several levels are composed automatically, whatever the order of the calls.
      */
     void add_dependency(uint dependent_subsystem, uint dependent, uint independent_subsystem, uint independent)
     {
-      if (dependent_subsystem >= n_fe_subsystems || independent_subsystem >= n_fe_subsystems)
-        throw std::runtime_error("The subsystems described by 'add_dependency' do not exist.");
+      check_adjacent_levels(dependent_subsystem, independent_subsystem, "add_dependency");
+      auto &adjacent = couplings[dependent_subsystem][independent_subsystem];
+      const std::array<uint, 2> coupling{{dependent, independent}};
+      if (std::find(adjacent.begin(), adjacent.end(), coupling) == adjacent.end()) adjacent.push_back(coupling);
 
-      if (dependent_subsystem != independent_subsystem + 1)
-        throw std::runtime_error(
-            "The model should only specify dependencies between fe subsystems at neighboring levels.");
-
-      couplings[dependent_subsystem][independent_subsystem].push_back({{dependent, independent}});
-
-      if (independent_subsystem > 0) {
-        for (const auto &dependency : couplings[independent_subsystem][independent_subsystem - 1])
-          if (dependency[0] == independent)
-            couplings[dependent_subsystem][independent_subsystem - 1].push_back({{dependent, dependency[1]}});
-      }
+      // Level dep couples to level dep - 2, dep - 3, ... through the adjacent couplings in between.
+      for (uint dep = 2; dep < n_fe_subsystems; ++dep)
+        for (int indep = int(dep) - 2; indep >= 0; --indep) {
+          auto &composed = couplings[dep][indep];
+          composed.clear();
+          for (const auto &outer : couplings[dep][dep - 1])
+            for (const auto &inner : couplings[dep - 1][indep])
+              if (outer[1] == inner[0]) {
+                const std::array<uint, 2> c{{outer[0], inner[1]}};
+                if (std::find(composed.begin(), composed.end(), c) == composed.end()) composed.push_back(c);
+              }
+        }
     }
 
+    /**
+     * @brief LDG: level @p dependent_subsystem is a fixed linear, homogeneous map of level @p independent_subsystem =
+     * dependent_subsystem - 1, i.e. \f$L_k = A\, L_{k-1}\f$ with a constant matrix \f$A\f$.
+     *
+     * ldg_flux and ldg_source must be linear in their argument, without constant terms, also in the boundary
+     * fluxes. The assembler then builds \f$A\f$ once instead of reassembling, provided all levels below are also
+     * constant (see jacobians_constant). The claim is checked on first use and throws if violated.
+     */
     void set_jacobian_constant(uint dependent_subsystem, uint independent_subsystem)
     {
-      if (dependent_subsystem >= n_fe_subsystems || independent_subsystem >= n_fe_subsystems)
-        throw std::runtime_error("The subsystems described by 'add_dependency' do not exist.");
-
-      if (dependent_subsystem != independent_subsystem + 1)
-        throw std::runtime_error(
-            "The model should only specify dependencies between fe subsystems at neighboring levels.");
+      check_adjacent_levels(dependent_subsystem, independent_subsystem, "set_jacobian_constant");
       j_const[dependent_subsystem][independent_subsystem] = true;
-
-      if (independent_subsystem > 0)
-        if (j_const[independent_subsystem][independent_subsystem - 1])
-          j_const[dependent_subsystem][independent_subsystem - 1] = true;
     }
 
+    /// The (dependent, independent) component pairs coupling the two levels, see add_dependency.
     const CouplingList &ldg_couplings(uint dependent_subsystem, uint independent_subsystem) const
     {
       return couplings[dependent_subsystem][independent_subsystem];
     }
+
+    /**
+     * @brief Whether level @p dependent_subsystem is a fixed linear map of level @p independent_subsystem <
+     * dependent_subsystem, i.e. whether every level in between was declared constant with set_jacobian_constant.
+     */
     bool jacobians_constant(uint dependent_subsystem, uint independent_subsystem) const
     {
-      return j_const[dependent_subsystem][independent_subsystem];
+      if (independent_subsystem >= dependent_subsystem || dependent_subsystem >= n_fe_subsystems) return false;
+      for (uint level = independent_subsystem + 1; level <= dependent_subsystem; ++level)
+        if (!j_const[level][level - 1]) return false;
+      return true;
     }
 
+    /// Number of components of level @p subsystem (0: the FE functions).
     static constexpr uint count_fe_functions(uint subsystem = 0) { return n_components[subsystem]; }
+    /// Number of variables.
     static constexpr uint count_variables() { return n_variables; }
+    /// Number of extractors.
     static constexpr uint count_extractors() { return n_extractors; }
+    /// Number of levels, 1 + the number of LDG levels.
     static constexpr uint count_fe_subsystems() { return n_fe_subsystems; }
 
-    template <typename DoFH> static std::vector<uint> get_component_block_structure(const DoFH &dofh)
+  private:
+    static void check_adjacent_levels(uint dependent_subsystem, uint independent_subsystem, const char *caller)
     {
-      std::vector<uint> dofs_per_component = dealii::DoFTools::count_dofs_per_fe_component(dofh);
-      return dofs_per_component;
+      if (dependent_subsystem >= n_fe_subsystems || independent_subsystem >= n_fe_subsystems)
+        throw std::runtime_error(std::string(caller) + ": the subsystems do not exist.");
+      if (dependent_subsystem != independent_subsystem + 1)
+        throw std::runtime_error(std::string(caller) + ": only neighbouring levels can be coupled directly.");
     }
 
-  private:
     template <typename T> using SubsystemMatrix = std::array<std::array<T, n_fe_subsystems>, n_fe_subsystems>;
 
     SubsystemMatrix<CouplingList> couplings;

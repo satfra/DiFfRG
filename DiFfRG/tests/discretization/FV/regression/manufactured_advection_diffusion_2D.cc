@@ -171,8 +171,7 @@ namespace
                             {"minimal_dt", 1.0e-8},
                             {"maximal_dt", timestep},
                             {"abs_tol", 1.0e-8},
-                            {"rel_tol", 1.0e-8},
-                            {"max_steps", 1000000}}}}},
+                            {"rel_tol", 1.0e-8}}}}},
                         {"output", {{"verbosity", 1}, {"vtk", false}, {"hdf5", false}}}});
   }
 

@@ -20,6 +20,7 @@
 namespace
 {
   using namespace DiFfRG;
+  using namespace DiFfRG::internal;
 
   std::filesystem::path make_file(const std::string &stem)
   {

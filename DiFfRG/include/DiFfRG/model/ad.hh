@@ -10,6 +10,27 @@
 #include <deal.II/base/tensor.h>
 #include <deal.II/lac/full_matrix.h>
 
+// clang-format off
+/**
+ * @file ad.hh
+ * @brief The jacobian mixins of a model: def::AD, def::FE_AD, def::NoJacobians.
+ *
+ * Implicit timesteppers need the derivative of the residual with respect to the unknowns. A model inherits exactly
+ * one of
+ * | Mixin            | FE functions \f$u\f$ | extractors \f$e(u)\f$ | variables \f$v\f$ |
+ * |------------------|----------------------|-----------------------|-------------------|
+ * | def::AD          | AD                   | AD (chain rule through extract()) | AD of dt_variables() |
+ * | def::FE_AD       | AD                   | frozen                | none              |
+ * | def::NoJacobians | zero unless the model provides `jacobian_*` itself | zero | zero |
+ *
+ * "AD" is forward-mode automatic differentiation (autodiff::real) of the model's own functions: flux, source and
+ * numerical fluxes through evaluate_batch(), mass() per point. "Frozen" means the dependence of the extractors on
+ * \f$u\f$ is left out of the jacobian; the residual stays exact, Newton may need more iterations. Under def::FE_AD
+ * the variables block of the jacobian is left to the timestepper (IDA then sees only its \f$\alpha I\f$ part). KT
+ * freezes the extractors under any mixin.
+ */
+// clang-format on
+
 namespace DiFfRG
 {
   namespace def
@@ -55,21 +76,18 @@ namespace DiFfRG
     } // namespace internal
 
     /**
-     * @brief Marks a model whose flux, source and numerical-flux jacobians are the forward-mode AD of its
-     * evaluate_batch (and of the numflux_batch / boundary_numflux_batch built on it), seed-stacked over all points
-     * of a batch; see DiFfRG::internal::seed_stacked_jacobian. def::AD and def::FE_AD derive from it. A model
-     * without it provides the per-point jacobian_* callbacks itself (or def::NoJacobians).
+     * @brief Marker: flux, source and numerical-flux jacobians are the AD of evaluate_batch (and of the batched
+     * numerical fluxes built on it). Inherited through def::AD and def::FE_AD; a model without it provides the
+     * per-point `jacobian_*` callbacks itself.
      */
     struct BatchADJacobians {
     };
 
-    /**
-     * @brief Marks a model whose extractors are frozen within a Newton step, i.e. whose jacobian_extractors is
-     * zero (def::FE_AD): the AD jacobians then skip the extractor directions.
-     */
+    /// Marker: the extractors are frozen within a Newton step; the AD jacobians skip their directions (def::FE_AD).
     struct FrozenExtractors {
     };
 
+    /// AD jacobian of mass() with respect to \f$u\f$ (`dot` = 0) or \f$\partial_t u\f$ (`dot` = 1), per point.
     template <typename Model> class ADjacobian_mass
     {
       Model &asImp() { return static_cast<Model &>(*this); }
@@ -114,6 +132,7 @@ namespace DiFfRG
       }
     };
 
+    /// AD jacobian of dt_variables() with respect to the variables.
     template <typename Model> class ADjacobian_variables
     {
       Model &asImp() { return static_cast<Model &>(*this); }
@@ -125,44 +144,27 @@ namespace DiFfRG
       template <uint to, typename NT, typename Solution>
       void jacobian_variables(FullMatrix<NT> &jac, const Solution &sol) const
       {
+        static_assert(to == 0, "Only the jacobian with respect to the variables is provided.");
         const auto &variables = get<0>(sol);
-        const auto &extractors = get<1>(sol);
-        if constexpr (to == 0) {
-          AssertThrow(jac.m() == variables.size() && jac.n() == variables.size(),
-                      ExcMessage("Assure that the jacobian has the right dimension!"));
-        } else if constexpr (to == 1) {
-          AssertThrow(jac.m() == variables.size() && jac.n() == extractors.size(),
-                      ExcMessage("Assure that the jacobian has the right dimension!"));
-        }
-
-        if constexpr (to == 0) {
-          auto du = AD_tools::template vector_to_AD<Model::Components::count_variables()>(variables);
-          auto ad_sol = std::tuple_cat(tuple_first<to>(sol), std::tie(du), tuple_last<Solution::size - to - 1>(sol));
-          for (uint j = 0; j < Model::Components::count_variables(); ++j) {
-            std::array<AD_type, Model::Components::count_variables()> res{{}};
-            seed(du[j]);
-            asImp().dt_variables(res, Solution::as(ad_sol));
-            for (uint i = 0; i < Model::Components::count_variables(); ++i) {
-              jac(i, j) = grad(res[i]);
-            }
-            unseed(du[j]);
-          }
-        } else if constexpr (to == 1) {
-          auto du = AD_tools::template vector_to_AD<Model::Components::count_extractors()>(extractors);
-          auto ad_sol = std::tuple_cat(tuple_first<to>(sol), std::tie(du), tuple_last<Solution::size - to - 1>(sol));
-          for (uint j = 0; j < Model::Components::count_extractors(); ++j) {
-            std::array<AD_type, Model::Components::count_variables()> res{{}};
-            seed(du[j]);
-            asImp().dt_variables(res, Solution::as(ad_sol));
-            for (uint i = 0; i < Model::Components::count_extractors(); ++i) {
-              jac(i, j) = grad(res[i]);
-            }
-            unseed(du[j]);
-          }
+        AssertThrow(jac.m() == variables.size() && jac.n() == variables.size(),
+                    ExcMessage("Assure that the jacobian has the right dimension!"));
+        auto du = AD_tools::template vector_to_AD<Model::Components::count_variables()>(variables);
+        auto ad_sol = std::tuple_cat(std::tie(du), tuple_last<Solution::size - 1>(sol));
+        for (uint j = 0; j < Model::Components::count_variables(); ++j) {
+          std::array<AD_type, Model::Components::count_variables()> res{{}};
+          seed(du[j]);
+          asImp().dt_variables(res, Solution::as(ad_sol));
+          for (uint i = 0; i < Model::Components::count_variables(); ++i)
+            jac(i, j) = grad(res[i]);
+          unseed(du[j]);
         }
       }
     };
 
+    /**
+     * @brief AD jacobian of extract() with respect to the FE values (`to` = 0), gradients (1) or hessians (2) at
+     * the extractor point.
+     */
     template <typename Model> class ADjacobian_extractors
     {
       Model &asImp() { return static_cast<Model &>(*this); }
@@ -186,7 +188,7 @@ namespace DiFfRG
           AssertThrow(jac.m() == Model::Components::count_extractors() && jac.n() == fe_derivatives.size() * dim,
                       ExcMessage("Assure that the jacobian has the right dimension!"));
         } else if constexpr (to == 2) {
-          AssertThrow(jac.m() == Model::Components::count_extractors() && jac.n() == fe_derivatives.size() * dim * dim,
+          AssertThrow(jac.m() == Model::Components::count_extractors() && jac.n() == fe_hessians.size() * dim * dim,
                       ExcMessage("Assure that the jacobian has the right dimension!"));
         }
 
@@ -236,8 +238,8 @@ namespace DiFfRG
     };
 
     /**
-     * @brief All jacobians by forward-mode AD: flux, source and numerical fluxes seed-stacked over the batches
-     * (BatchADJacobians), mass, variables and extractors per point.
+     * @brief All jacobians by forward-mode AD, including the dependence through the extractors and the variables'
+     * jacobian from dt_variables(). The default choice.
      */
     template <typename Model>
     class AD : public BatchADJacobians,
@@ -248,8 +250,8 @@ namespace DiFfRG
     };
 
     /**
-     * @brief As AD, but with frozen extractors and variables: their jacobians are zero, so the jacobian holds only
-     * the direct dependence on the FE functions.
+     * @brief As def::AD, but only with respect to the FE functions: extractors are frozen and no variables
+     * jacobian is computed. Cheaper per Newton step when extractors or variables are expensive.
      */
     template <typename Model>
     class FE_AD : public BatchADJacobians, public FrozenExtractors, public ADjacobian_mass<Model>
@@ -265,6 +267,10 @@ namespace DiFfRG
       }
     };
 
+    /**
+     * @brief Every jacobian callback is defined and does nothing, i.e. the jacobians are zero. A model using it
+     * shadows the callbacks it can provide by hand (e.g. KT's per-point `jacobian_source*`).
+     */
     class NoJacobians
     {
     public:

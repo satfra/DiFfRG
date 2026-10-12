@@ -21,19 +21,21 @@ namespace DiFfRG
 {
   using namespace dealii;
 
+  /**
+   * @brief Mesh adaptor that never changes the mesh. Use it with timesteppers that do not support adaptivity.
+   *
+   * Construct it either with the vector type, `NoAdaptivity<VectorType>`, or from the assembler (or discretization),
+   * `NoAdaptivity mesh_adaptor(assembler);`, which deduces the vector type.
+   *
+   * @tparam VectorType Vector type of the spatial solution.
+   */
   template <typename VectorType> class NoAdaptivity : public AbstractAdaptor<VectorType>
   {
   public:
     NoAdaptivity() {}
 
     /**
-     * @brief Deduction-only constructor.
-     *
-     * NoAdaptivity needs nothing from the assembler; taking one lets a driver write
-     * `NoAdaptivity mesh_adaptor(assembler);` next to `HAdaptivity mesh_adaptor(assembler, json);`
-     * instead of respelling VectorType. The first constraint keeps this template from hijacking
-     * the copy constructor, the second turns a mismatched argument into a clean substitution
-     * failure rather than a silently wrong adaptor.
+     * @brief Deduce VectorType from an assembler or discretization; the argument is not used otherwise.
      */
     template <typename AssemblerOrDiscretization>
       requires(!std::same_as<std::remove_cvref_t<AssemblerOrDiscretization>, NoAdaptivity>) &&
@@ -45,18 +47,12 @@ namespace DiFfRG
     virtual ~NoAdaptivity() = default;
 
     /**
-     * @brief Check if an adaptation step should be done and tranfer the given solution to the new mesh.
-     *
-     * @param t Current time; at adapt_dt time distances we perform an adaptation
-     * @param sol Current solution
-     * @return true if adapation has happened, false otherwise
+     * @brief Does nothing. @return false.
      */
     virtual bool operator()(const double, VectorType &) override { return false; }
 
     /**
-     * @brief Force an adaptation and transfer the solution sol to the new mes
-
-     * @param solution to be transferred
+     * @brief Does nothing. @return false.
      */
     virtual bool adapt(VectorType &) override { return false; }
   };

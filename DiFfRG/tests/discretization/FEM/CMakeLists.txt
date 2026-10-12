@@ -4,6 +4,7 @@
 
 setup_test(cg.cc)
 setup_test(cg_consistency.cc)
+setup_test(cg_hanging_nodes.cc)
 setup_test(dg.cc)
 setup_test(dg_consistency.cc)
 setup_test(dg_batch_equivalence.cc)

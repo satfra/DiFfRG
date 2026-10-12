@@ -10,9 +10,16 @@ namespace DiFfRG
 {
   using namespace dealii;
   /**
-   * @brief A newton solver, using local error estimates for each vector component.
+   * @brief Newton's method with line search from SUNDIALS KINSOL, with the same callbacks as Newton.
    *
-   * @tparam VectorType_ Vector type used by the simulation (i.e. any dealii vector type)
+   * KINSOL stops when the scaled residual satisfies \f$\max_i |F_i(u)| \le\f$ `abstol`. Afterwards the
+   * root-mean-square residual is checked against \f$\max(\text{abstol}, \text{reltol} \cdot \text{RMS}(u))\f$:
+   * if KINSOL reported a failure and this check fails, it throws; if KINSOL returned normally but the check fails,
+   * KINSOL is run once more from there.
+   *
+   * `assemble_threshold` and `n_stepsize_iterations` are accepted for compatibility with Newton but not used.
+   *
+   * @tparam VectorType_ a serial deal.II vector type.
    */
   template <typename VectorType_> class KINSOL
   {
@@ -22,57 +29,44 @@ namespace DiFfRG
     KINSOL(double abstol_ = 1e-10, double reltol_ = 1e-6, double assemble_threshold_ = 0., unsigned int max_steps_ = 21,
            unsigned int n_stepsize_iterations_ = 21);
 
-    /**
-     * @brief Should it be necessary, one can force a recalculation of the jacobian hereby.
-     */
+    /// Build the Jacobian at @p u now.
     void reinit(const VectorType &u);
 
-    /**
-     * @brief Perform a newton iteration on the input vector.
-     *
-     * @param iterate the input vector which contains the initial guess and later the solution.
-     */
+    /// Solve \f$F(u) = 0\f$; @p iterate is the initial guess on entry and the solution on return.
     void operator()(VectorType &iterate);
 
-    /**
-     * @brief Set the jacobian recalculation threshold, i.e. below which reduction we force a jacobian update.
-     *
-     * @return double the old threshold
-     */
+    /// Has no effect; kept for compatibility with Newton. @return the previous value.
     double threshold(const double thr);
 
+    /// \f$F\f$ at the last evaluated point.
     const VectorType &get_residual() const;
+    /// The initial guess of the last solve.
     const VectorType &get_initial() const;
+    /// The last iterate.
     const VectorType &get_iterate() const;
 
+    /// Mean wall time of a solve in seconds.
     double average_time_newton() const;
+    /// Number of solves so far.
     unsigned int num_newton_calls() const;
 
-    /**
-     * @brief Make the newton algorithm return a success even if the evolution did not fulfill the convergence
-     * criterion. The iteration always fails if the solution contains NaNs or infinities.
-     *
-     * @param x
-     */
+    /// Accept the iterate whenever KINSOL fails, without checking the residual.
     void set_ignore_nonconv(bool x);
 
+    /// residual(F, u): write \f$F(u)\f$ into F.
     std::function<void(VectorType &, const VectorType &)> residual;
+    /// lin_solve(du, F): solve \f$J\, du = F\f$ with the current Jacobian.
     std::function<void(VectorType &, const VectorType &)> lin_solve;
+    /// update_jacobian(u): build the Jacobian at u.
     std::function<void(const VectorType &)> update_jacobian;
 
-    /**
-     * @brief Get the latest error
-     */
+    /// The convergence measure \f$E\f$ of Newton at the last iterate.
     double get_error();
 
-    /**
-     * @brief Get the number of steps taken in the latest iteration
-     */
+    /// Number of KINSOL iterations of the last solve.
     unsigned int get_step();
 
-    /**
-     * @brief Get the number of jacobians created in the latest iteration
-     */
+    /// Number of Jacobians built during the last solve.
     unsigned int get_jacobians();
 
   private:
@@ -90,19 +84,10 @@ namespace DiFfRG
 
     std::vector<double> timings_newton;
 
-    /**
-     * @brief Calculate the current error estimate
-     *
-     * @return double
-     */
+    /// The convergence measure \f$E\f$ of Newton at the current iterate.
     double get_EEst();
 
-    /**
-     * @brief Check if the iteration should go on.
-     *
-     * @return true
-     * @return false
-     */
+    /// Unused.
     bool check();
 
     std::shared_ptr<SUNDIALS::KINSOL<VectorType>> kinsol;

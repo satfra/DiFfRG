@@ -37,10 +37,10 @@ TEST_CASE("Stress test p0 sums/integrals", "[integration][quadrature]")
 
     const ctype T = GENERATE(0., 1e-4, 1e-3, 1e-2, 1e-1, 1.);
 
-    QuadratureProvider quadrature_provider;
-    Integrator_fT<1, NT, PolyIntegrand<1, NT, -1>, ExecutionSpace> integrator(quadrature_provider, {}, {});
-
     const ctype k = GENERATE(take(1, random(0., 1.)));
+
+    QuadratureProvider quadrature_provider;
+    Integrator_fT<1, NT, PolyIntegrand<1, NT, -1>, ExecutionSpace> integrator(quadrature_provider, T, k);
 
     SECTION("Volume integral (bosonic)")
     {

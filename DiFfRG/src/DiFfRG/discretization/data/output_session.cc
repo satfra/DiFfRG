@@ -184,7 +184,7 @@ namespace DiFfRG
         named_fe_outs.at(name).flush(time);
     }
     {
-      ScopedTimer csv_timer(current_frame.csv);
+      internal::ScopedTimer csv_timer(current_frame.csv);
       for (auto &[name, csv] : csv_files)
         csv.flush(time);
     }

@@ -7,16 +7,15 @@ namespace DiFfRG
   namespace def
   {
     /**
-     * @brief Unlimited central-difference "limiter" — returns the arithmetic mean
-     * of the two one-sided slopes.
+     * @brief No limiting: the central slope \f$\tfrac12(a + b)\f$ of the backward and forward slopes \f$a, b\f$.
      *
-     * Diagnostic / comparison choice. NOT TVD: this can amplify oscillations at
-     * discontinuities. Useful as the smooth-end bracket against MinModLimiter
-     * to measure how much the TVD clipping contributes to time-stepper failures.
+     * Not TVD: it creates oscillations at discontinuities and steep fronts. Useful as a reference, e.g. to see how much
+     * the limiting of another limiter affects a flow.
      */
     class CentralLimiter
     {
     public:
+      /// \f$\tfrac12(a + b)\f$.
       template <typename NumberType> static NumberType slope_limit(const NumberType &du_1, const NumberType &du_2)
       {
         return NumberType(0.5) * (du_1 + du_2);

@@ -12,6 +12,7 @@ namespace DiFfRG
 {
   namespace def
   {
+    /// The inputs of the diffusion flux at one face: cell averages and corrected gradients of both cells, and means.
     template <int dim, typename NumberType, size_t n_components> struct DiffusionFaceState {
       std::array<NumberType, n_components> u_minus{};
       std::array<NumberType, n_components> u_plus{};
@@ -21,6 +22,17 @@ namespace DiFfRG
       GradientType<dim, NumberType, n_components> grad{};
     };
 
+    /**
+     * @brief The gradients the KT diffusion flux sees at a face between cells \f$K\f$ (side -) and \f$N\f$ (side +).
+     *
+     * Each cell's gradient \f$\hat g\f$ is the weighted least-squares fit to its \f$2d\f$ face neighbours \f$M\f$,
+     * minimizing \f$\sum_M |x_M - x_K|^{-2} \big(\bar u_M - \bar u_K - \hat g \cdot (x_M - x_K)\big)^2\f$, then
+     * corrected along \f$\Delta x = x_N - x_K\f$ so that \f$\hat g \cdot \Delta x = \bar u_N - \bar u_K\f$. The
+     * correction makes the normal derivative the compact two-point difference across the face. No limiter is applied.
+     *
+     * @tparam dim_ The spatial dimension.
+     * @tparam NumberType The scalar type of the cell averages.
+     */
     template <int dim_, typename NumberType> class CorrectedWeightedLeastSquaresDiffusionReconstructor
     {
     public:
@@ -28,6 +40,7 @@ namespace DiFfRG
       static constexpr int n_faces = 2 * dim;
       static constexpr int jacobian_stencil_radius = 2;
 
+      /// The weighted least-squares gradient of the stencil's cell.
       template <size_t n_components, typename CellStencil>
       static GradientType<dim, NumberType, n_components> compute_cell_gradient(const CellStencil &stencil)
       {
@@ -63,6 +76,7 @@ namespace DiFfRG
         return gradients;
       }
 
+      /// @p base_gradient plus the multiple of @p d that makes its component along @p d equal to (u_plus - u_minus).
       template <size_t n_components>
       static GradientType<dim, NumberType, n_components> correct_gradient(
           const GradientType<dim, NumberType, n_components> &base_gradient,
@@ -82,6 +96,7 @@ namespace DiFfRG
         return corrected;
       }
 
+      /// The diffusion inputs at the face between the cells of @p minus_stencil and @p plus_stencil.
       template <size_t n_components, typename CellStencil>
       static DiffusionFaceState<dim, NumberType, n_components> compute_face_state(
           const CellStencil &minus_stencil, const CellStencil &plus_stencil)
@@ -106,6 +121,7 @@ namespace DiFfRG
         return state;
       }
 
+      /// The derivatives of a face state computed with one seeded autodiff input, for side - and side +.
       template <size_t n_components>
       static std::array<ReconstructionDerivativeData<dim, NumberType, n_components>, 2> extract_derivatives(
           const DiffusionFaceState<dim, autodiff::Real<1, NumberType>, n_components> &state)

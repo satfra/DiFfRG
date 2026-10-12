@@ -93,7 +93,8 @@ namespace DiFfRG
                                   std::vector<std::pair<std::string, std::vector<double>>> data_sets)
   {
     staged.actions.emplace_back([series_number, time, group_name, fe_output_name, dim, n_nodes,
-                                 nodes = std::move(node_data), sets = std::move(data_sets)](HDF5FrameContext &context) {
+                                 nodes = std::move(node_data),
+                                 sets = std::move(data_sets)](internal::HDF5FrameContext &context) {
       auto group = context.group(group_name).create_group(dealii::Utilities::int_to_string(series_number, 6));
       group.write_attribute("time", time);
       group.write_attribute("series_number", static_cast<int>(series_number));
@@ -123,7 +124,7 @@ namespace DiFfRG
     // Stamped last, so that every map group they refer to has been created by an earlier action
     // of the same frame.
     for (const auto &[name, series_number] : written_map_series) {
-      staged.actions.emplace_back([name, series_number, time](HDF5FrameContext &context) {
+      staged.actions.emplace_back([name, series_number, time](internal::HDF5FrameContext &context) {
         auto parent = context.group("maps").open_group(name);
         auto group = parent.open_group(std::to_string(series_number));
         group.write_attribute("time", time);
@@ -140,7 +141,7 @@ namespace DiFfRG
   void HDF5Output::run_staged_frame(const double time)
   {
     if (staged.empty()) {
-      staged = HDF5Frame{};
+      staged = internal::HDF5Frame{};
       return;
     }
 
@@ -159,7 +160,7 @@ namespace DiFfRG
     else
       staged.run(&frame_timings);
 
-    staged = HDF5Frame{};
+    staged = internal::HDF5Frame{};
   }
 
   void HDF5Output::drain()
@@ -188,7 +189,7 @@ namespace DiFfRG
   void HDF5Output::open_file()
   {
     if (opened) return;
-    ScopedTimer open_timer(frame_timings.hdf5_open_close);
+    internal::ScopedTimer open_timer(frame_timings.hdf5_open_close);
     ++frame_timings.hdf5_open_count;
     h5_file = DiFfRG::hdf5::File::open(path.string(), DiFfRG::hdf5::Access::ReadWrite);
     opened = true;
@@ -197,7 +198,7 @@ namespace DiFfRG
   void HDF5Output::close_file()
   {
     if (!opened) return;
-    ScopedTimer close_timer(frame_timings.hdf5_open_close);
+    internal::ScopedTimer close_timer(frame_timings.hdf5_open_close);
     // No child handles are retained here -- see HDF5FrameContext, which caches them for the
     // duration of a frame and releases them before H5Fclose for the usual reason: HDF5
     // reference-counts the file through them, so a live one keeps it open at the OS level.

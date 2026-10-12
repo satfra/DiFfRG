@@ -5,3 +5,4 @@
 setup_test(ad.cc)
 setup_test(component_descriptor.cc)
 setup_test(fv_boundaries.cc)
+setup_test(numflux.cc)

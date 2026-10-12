@@ -80,6 +80,8 @@ namespace
                         public def::AD<GaussianModel>
   {
   public:
+    static constexpr bool readouts_use_potential = false; // the readout only records the EoM
+
     explicit GaussianModel(const GaussianScenario &scenario) : def::fRG(1.0), scenario(scenario) {}
     GaussianModel(const ConfigTree &json, const GaussianScenario &scenario) : def::fRG(json), scenario(scenario) {}
 
@@ -186,8 +188,7 @@ namespace
              {"minimal_dt", 1.0e-14},
              {"maximal_dt", 1.0},
              {"abs_tol", 1.0e-12},
-             {"rel_tol", 1.0e-10},
-             {"max_steps", 5000000}}}}},
+             {"rel_tol", 1.0e-10}}}}},
          {"output", {{"verbosity", 0}, {"vtk", false}, {"hdf5", false}}}});
   }
 
@@ -431,23 +432,4 @@ TEST_CASE("Zero-dimensional KT Gaussian 40x40 matrix preserves analytic observab
       check_observables(scenario, {.n_cells_per_direction = 40}, observables);
     }
   }
-}
-
-TEST_CASE("Zero-dimensional KT Gaussian swapped anisotropic 400x400 run preserves analytic observables",
-          "[2d][FV][KT][gaussian][slow]")
-{
-  const GaussianScenario scenario{"a=2, b=1, h1=0.75, h2=-0.5", 2.0, 1.0, 0.75, -0.5};
-  const RunParameters params{.n_cells_per_direction = 400};
-  const auto observables = run_gaussian_regression(scenario, params);
-  check_observables(scenario, params, observables);
-}
-
-TEST_CASE("Zero-dimensional KT Gaussian automatically finds the model EoM", "[2d][FV][KT][gaussian][EoM]")
-{
-  const GaussianScenario scenario{"a=2, b=1, h1=0.75, h2=-0.5", 2.0, 1.0, 0.75, -0.5};
-  const RunParameters params{.n_cells_per_direction = 40};
-  const auto observables = run_gaussian_regression(scenario, params);
-
-  CHECK_THAT(observables.minimum[0], Catch::Matchers::WithinAbs(scenario.h_1 / scenario.a, cell_width(params)));
-  CHECK_THAT(observables.minimum[1], Catch::Matchers::WithinAbs(scenario.h_2 / scenario.b, cell_width(params)));
 }

@@ -3,6 +3,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iostream>
+#include <sstream>
 
 #include <DiFfRG/common/config_tree.hh>
 
@@ -105,7 +107,8 @@ TEST_CASE("ConfigTree::get_double accepts integer entries", "[config][common]")
   // Non-numeric entries still fail, and integer accessors stay strict.
   REQUIRE_THROWS_AS(config.get_double("/c"), std::runtime_error);
   REQUIRE_THROWS_AS(config.get_int("/b"), std::runtime_error);
-  REQUIRE(config.get_double("/c", 3.0) == Catch::Approx(3.0));
+  // A present but unreadable entry is an error even when a default is given.
+  REQUIRE_THROWS_AS(config.get_double("/c", 3.0), std::runtime_error);
 }
 
 TEST_CASE("ConfigTree integer getters accept values stored as unsigned", "[config][common]")
@@ -235,4 +238,17 @@ TEST_CASE("Warning getters return the value when present and the default when no
 
   // Repeated reads of the same missing key stay consistent (the warning itself is once-only).
   CHECK(config.get_double_or_warn("/physical/T", 0.1) == Catch::Approx(0.1));
+}
+
+TEST_CASE("ConfigTree getters with a default throw for a present but mistyped key", "[config][common]")
+{
+  const ConfigTree config = boost::json::value({{"order", 2.5}, {"name", "x"}});
+
+  REQUIRE_THROWS_AS(config.get_uint("/order", 3), std::runtime_error);
+  REQUIRE_THROWS_AS(config.get_uint_or_warn("/order", 3), std::runtime_error);
+  REQUIRE_THROWS_AS(config.get_double("/name", 1.0), std::runtime_error);
+  REQUIRE_THROWS_AS(config.get_double_or_warn("/name", 1.0), std::runtime_error);
+  // Only a missing key falls back.
+  REQUIRE(config.get_uint("/missing", 3) == 3);
+  REQUIRE(config.get_uint_or_warn("/missing", 3) == 3);
 }

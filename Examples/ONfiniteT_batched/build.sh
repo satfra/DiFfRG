@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# ##############################################################################
+# Script setup
+# ##############################################################################
+
+threads='1'
+while getopts j: flag; do
+  case "${flag}" in
+  j) threads=${OPTARG} ;;
+  esac
+done
+scriptpath="$(
+  cd -- "$(dirname "$0")" >/dev/null 2>&1
+  pwd -P
+)"
+
+# ##############################################################################
+# Build application
+# ##############################################################################
+
+mkdir -p build
+cd build
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j"$threads"

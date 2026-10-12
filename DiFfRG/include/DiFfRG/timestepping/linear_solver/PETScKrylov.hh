@@ -90,9 +90,12 @@ namespace DiFfRG
    * timestepper's setup_jacobian) and therefore skip factorization diagnostics for it, exactly
    * as they already do for the serial GMRES.
    *
+   * solve() runs PETSc's GMRES until the residual norm is below `tol`, at most \f$\max(1000, n/10)\f$ iterations for
+   * a global size \f$n\f$.
+   *
    * @tparam SparseMatrixType a PETSc MPI matrix type
    * @tparam VectorType the matching PETSc MPI vector type
-   * @tparam PreconditionerType see internal::PETScDefaultPreconditioner
+   * @tparam PreconditionerType defaults to BoomerAMG (hypre) if PETSc was built with hypre, else block Jacobi.
    */
   template <typename SparseMatrixType, typename VectorType,
             typename PreconditionerType = internal::PETScDefaultPreconditioner>

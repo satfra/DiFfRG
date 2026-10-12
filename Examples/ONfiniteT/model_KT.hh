@@ -12,15 +12,14 @@ struct Parameters {
       Lambda = config.get_double("/physical/Lambda");
       N = config.get_double("/physical/N");
       T = config.get_double("/physical/T");
-      lambda = config.get_double("/physical/lambda");
-      m2 = config.get_double("/physical/m2");
-
-      std::cout << "Parameters: " << Lambda << " " << N << " " << T << " " << lambda << " " << m2 << std::endl;
+      lambda2 = config.get_double("/physical/lambda2");
+      lambda4 = config.get_double("/physical/lambda4");
+      lambda6 = config.get_double("/physical/lambda6");
     } catch (std::exception &e) {
       std::cout << "Error in reading parameters: " << e.what() << std::endl;
     }
   }
-  double Lambda, N, T, lambda, m2;
+  double Lambda, N, T, lambda2, lambda4, lambda6;
 };
 
 // One FE function m2 = dV/drho, no extractors, no variables.
@@ -60,10 +59,11 @@ public:
     flow_equations.set_T(prm.T);
   }
 
+  /// Mesh refinement where m^2 bends, as in the CG model: |d^2 m^2 / drho^2| (KT: from the cell averages).
   template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
   {
     const auto &rho = pos[0];
-    values[idxf("m2")] = prm.m2 + prm.lambda / 2. * rho;
+    values[idxf("m2")] = prm.lambda2 + prm.lambda4 * rho + prm.lambda6 * powr<2>(rho);
   }
 
   void set_time(double t_)

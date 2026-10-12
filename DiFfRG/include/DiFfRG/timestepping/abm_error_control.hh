@@ -17,19 +17,19 @@ namespace DiFfRG
   namespace internal
   {
     /**
-     * @brief Adams-Bashforth-Moulton predictor-corrector (PEC: Adams-Bashforth predictor, one Adams-Moulton
-     * correction, both of order Steps) whose step size may change between steps, with a local error estimate on every
-     * step.
+     * @brief Adams-Bashforth-Moulton predictor-corrector (PECE: Adams-Bashforth predictor, one Adams-Moulton
+     * correction, both of order Steps; two right-hand side evaluations per step) whose step size may change between
+     * steps, with a local error estimate on every step.
      *
      * The stepper keeps the right-hand side at past points of the trajectory. When the step size changes, this history
      * is resampled onto the new step size: halving interpolates the polynomial through the stored points (the same
      * polynomial the Adams formulas integrate, so the order is kept), doubling picks every other point of a history
-     * that is kept 2 * Steps long. Only while there are fewer than Steps points -- the first Steps - 1 steps of a run --
-     * are steps taken by an embedded Runge-Kutta pair (Cash-Karp 5(4)) instead, whose error estimate stands in.
+     * that is kept 2 * Steps long. Only while there are fewer than Steps points -- the first Steps - 1 steps of a run
+     * -- are steps taken by an embedded Runge-Kutta pair (Cash-Karp 5(4)) instead, whose error estimate stands in.
      *
      * Error estimate of a multistep step: with the Adams-Bashforth coefficients g_m = 1 - sum_{j<m} g_j / (m + 1 - j),
-     * the predictor has error constant g_Steps and the corrector g*_Steps = g_Steps - g_{Steps-1}. The local error of the
-     * corrected step is therefore milne_factor = |g*_Steps| / g_{Steps-1} times the predictor-corrector difference
+     * the predictor has error constant g_Steps and the corrector g*_Steps = g_Steps - g_{Steps-1}. The local error of
+     * the corrected step is therefore milne_factor = |g*_Steps| / g_{Steps-1} times the predictor-corrector difference
      * (~1/33 at Steps = 8).
      *
      * do_step(system, x, t, dt) continues the trajectory from (x, t), which is either where the last step ended or,

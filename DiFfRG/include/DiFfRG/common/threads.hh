@@ -1,56 +1,62 @@
 #pragma once
 
+/**
+ * @file threads.hh
+ * @brief The CPU thread budget of a DiFfRG process.
+ *
+ * All CPU work runs in one TBB thread pool. Its size is taken from the first of the following that is set
+ * (see ThreadSource):
+ * 1. the environment variable `DiFfRG_NUM_THREADS` (or `DIFFRG_NUM_THREADS`),
+ * 2. the CPUs the launcher gave this process: its CPU affinity mask if it is smaller than the machine,
+ *    otherwise `SLURM_CPUS_PER_TASK`, otherwise `SLURM_JOB_CPUS_PER_NODE` or `SLURM_CPUS_ON_NODE` divided by
+ *    `SLURM_NTASKS_PER_NODE`,
+ * 3. the parameter `/discretization/threads` (0 means unset),
+ * 4. `OMP_NUM_THREADS`, `DEAL_II_NUM_THREADS` or `KOKKOS_NUM_THREADS`,
+ * 5. otherwise all CPUs, shared among the MPI ranks on the node.
+ *
+ * DiFfRG::Init prints a warning when several of these are set to different values. Note that tier 2 beats
+ * the parameter file: e.g. `mpirun` binding each rank to one core gives one thread per rank.
+ */
+
 namespace DiFfRG
 {
   /**
    * @brief Where the CPU thread budget came from, in order of precedence (highest first).
    *
-   * DiFfRG runs its CPU work on a single TBB pool, so there is exactly one number to resolve, and
-   * several places that may want to set it. They are ranked rather than combined: a launcher knows
-   * more about the machine than a parameter file does, and an explicit environment variable is the
-   * user overruling both.
+   * See threads.hh for the full rules.
    */
   enum class ThreadSource {
-    /// DiFfRG_NUM_THREADS (or DIFFRG_NUM_THREADS).
+    /// `DiFfRG_NUM_THREADS` (or `DIFFRG_NUM_THREADS`).
     diffrg_env,
-    /// The CPU allocation this process was given: its affinity mask, or SLURM_* if it has none.
+    /// The CPU allocation this process was given: its affinity mask, or `SLURM_*` if it has none.
     launcher,
-    /// /discretization/threads.
+    /// `/discretization/threads`, or an explicit set_thread_limit(unsigned int).
     config,
-    /// OMP_NUM_THREADS, DEAL_II_NUM_THREADS, KOKKOS_NUM_THREADS.
+    /// `OMP_NUM_THREADS`, `DEAL_II_NUM_THREADS`, `KOKKOS_NUM_THREADS`.
     other_env,
     /// Nothing was set: the machine, divided among the node-local ranks that share its CPUs.
     automatic
   };
 
-  /// The name of a thread-count source, as it appears in the precedence warning.
+  /// The name of a thread-count source, as it appears in log messages.
   const char *to_string(const ThreadSource source);
 
   /**
-   * @brief The CPU thread budget this process resolved.
+   * @brief The number of CPU threads this process uses.
    *
-   * This is the number every DiFfRG component sizes itself against: the host/device split of the
-   * map scheduler, and the TBB arena itself. Resolved once by
-   * DiFfRG::Init, or by set_thread_limit() for embedders that never construct an Init.
-   *
-   * Deliberately not a synonym for dealii::MultithreadInfo::n_threads(). That is a mutable static
-   * which every set_thread_limit() call rewrites -- silently taking the minimum with
-   * DEAL_II_NUM_THREADS as it goes -- so the value read back out of deal.II is not necessarily the
-   * value DiFfRG resolved. The two are kept in agreement here by construction: this returns what
-   * deal.II actually installed, after the precedence rules have been applied.
-   *
-   * Before resolution it reports TBB's live concurrency, so an embedder that skips Init still gets
-   * a usable number rather than a zero.
+   * Set by DiFfRG::Init, and changed by every later set_thread_limit() call. Before either, TBB's current
+   * concurrency limit.
    */
   unsigned int n_threads();
 
-  /// Which rule produced n_threads(). ThreadSource::automatic before anything has been resolved.
+  /// Which rule produced n_threads(). ThreadSource::automatic before anything has been set.
   ThreadSource n_threads_source();
 
   /// What the precedence rules picked, and which setting it came from.
   struct ThreadResolution {
     /// 0 when nothing was set anywhere, i.e. the automatic tier applies.
     unsigned int threads;
+    /// The tier of the winning setting.
     ThreadSource source;
     /// The winning setting's name, e.g. "SLURM_CPUS_PER_TASK". Never null.
     const char *name;
@@ -59,25 +65,20 @@ namespace DiFfRG
   /**
    * @brief Apply the precedence order to the environment and one configured thread count.
    *
-   * Pure: it reads the environment and reports what would win, without installing anything and
-   * without touching the environment. DiFfRG::Init calls this and then acts on the result; it is
-   * public so the precedence order can be tested directly, rather than through a process-global
-   * Init that can only be constructed once.
+   * Only reports what would win; changes nothing. Exposed for tests.
    *
-   * @param configured_threads /discretization/threads, or 0 if unset.
+   * @param configured_threads `/discretization/threads`, or 0 if unset.
    */
   ThreadResolution resolve_thread_count(const unsigned int configured_threads);
 
   /**
-   * @brief Limit the number of CPU threads this process may use.
+   * @brief Set the number of CPU threads this process may use.
    *
-   * Sets deal.II's thread limit, which installs the process-wide tbb::global_control capping
-   * every TBB pipeline in deal.II and DiFfRG, and publishes the result through n_threads().
-   * A value of 0 means "all available cores".
+   * Sets deal.II's thread limit, which caps every TBB pool in deal.II and DiFfRG, and updates n_threads().
+   * 0 means all available cores. Skips the precedence order of threads.hh, but deal.II still caps the value
+   * at `DEAL_II_NUM_THREADS` if that is set.
    *
-   * @note This is the unconditional form: it does not consult the environment. Applications go
-   * through DiFfRG::Init, which applies the precedence order described at ThreadSource. This
-   * exists for tests and for embedders that drive the library without Init.
+   * @param threads The thread count.
    */
   void set_thread_limit(const unsigned int threads);
 } // namespace DiFfRG

@@ -40,3 +40,14 @@ cpmaddpackage(
   LLNL/sundials
   GIT_TAG
   v7.7.0)
+
+# DiFfRG's IDA driver continues IDA warm across mesh adaptations (timestepping/ida_driver.cc), which needs IDA's
+# internal state: install idas_impl.h and the private headers it includes.
+install(
+  FILES ${sundials_SOURCE_DIR}/src/idas/idas_impl.h
+        ${sundials_SOURCE_DIR}/src/sundials/sundials_logger_impl.h
+        ${sundials_SOURCE_DIR}/src/sundials/sundials_macros.h
+        ${sundials_SOURCE_DIR}/src/sundials/sundials_hashmap_impl.h
+        ${sundials_SOURCE_DIR}/src/sundials/sundials_utils.h
+  DESTINATION include/sundials_internal)
+install(FILES ${sundials_SOURCE_DIR}/src/sundials/stl/sunstl_vector.h DESTINATION include/sundials_internal/stl)

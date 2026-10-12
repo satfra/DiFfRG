@@ -171,17 +171,23 @@ namespace ldg_test
   /**
    * Model2's physics plus a second level llu = (lu^2 / 2 + 0.3 lu lv)' + 0.1 lv, which is nonlinear in level 1 and
    * depends on both of its components; the main level reads it. Level 1 is constant or assembled, level 2 is
-   * always assembled.
+   * assembled.
+   *
+   * With `swapped`, it is the other way round: level 1 (lu, lv) = ((u^2 / 2)', v') is nonlinear in u, and level 2,
+   * llu = (lu + 0.3 lv)', is linear in level 1 and declared constant. With `misdeclared`, level 2 keeps its nonlinear
+   * definition but is declared constant all the same.
    */
-  template <bool constant, bool batched = false>
-  class Model3 : public def::AbstractModel<Model3<constant, batched>, Components3>,
-                 public ModelBase<Model3<constant, batched>, Components3, false, batched>,
+  template <bool constant, bool batched = false, bool swapped = false, bool misdeclared = false>
+  class Model3 : public def::AbstractModel<Model3<constant, batched, swapped, misdeclared>, Components3>,
+                 public ModelBase<Model3<constant, batched, swapped, misdeclared>, Components3, false, batched>,
                  public def::Time,
-                 public def::LLFFlux<Model3<constant, batched>>,
-                 public def::LDGUpDownFluxes<Model3<constant, batched>, Level1Fluxes, Level2Fluxes>,
-                 public def::FlowBoundaries<Model3<constant, batched>>,
-                 public def::AD<Model3<constant, batched>>
+                 public def::LLFFlux<Model3<constant, batched, swapped, misdeclared>>,
+                 public def::LDGUpDownFluxes<Model3<constant, batched, swapped, misdeclared>, Level1Fluxes, Level2Fluxes>,
+                 public def::FlowBoundaries<Model3<constant, batched, swapped, misdeclared>>,
+                 public def::AD<Model3<constant, batched, swapped, misdeclared>>
   {
+    static_assert(!(constant && swapped), "With `swapped`, level 1 is nonlinear and cannot be constant.");
+
     using Abstract = def::AbstractModel<Model3, Components3>;
     using Shared = ModelBase<Model3, Components3, false, batched>;
 
@@ -202,6 +208,7 @@ namespace ldg_test
       this->components().add_dependency(2, 0, 1, 0);
       this->components().add_dependency(2, 0, 1, 1);
       if constexpr (constant) this->components().set_jacobian_constant(1, 0);
+      if constexpr (swapped || misdeclared) this->components().set_jacobian_constant(2, 1);
     }
 
     template <typename Out, typename Batch> void default_evaluate_batch(Out &out, const Batch &batch) const
@@ -214,9 +221,11 @@ namespace ldg_test
                   const Vector &u) const
     {
       if constexpr (submodel == 1) {
-        F[0][0] = u[0];
+        F[0][0] = swapped ? 0.5 * u[0] * u[0] : u[0];
         F[1][0] = u[1];
-      } else
+      } else if constexpr (swapped)
+        F[0][0] = u[0] + 0.3 * u[1];
+      else
         F[0][0] = 0.5 * u[0] * u[0] + 0.3 * u[0] * u[1];
     }
 
@@ -224,7 +233,7 @@ namespace ldg_test
     void ldg_source(std::array<NT, Components3::count_fe_functions(submodel)> &s, const Point<dim> &,
                     const Vector &u) const
     {
-      if constexpr (submodel == 2) s[0] = 0.1 * u[1];
+      if constexpr (submodel == 2 && !swapped) s[0] = 0.1 * u[1];
     }
   };
 

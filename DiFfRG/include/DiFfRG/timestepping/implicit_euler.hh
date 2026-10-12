@@ -1,5 +1,8 @@
 #pragma once
 
+// standard library
+#include <memory>
+
 // DiFfRG
 #include <DiFfRG/common/linear_algebra.hh>
 #include <DiFfRG/common/math.hh>
@@ -10,11 +13,37 @@
 #include <DiFfRG/discretization/data/output_session.hh>
 #include <DiFfRG/timestepping/abstract_timestepper.hh>
 #include <DiFfRG/timestepping/default_linear_solver.hh>
+#include <DiFfRG/timestepping/solver/newton.hh>
 
 namespace DiFfRG
 {
-  template <typename VectorType, typename SparseMatrixType, uint dim,
-            template <typename...> typename LinearSolver>
+  /**
+   * @brief Backward Euler with adaptive step size.
+   *
+   * Each step solves, by Newton's method with the matrix \f$M + \Delta t\, \partial R/\partial u\f$,
+   * \f[
+   *   m(u_{n+1}) - m(u_n) + \Delta t\, R(u_{n+1}) = 0\,,
+   * \f]
+   * which is \f$M(u_{n+1} - u_n) + \Delta t\, R(u_{n+1}) = 0\f$ for the usual linear mass term (notation of
+   * abstract_timestepper.hh). First order in \f$\Delta t\f$.
+   *
+   * The step size is chosen by a PI controller (TC_PI) from the local error estimate
+   * \f[
+   *   (M + \Delta t\, J)\, e = \frac{\Delta t}{2}\big(R(u_n) - R(u_{n+1})\big)\,, \qquad J = \partial R/\partial u\,,
+   * \f]
+   * i.e. \f$\frac{\Delta t}{2}(\dot u_{n+1} - \dot u_n)\f$ damped in stiff directions. A step is rejected and retried
+   * with a smaller \f$\Delta t\f$ if \f$\sqrt{\frac1N\sum_i (e_i / (\text{atol} + \text{rtol}\max(|u_{n,i}|,
+   * |u_{n+1,i}|)))^2} > 1\f$, with atol, rtol = /timestepping/implicit/abs_tol, rel_tol (which also set Newton's
+   * tolerance). Steps stay in [implicit/minimal_dt, implicit/maximal_dt]; at minimal_dt a step is accepted regardless
+   * of the error estimate and of Newton convergence. Frames are written at \f$t_\text{start} + n\,\f$output_dt, and at
+   * the final time, interpolated within the step that reaches them (linearly).
+   *
+   * Only the FE part is integrated; a flow with variables throws. Serial only; the mesh adaptor is called
+   * before every step.
+   *
+   * @tparam LinearSolver solver for the Newton systems; see DefaultLinearSolver.
+   */
+  template <typename VectorType, typename SparseMatrixType, uint dim, template <typename...> typename LinearSolver>
   class TimeStepperImplicitEuler_impl : public AbstractTimestepper<VectorType, SparseMatrixType, dim>
   {
     static_assert(!is_distributed_la<VectorType>,
@@ -32,17 +61,21 @@ namespace DiFfRG
     using Base::assembler, Base::data_out, Base::config, Base::adaptor;
 
     /// The public entry point, which handles snapshots and restarts; see AbstractTimestepper::run.
-
     using Base::run;
-    /// Forwards to the base with this stepper's kind. Not `using Base::Base;`: the base needs to
-    /// know which /timestepping/ section to read, and it cannot ask a virtual function for that
-    /// from inside its own constructor.
-    TimeStepperImplicitEuler_impl(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
+
+    // Not `using Base::Base;`: the base needs to know which /timestepping/ section to read, and it
+    // cannot ask a virtual function for that from inside its own constructor.
+
+    /// Construct without mesh adaptation; see AbstractTimestepper.
+    TimeStepperImplicitEuler_impl(const ConfigTree &config,
+                                  AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                                   OutputSession_impl<dim, VectorType> &data_out)
         : Base(config, assembler, data_out, /*implicit=*/true, /*explicit=*/false)
     {
     }
-    TimeStepperImplicitEuler_impl(const ConfigTree &config, AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
+    /// Construct with a mesh adaptor; see AbstractTimestepper.
+    TimeStepperImplicitEuler_impl(const ConfigTree &config,
+                                  AbstractAssembler<VectorType, SparseMatrixType, dim> &assembler,
                                   OutputSession_impl<dim, VectorType> &data_out, AbstractAdaptor<VectorType> &adaptor)
         : Base(config, assembler, data_out, adaptor, /*implicit=*/true, /*explicit=*/false)
     {
@@ -51,6 +84,17 @@ namespace DiFfRG
 
     virtual void run_segment(AbstractFlowingVariables<NumberType, VectorType> &initial_condition, const double t_start,
                              const double t_stop) override;
+
+    // The interface TC_PI uses to control the step; valid only during run().
+
+    /// Weighted RMS norm of the local error estimate of the last attempted step (infinite if Newton failed).
+    double get_error() const { return error_estimate; }
+    /// Accept steps whose Newton iteration did not converge; see Newton::set_ignore_nonconv.
+    void set_ignore_nonconv(bool x) { ptr_newton->set_ignore_nonconv(x); }
+
+  private:
+    std::shared_ptr<Newton<VectorType>> ptr_newton;
+    double error_estimate = 0.;
   };
 
   // ##############################################################################
@@ -62,14 +106,10 @@ namespace DiFfRG
   // assembler would explode that set into one instantiation per model. Applications name the
   // assembler instead and let these aliases project it onto that fixed parameter list.
   //
-  // The argument is anything exposing VectorType, SparseMatrixType and dim -- an Assembler, or a
-  // Discretization where the assembler type is not a single type (e.g. a test that runs one
-  // discretization against several models).
-  //
-  // The solver defaults to DefaultLinearSolver, which follows the linear algebra: UMFPack when it
-  // is serial, a distributed direct solve when it is not. Note that <Assembler> and
-  // <Assembler, UMFPack> are *different types* even in a serial build -- see the comment on
-  // DefaultLinearSolver -- so both need their own explicit instantiation.
+  // Note that <Assembler> and <Assembler, UMFPack> are *different types* even in a serial build --
+  // see the comment on DefaultLinearSolver -- so both need their own explicit instantiation.
+
+  /// Backward-Euler timestepper for an assembler; see TimeStepperImplicitEuler_impl.
   template <typename Assembler, template <typename...> typename LinearSolver = DefaultLinearSolver>
   using TimeStepperImplicitEuler =
       TimeStepperImplicitEuler_impl<typename Assembler::VectorType, typename Assembler::SparseMatrixType,

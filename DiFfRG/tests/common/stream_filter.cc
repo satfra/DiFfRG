@@ -17,7 +17,7 @@ namespace
   std::string filtered(std::string_view input, std::string_view prefix = kokkos_arch_warning)
   {
     std::ostringstream sink;
-    LinePrefixFilter filter(sink.rdbuf(), prefix);
+    DiFfRG::internal::LinePrefixFilter filter(sink.rdbuf(), prefix);
     std::ostream out(&filter);
     for (const char c : input)
       out.put(c);
@@ -56,7 +56,7 @@ TEST_CASE("Nothing else is withheld", "[stream_filter]")
     // bytes have to be through the filter already. This is the one check that separates the
     // incremental filter from a line-buffering one -- do not let it be flushed first.
     std::ostringstream sink;
-    LinePrefixFilter filter(sink.rdbuf(), kokkos_arch_warning);
+    DiFfRG::internal::LinePrefixFilter filter(sink.rdbuf(), kokkos_arch_warning);
     std::ostream out(&filter);
 
     const std::string dying = "Kokkos::Cuda::initialize ERROR: about to abort";
@@ -96,7 +96,7 @@ TEST_CASE("The filter is removed when its scope ends", "[stream_filter]")
   std::ostringstream capture;
   std::streambuf *const original = std::cerr.rdbuf(capture.rdbuf());
   {
-    ScopedLineFilter guard(std::cerr, "drop me");
+    DiFfRG::internal::ScopedLineFilter guard(std::cerr, "drop me");
     std::cerr << "drop me, this is the warning\n" << "keep me\n" << std::flush;
   }
   std::cerr << "after the scope\n" << std::flush;

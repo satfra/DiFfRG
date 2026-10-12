@@ -176,3 +176,28 @@ TEST_CASE("Test stack row-major element access", "[interpolator]")
   for (size_t i = 0; i < in_data.size(); ++i)
     CHECK(interpolator[i] == in_data[i]);
 }
+
+TEST_CASE("Clamped spline stack reproduces a cubic on each row", "[interpolator]")
+{
+  DiFfRG::Init();
+
+  // Rows differ by a constant, so all share the end slopes passed to update().
+  const auto f = [](double x) { return x * x * x - 2. * x * x; };
+  const int m_size = 3;
+  const size_t n = 11;
+  const double T = 0.1;
+  std::vector<double> in_data(m_size * n);
+  for (int i = 0; i < m_size; ++i)
+    for (size_t j = 0; j < n; ++j)
+      in_data[i * n + j] = f(double(j)) + i;
+  LinearCoordinates1D<double> radial(n, 0., double(n - 1));
+  BosonicCoordinates1DFiniteT<int, double, LinearCoordinates1D<double>> coords(radial, 0, m_size, T);
+  SplineInterpolator1DStack<double, BosonicCoordinates1DFiniteT<int, double, LinearCoordinates1D<double>>>
+      interpolator(coords);
+  interpolator.update(in_data.data(), 0., 3. * 100. - 4. * 10.);
+
+  const double w = 2. * M_PI * T;
+  for (int i = 0; i < m_size; ++i)
+    for (const double x : {0.25, 3.25, 6.7, 9.9})
+      CHECK(is_close(interpolator(i * w, x), f(x) + i, 1e-10));
+}
