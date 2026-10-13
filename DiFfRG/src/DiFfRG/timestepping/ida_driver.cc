@@ -299,7 +299,25 @@ namespace DiFfRG
       }
     };
     // IDA's state at `stop`; with step_needs_restart, step by step so that every accepted step can be shown to it.
+    // A failure is retried once, from a cold restart at the last accepted state (see solve_dae's documentation).
     auto advance_to = [&](const double stop) {
+      bool retried = false;
+      auto retry_or_fail = [&](const int status) {
+        if (status >= 0) return false;
+        if (retried || (status != IDA_CONV_FAIL && status != IDA_ERR_FAIL)) fail_if(status);
+        retried = true;
+        // On these failures IDA returns its last accepted state at t.
+        check(IDAGetCurrentTime(ida_mem, &t), "IDAGetCurrentTime");
+        if (warn) {
+          std::ostringstream message;
+          message << std::setprecision(10) << "IDA failed at t = " << t << " (" << IDAGetReturnFlagName(status)
+                  << "); restarting it cold there, once";
+          warn(message.str());
+        }
+        if (before_retry) before_retry(t, solution);
+        reset(t, prm.initial_step_size, solution, solution_dot, true);
+        return true;
+      };
       auto yy = make_nvector_view(solution, ctx);
       auto yp = make_nvector_view(solution_dot, ctx);
       if (step_needs_restart) {
@@ -308,16 +326,23 @@ namespace DiFfRG
         do {
           status = IDASolve(ida_mem, stop, &t, yy, yp, IDA_ONE_STEP);
           handle_pending_exception();
-          fail_if(status);
+          if (retry_or_fail(status)) {
+            check(IDASetStopTime(ida_mem, stop), "IDASetStopTime");
+            continue;
+          }
           if (step_needs_restart(t, solution, solution_dot)) {
             // The flow is discontinuous at t: IDA starts over without its step history.
             reset(t, prm.initial_step_size, solution, solution_dot, true);
             check(IDASetStopTime(ida_mem, stop), "IDASetStopTime");
           }
         } while (status != IDA_TSTOP_RETURN && t < stop);
-      } else
-        fail_if(IDASolve(ida_mem, stop, &t, yy, yp, IDA_NORMAL));
-      handle_pending_exception();
+      } else {
+        int status = 0;
+        do {
+          status = IDASolve(ida_mem, stop, &t, yy, yp, IDA_NORMAL);
+          handle_pending_exception();
+        } while (retry_or_fail(status));
+      }
       check(IDAGetLastStep(ida_mem, &h), "IDAGetLastStep");
     };
     // The first multiple of restart_check_period (counted from the initial time) after t.

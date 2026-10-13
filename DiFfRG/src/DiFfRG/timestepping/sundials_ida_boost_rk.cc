@@ -73,6 +73,7 @@ namespace DiFfRG
 
     // Create the IDA integrator for spatial data
     IDADriver<VectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt, adaptor.adaptation_period()));
+    time_stepper.warn = [&](const std::string &message) { this->log.warn(message); };
 
     // Initialize initial condition
     VectorType spatial_y = initial_data.block(0);

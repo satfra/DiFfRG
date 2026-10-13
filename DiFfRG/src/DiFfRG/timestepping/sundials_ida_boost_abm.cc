@@ -70,6 +70,7 @@ namespace DiFfRG
 
     // Create the IDA integrator for spatial data
     IDADriver<VectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt, adaptor.adaptation_period()));
+    time_stepper.warn = [&](const std::string &message) { this->log.warn(message); };
 
     // Initialize initial condition
     VectorType spatial_y = initial_data.block(0);
@@ -531,6 +532,16 @@ namespace DiFfRG
       }
     };
 
+    // [STAGGER] The fading offset that keeps the served v(t) continuous when the buffer advances (see serve_variables).
+    VectorType v_served = variable_y, serve_offset = variable_y;
+    serve_offset = 0.;
+    double t_served = 0., served_front = 0., t_offset = 0., offset_width = 0.;
+    bool have_served = false;
+    auto offset_weight = [&](const double t) {
+      return offset_width > 0. ? std::clamp(1. - (t - t_offset) / offset_width, 0., 1.) : 0.;
+    };
+    auto have_offset_at = [&](const double t) { return offset_weight(t) > 0.; };
+
     // Serve v(t) to IDA. All three modes are independent of IDA's spatial trial state, so repeated
     // Newton iterations at the same trial endpoint (and retries after rejection) all see
     // the same v(t) -- which is what keeps Newton convergent when the FEM source reads v.
@@ -548,6 +559,29 @@ namespace DiFfRG
           eval_predictor(variable_ret, t);
           eigen_to_dealii(variable_ret, variable_y);
         }
+        // When the buffer has advanced since the last query, the curve served from now on differs from the one IDA
+        // was served before by the error of the extrapolation it replaces -- a jump in v(t) that IDA's step history
+        // cannot follow (it is large where v bends strongly, e.g. right after a restart). The difference at the last
+        // query is kept and faded out over half a step, so that the served v(t) stays continuous; a faster fade is
+        // itself a rapid change of v that IDA has to follow.
+        if (have_served && !is_close(variable_buffer_times.back(), served_front)) {
+          VectorType new_at_last(variable_y);
+          if (t_served <= variable_buffer_times.back() || is_close(t_served, variable_buffer_times.back()))
+            interpolate_buffer(new_at_last, t_served);
+          else {
+            eval_predictor(variable_ret, t_served);
+            eigen_to_dealii(variable_ret, new_at_last);
+          }
+          serve_offset = v_served;
+          serve_offset -= new_at_last;
+          t_offset = t_served;
+          offset_width = 0.5 * cur_dt;
+        }
+        if (have_offset_at(t)) variable_y.add(offset_weight(t), serve_offset);
+        served_front = variable_buffer_times.back();
+        t_served = t;
+        v_served = variable_y;
+        have_served = true;
       } else if (mode_predict) {
         serve_lookahead(variable_y, t);
       } else {
@@ -720,10 +754,33 @@ namespace DiFfRG
       return false;
     };
 
+    // Start the explicit side over at t, with the variables in variable_y: they are committed at t, and the Adams
+    // history, the spatial checkpoints and the predictor slope, which would reach back across t, are dropped. The
+    // explicit steps then begin again with their Runge-Kutta start, which has no error estimate: with error control
+    // they begin at an eighth of the step and grow back, so that the first step does not cross the transient that
+    // usually follows a restart in one go. (In the stagger mode IDA is served an extrapolation from t until that
+    // step is taken, half a step later; replacing it by a step across a fast transient is a jump IDA cannot follow.)
+    auto restart_explicit_side = [&](const double t, const VectorType &sol) {
+      if (expl.error_control) cur_dt = std::max(base_dt / 8., expl.minimal_dt);
+      dealii_to_eigen(variable_y, variable_sol);
+      variable_buffer.assign(1, variable_sol);
+      variable_buffer_times.assign(1, t);
+      variable_stepper = decltype(variable_stepper){};
+      spatial_ckpt_times.assign(1, t);
+      spatial_ckpts.assign(1, sol);
+      spatial_lo = spatial_hi = spatial_pending = sol;
+      spatial_lo_time = spatial_hi_time = t;
+      t_committed = t_pending = frontier = t_accepted = t;
+      refresh_dv_committed_from_buffer();
+      have_prev_dv = false;
+      look_valid = false;
+      // A restart is a discontinuity on purpose: nothing to fade into.
+      have_served = false;
+      offset_width = 0.;
+    };
+
     // A model with a discontinuity in time asks for a restart at an accepted step (see HasNeedsRestart). IDA then
-    // restarts cold, and the explicit side starts over at t as well: the variables are committed at t, the Adams
-    // history, the spatial checkpoints and the predictor slope, all of which would reach across the discontinuity,
-    // are dropped, and the explicit steps begin again with their Runge-Kutta start.
+    // restarts cold, and the explicit side starts over at t as well.
     if (assembler.requests_restarts())
       time_stepper.step_needs_restart = [&](const double t, const VectorType &sol, const VectorType &) {
         // The variables at t as IDA was served them for this step, taken before the model is asked: it may change
@@ -731,22 +788,18 @@ namespace DiFfRG
         serve_variables(variable_y, t);
         restart_view.refresh(sol);
         if (!assembler.needs_restart(t, restart_view.get())) return false;
-        dealii_to_eigen(variable_y, variable_sol);
-        variable_buffer.assign(1, variable_sol);
-        variable_buffer_times.assign(1, t);
-        variable_stepper = decltype(variable_stepper){};
-        spatial_ckpt_times.assign(1, t);
-        spatial_ckpts.assign(1, sol);
-        spatial_lo = spatial_hi = spatial_pending = sol;
-        spatial_lo_time = spatial_hi_time = t;
-        t_committed = t_pending = frontier = t_accepted = t;
         // The slope after the discontinuity: the model has switched in needs_restart, so this reads the new flow.
-        refresh_dv_committed_from_buffer();
-        have_prev_dv = false;
-        look_valid = false;
+        restart_explicit_side(t, sol);
         this->log.info("Restarting the time integration at t = {:.6f} on the model's request", t);
         return true;
       };
+
+    // IDA retries a failed step from a cold restart (IDADriver::solve_dae); the explicit side starts over with it, as
+    // the variables it served may be what IDA's step history no longer fits.
+    time_stepper.before_retry = [&](const double t, const VectorType &sol) {
+      serve_variables(variable_y, t);
+      restart_explicit_side(t, sol);
+    };
 
     time_stepper.differential_components = [&]() { return assembler.get_differential_indices(); };
 

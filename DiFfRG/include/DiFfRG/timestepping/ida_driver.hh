@@ -98,6 +98,11 @@ namespace DiFfRG
      * @brief Integrate from Parameters::initial_time to Parameters::final_time, starting from @p solution and
      * @p solution_dot, which hold the final state on return.
      *
+     * If IDA fails (no convergence or error test failures down to the minimal step), it is restarted once, cold, at
+     * its last accepted state, with a warning: a step history that no longer fits the residual (e.g. after the
+     * explicit variables of a hybrid stepper were updated) is a reason for that which a fresh start removes. A second
+     * failure before the next stop time (output, solver_should_restart() check, or the end) throws.
+     *
      * @return the number of steps since the last (re)initialization.
      */
     unsigned int solve_dae(VectorType &solution, VectorType &solution_dot);
@@ -139,6 +144,13 @@ namespace DiFfRG
      * Setting it makes IDA run step by step up to each output time instead of interpolating to it.
      */
     std::function<bool(const double t, const VectorType &sol, const VectorType &sol_dot)> step_needs_restart;
+
+    /// Optional: receives warnings, e.g. that a failed step was retried after a cold restart (see solve_dae()).
+    std::function<void(const std::string &message)> warn;
+
+    /// Optional: called before a failed step is retried from a cold restart at the last accepted state (t, sol), e.g.
+    /// so that a hybrid stepper restarts its explicit side there as well.
+    std::function<void(const double t, const VectorType &sol)> before_retry;
 
     /// The differential components; all others are algebraic and excluded from the error test.
     std::function<dealii::IndexSet()> differential_components;
