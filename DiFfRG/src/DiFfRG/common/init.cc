@@ -11,13 +11,17 @@
 // standard libraries
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 // external libraries
@@ -37,6 +41,53 @@ namespace DiFfRG
 {
   namespace
   {
+    class Watchdog
+    {
+    public:
+      static Watchdog &instance()
+      {
+        static Watchdog instance;
+        return instance;
+      }
+
+      void set_timeout(const std::chrono::milliseconds &_timeout) { this->timeout = _timeout; }
+
+      void start()
+      {
+        if (timeout.count() == 0) return;
+        thread = std::thread([this]() {
+          std::unique_lock<std::mutex> lock(mutex);
+          if (!cv.wait_for(lock, timeout, [this]() { return watchdog_cancel; })) {
+            std::cerr << "DiFfRG: wall-time limit reached, aborting." << std::endl;
+#ifdef HAVE_MPI
+            MPI_Abort(MPI_COMM_WORLD, 1);
+#else
+            std::abort();
+#endif
+          }
+        });
+      }
+
+      void stop()
+      {
+        {
+          std::lock_guard<std::mutex> lock(mutex);
+          watchdog_cancel = true;
+        }
+        cv.notify_all();
+        if (thread.joinable()) thread.join();
+      }
+
+    private:
+      Watchdog() = default;
+
+      std::chrono::milliseconds timeout{0};
+      std::thread thread;
+      std::mutex mutex;
+      std::condition_variable cv;
+      bool watchdog_cancel = false;
+    };
+
     /// Length of the PCI bus id string CUDA returns, e.g. "0000:65:00.0".
     constexpr int bus_id_len = 16;
 
@@ -530,6 +581,13 @@ namespace DiFfRG
           resolution.resolved ? resolution.threads
                               : tbb::global_control::active_value(tbb::global_control::max_allowed_parallelism);
 
+      // Install a watchdog that will abort the run if it runs for longer than an optionally configured timeout.
+      const size_t timeout_minutes = config.get_uint("/timestepping/timeout_minutes", 0);
+      if (timeout_minutes > 0) {
+        Watchdog::instance().set_timeout(std::chrono::minutes(timeout_minutes));
+        Watchdog::instance().start();
+      }
+
       // We initialize every library that deal.II's MPI_InitFinalize would, *except* Kokkos, and then
       // hand the Kokkos lifecycle to deal.II via ensure_kokkos_initialized() below. The reason is a
       // teardown-ordering bug:
@@ -553,6 +611,7 @@ namespace DiFfRG
 
       std::atexit([]() {
         if (initialized) {
+          Watchdog::instance().stop();
           // Finalizes MPI/PETSc/... (but not Kokkos, which deal.II finalizes via its own atexit hook
           // registered by ensure_kokkos_initialized()).
           delete Init::mpi_initialization;

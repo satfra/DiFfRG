@@ -74,6 +74,7 @@ Only used if `main` passes an `HAdaptivity` to the timestepper (see [Tutorial 7]
 | --- | --- | --- | --- |
 | `output_dt` | double | 0.1 | RG-time interval between output frames. |
 | `final_time` | double | — | Not read by the library; by convention the end time applications pass to `run()`. |
+| `timeout_minutes` | uint | 0 | Wall-time limit in minutes, counted from `DiFfRG::Init`; 0 disables it. When it is exceeded, the run is aborted on all ranks without writing a final snapshot. |
 
 ### `/timestepping/implicit`
 
@@ -88,7 +89,7 @@ Read by IDA, implicit Euler, TR-BDF2 and the FE part of the IDA hybrids.
 | `maximal_dt` | double | 1 | Largest step. |
 | `max_non_linear_iterations` | uint | 3 | Newton iterations per IDA step attempt. |
 | `iterative_refinement` | bool | true | Refine every `UMFPack` solve iteratively. |
-| `local_tolerance_refresh` | double | 4 | For models with per-dof tolerances: IDA adopts new tolerances when one would be tighter than the current one by more than this factor. |
+| `local_tolerance_refresh` | double | 4 | For models with per-dof tolerances: IDA adopts new tolerances when one would be tighter or looser than the current one by more than this factor. |
 | `jacobian_diagnostics` | bool | false | Write `<run>_jacobian_diagnostics.csv`, see [Output](output.md#diagnostics). |
 
 Debugging aids for IDA, all off by default: `ida_callback_trace` (print every failed callback at verbosity ≥ 5,
