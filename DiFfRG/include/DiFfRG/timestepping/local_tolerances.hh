@@ -17,10 +17,9 @@ namespace DiFfRG
    * @brief Per-dof absolute tolerances for SUNDIALS IDA, taken from AbstractAssembler::local_abs_tolerances.
    *
    * IDA reads absolute tolerances only when it is (re)initialised. Model tolerances may depend on the state, so
-   * the stepper asks refresh_needed() at every output time, from IDADriver::solver_should_restart: when some
-   * dof needs a tolerance tighter than the one IDA uses by more than the factor
-   * /timestepping/implicit/local_tolerance_refresh, the new set is adopted and IDA restarts warm (it keeps the last
-   * step size). Models should give tolerances that vary smoothly with the state, or every sign change of a scale
+   * the stepper asks refresh_needed() at every restart check, from IDADriver::solver_should_restart: when some
+   * dof's tolerance differs from the one IDA uses by more than the factor /timestepping/implicit/local_tolerance_refresh,
+   * in either direction, the new set is adopted and IDA restarts warm (it keeps the last step size). Models should give tolerances that vary smoothly with the state, or every sign change of a scale
    * forces a restart.
    */
   template <typename VectorType, typename SparseMatrixType, uint dim> class LocalAbsTolerances
@@ -40,9 +39,9 @@ namespace DiFfRG
     }
 
     /**
-     * True if the tolerances for `solution` ask for more accuracy than the ones IDA uses, by more than the refresh
-     * factor on some dof; the new set is then adopted. A tolerance that has merely become looser than needed is
-     * kept: it costs steps, not accuracy, and every restart drops IDA back to order 1 with a fresh Jacobian.
+     * True if the tolerances for `solution` differ from the ones IDA uses by more than the refresh factor on some
+     * dof, tighter or looser; the new set is then adopted. The factor keeps small drifts from restarting IDA, which
+     * drops it back to order 1 with a fresh Jacobian.
      */
     bool refresh_needed(const VectorType &solution)
     {
@@ -51,7 +50,7 @@ namespace DiFfRG
       bool drifted = candidate.size() != atol.size();
       if (!drifted)
         for (const auto i : atol.locally_owned_elements())
-          if (candidate(i) * refresh < atol(i)) {
+          if (candidate(i) * refresh < atol(i) || candidate(i) > refresh * atol(i)) {
             drifted = true;
             break;
           }

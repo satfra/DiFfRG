@@ -136,8 +136,8 @@ namespace DiFfRG
      *
      * Instead of the uniform `/timestepping/implicit/abs_tol`, a model can set one absolute tolerance per dof through
      * the hook `abs_tolerances` (def::HasAbsTolerances), useful when components live on very different scales. The
-     * tolerances may depend on the state; the IDA steppers re-read them when some dof needs a tolerance tighter by more
-     * than the factor `/timestepping/implicit/local_tolerance_refresh`.
+     * tolerances may depend on the state; the IDA steppers re-read them when some dof's tolerance has changed by more
+     * than the factor `/timestepping/implicit/local_tolerance_refresh`, in either direction.
      *
      * @param atol Output; sized and filled when the function returns true.
      * @param solution The current spatial solution.
