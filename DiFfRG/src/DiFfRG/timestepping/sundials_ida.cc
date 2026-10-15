@@ -261,7 +261,8 @@ namespace DiFfRG
         jacobian_diagnostics_enabled ? data_out.diagnostic_port() : DiagnosticPort{};
 
     // Create the IDA integrator
-    IDADriver<VectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt, adaptor.adaptation_period()));
+    IDADriver<VectorType> time_stepper(
+        internal::ida_parameters(impl, t_start, t_stop, output_dt, adaptor.adaptation_period()));
     time_stepper.warn = [&](const std::string &message) { this->log.warn(message); };
 
     // Define some variables for monitoring
@@ -619,7 +620,8 @@ namespace DiFfRG
         jacobian_diagnostics_enabled ? data_out.diagnostic_port() : DiagnosticPort{};
 
     // Create the IDA integrator
-    IDADriver<BlockVectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt, adaptor.adaptation_period()));
+    IDADriver<BlockVectorType> time_stepper(
+        internal::ida_parameters(impl, t_start, t_stop, output_dt, adaptor.adaptation_period()));
     time_stepper.warn = [&](const std::string &message) { this->log.warn(message); };
 
     // Define some variables for monitoring
@@ -996,7 +998,8 @@ namespace DiFfRG
         jacobian_diagnostics_enabled ? data_out.diagnostic_port() : DiagnosticPort{};
 
     // Create the IDA integrator
-    IDADriver<VectorType> time_stepper(internal::ida_parameters(impl, t_start, t_stop, output_dt, adaptor.adaptation_period()));
+    IDADriver<VectorType> time_stepper(
+        internal::ida_parameters(impl, t_start, t_stop, output_dt, adaptor.adaptation_period()));
     time_stepper.warn = [&](const std::string &message) { this->log.warn(message); };
 
     // Define some variables for monitoring

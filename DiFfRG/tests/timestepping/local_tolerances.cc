@@ -142,24 +142,24 @@ TEST_CASE("LDG local tolerances sit at each dof's support point", "[timestepping
   }
   REQUIRE(negative_seen);
 
-  SECTION("refresh only on a tightening beyond the refresh factor")
+  SECTION("refresh only on a change beyond the refresh factor, in either direction")
   {
     const auto initial = tol.get();
-    auto looser = u;
-    looser *= 10.;
-    REQUIRE_FALSE(tol.refresh_needed(looser));
-    auto slightly_tighter = u;
-    slightly_tighter *= 0.5;
-    REQUIRE_FALSE(tol.refresh_needed(slightly_tighter));
+    for (const double factor : {0.5, 2.}) {
+      auto slightly_changed = u;
+      slightly_changed *= factor;
+      REQUIRE_FALSE(tol.refresh_needed(slightly_changed));
+    }
     for (uint i = 0; i < u.size(); ++i)
       REQUIRE(tol.get()[i] == initial[i]);
 
-    auto much_tighter = u;
-    much_tighter *= 0.1;
-    REQUIRE(tol.refresh_needed(much_tighter));
+    const double factor = GENERATE(0.1, 10.);
+    auto much_changed = u;
+    much_changed *= factor;
+    REQUIRE(tol.refresh_needed(much_changed));
     for (uint i = 0; i < u.size(); ++i)
       REQUIRE(tol.get()[i] ==
-              Catch::Approx(expected(model_tolerance(0, support[i][0], much_tighter[i]))).epsilon(1e-12));
+              Catch::Approx(expected(model_tolerance(0, support[i][0], much_changed[i]))).epsilon(1e-12));
   }
 }
 
