@@ -44,11 +44,18 @@ namespace DiFfRG
   class MapCompletion
   {
   public:
-    /// A staged result still to be copied: `bytes` bytes from `src` to `dst`.
+    /**
+     * @brief A staged result still to be copied: `bytes` bytes from `src` to `dst`.
+     *
+     * With `src_stride` > 0 the source is strided: element i (of `elem` bytes) is read from
+     * `src + i * src_stride`. That is how one component of a MultiValue result reaches its destination.
+     */
     struct PendingCopy {
       void *dst;
       const void *src;
       size_t bytes;
+      size_t elem = 0;
+      size_t src_stride = 0;
     };
 
     /**
@@ -57,6 +64,28 @@ namespace DiFfRG
     static void record(void *dst, const void *src, const size_t bytes)
     {
       pending().push_back(PendingCopy{dst, src, bytes});
+    }
+
+    /**
+     * @brief Register a strided device->host result: `n` elements of `elem` bytes, read from `src` with a
+     * stride of `src_stride` bytes and written contiguously to `dst`.
+     */
+    static void record_strided(void *dst, const void *src, const size_t n, const size_t elem, const size_t src_stride)
+    {
+      pending().push_back(PendingCopy{dst, src, n * elem, elem, src_stride});
+    }
+
+    /// Perform one pending copy.
+    static void land(const PendingCopy &c)
+    {
+      if (c.src_stride == 0) {
+        std::memcpy(c.dst, c.src, c.bytes);
+        return;
+      }
+      char *dst = static_cast<char *>(c.dst);
+      const char *src = static_cast<const char *>(c.src);
+      for (size_t i = 0, n = c.bytes / c.elem; i < n; ++i)
+        std::memcpy(dst + i * c.elem, src + i * c.src_stride, c.elem);
     }
 
     /**
@@ -105,7 +134,7 @@ namespace DiFfRG
       Kokkos::fence("DiFfRG::MapCompletion::flush");
       auto &p = pending();
       for (const auto &c : p)
-        std::memcpy(c.dst, c.src, c.bytes);
+        land(c);
       p.clear();
       MapScheduler::instance().complete();
     }

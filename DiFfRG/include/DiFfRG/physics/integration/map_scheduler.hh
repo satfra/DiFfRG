@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -248,7 +249,8 @@ namespace DiFfRG
      * from rank-local state instead is the one way to deadlock this design.
      *
      * @param integrator_id stable, construction-order id of the calling integrator
-     * @param dest base of the caller's destination array (unoffset)
+     * @param dests bases of the caller's destination arrays (unoffset), one per output of the map; every
+     *        destination receives the same slice of the grid
      * @param elem_size sizeof one result element
      * @param grid_size number of external grid points, G
      * @param quadrature_volume points per integral, Q
@@ -261,8 +263,16 @@ namespace DiFfRG
      *        slices are charged to. An explicit user override (DIFFRG_MAP_QUANTUM or
      *        /integration/map_quantum) replaces the threshold, but never the resource.
      */
+    MapSlice schedule(size_t integrator_id, std::span<void *const> dests, size_t elem_size, size_t grid_size,
+                      size_t quadrature_volume, bool splittable, MapTarget target);
+
+    /// schedule() for a map with a single destination array.
     MapSlice schedule(size_t integrator_id, void *dest, size_t elem_size, size_t grid_size, size_t quadrature_volume,
-                      bool splittable, MapTarget target);
+                      bool splittable, MapTarget target)
+    {
+      return schedule(integrator_id, std::span<void *const>(&dest, 1), elem_size, grid_size, quadrature_volume,
+                      splittable, target);
+    }
 
     /// Whether the open plan already contains a map() from this integrator. Used in place of a
     /// rank-local "is a result still staged" test, which ranks would answer differently.
@@ -332,7 +342,7 @@ namespace DiFfRG
   private:
     struct Entry {
       size_t integrator_id;
-      void *dest;
+      std::vector<void *> dests;
       size_t elem_size;
       size_t grid_size;
       MapResource resource;

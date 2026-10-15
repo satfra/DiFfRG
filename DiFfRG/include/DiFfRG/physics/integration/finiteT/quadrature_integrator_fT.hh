@@ -602,6 +602,15 @@ namespace DiFfRG
       run_map_points(dest, PointArg<internal::point_arg_value_t<A>>(args)...);
     }
 
+    /// map_points() for a kernel returning MultiValue<T, N>: component j of every integral lands in `dest[j]`.
+    template <typename OT, size_t N, typename... A>
+      requires(internal::is_map_result<MultiValue<OT, N>, NT> &&
+               internal::accepts_args<NT, KERNEL, ctype, dim, internal::point_arg_value_t<A>...>)
+    void map_points(const std::array<PointSpan<OT>, N> &dest, const A &...args)
+    {
+      run_map_points(dest, PointArg<internal::point_arg_value_t<A>>(args)...);
+    }
+
     /// How a device map_points() distributes its work; see MapPointsPolicy.
     void set_map_points_policy(const MapPointsPolicy policy) { m_map_points_policy = policy; }
 
@@ -706,6 +715,24 @@ namespace DiFfRG
       return space;
     }
 
+    /// map() for a kernel returning MultiValue<T, N>: component j of every integral lands in `dest[j]`.
+    template <typename OT, size_t N, typename Coordinates, typename... Args>
+      requires internal::is_map_result<MultiValue<OT, N>, NT>
+    auto map(const std::array<OT *, N> &dest, const Coordinates &coordinates, const Args &...args)
+    {
+      internal::scheduled_map<ExecutionSpace>(integrator_id(), quadrature_volume(), dest, coordinates,
+                                              [&](const auto &d, const auto &c) { this->map_dist(d, c, args...); });
+      return space;
+    }
+
+    /// map() into MultiValue destinations given as a braced list: `map({&a[0], &b[0]}, coordinates, args...)`.
+    template <typename OT, size_t N, typename Coordinates, typename... Args>
+      requires internal::is_map_result<MultiValue<OT, N>, NT>
+    auto map(OT *const (&dest)[N], const Coordinates &coordinates, const Args &...args)
+    {
+      return map(std::to_array(dest), coordinates, args...);
+    }
+
     /// map() without the MapScheduler: computes the whole of `coordinates` on this rank.
     template <typename OT, typename Coordinates, typename... Args>
     auto map_dist(OT *dest, const Coordinates &coordinates, const Args &...args)
@@ -716,10 +743,20 @@ namespace DiFfRG
       return space;
     }
 
-  private:
-    template <typename OT, typename... T> void run_map_points(const PointSpan<OT> dest, const PointArg<T> &...args)
+    /// map_dist() for MultiValue destinations.
+    template <typename OT, size_t N, typename Coordinates, typename... Args>
+    auto map_dist(const std::array<OT *, N> &dest, const Coordinates &coordinates, const Args &...args)
     {
-      const size_t n = dest.size();
+      internal::staged_map(
+          space, m_staging.template get<MultiValue<OT, N>>(), dest, coordinates.size(),
+          [this, coordinates, args...](const auto &view) { this->map(this->space, view, coordinates, args...); });
+      return space;
+    }
+
+  private:
+    template <typename Dest, typename... T> void run_map_points(const Dest &dest, const PointArg<T> &...args)
+    {
+      const size_t n = internal::point_count(dest);
       if (n == 0) return;
       constexpr bool handles = internal::takes_handles<NT, KERNEL, ctype, dim, T...>;
       internal::check_kernel_precision<handles, ctype, T...>();
@@ -1007,10 +1044,23 @@ namespace DiFfRG
       internal::map_points_by_get(*this, dest, PointArg<internal::point_arg_value_t<A>>(args)...);
     }
 
-    /// map() without MPI distribution: computes all of @p coordinates on this rank and waits for the result.
-    template <typename OT, typename Coordinates, typename... Args>
-      requires internal::is_map_result<OT, NT>
-    void map(execution_space &, OT *dest, const Coordinates &coordinates, const Args &...args)
+    /// See QuadratureIntegrator_fT::map_points for MultiValue results.
+    template <typename OT, size_t N, typename... A>
+      requires(internal::is_map_result<MultiValue<OT, N>, NT> &&
+               internal::accepts_args<NT, KERNEL, ctype, dim, internal::point_arg_value_t<A>...>)
+    void map_points(const std::array<PointSpan<OT>, N> &dest, const A &...args) const
+    {
+      internal::map_points_by_get(*this, dest, PointArg<internal::point_arg_value_t<A>>(args)...);
+    }
+
+    /**
+     * @brief map() without MPI distribution: computes all of @p coordinates on this rank and waits for the result.
+     *
+     * @p dest is a pointer, or a std::array of pointers for a kernel returning MultiValue.
+     */
+    template <typename Dest, typename Coordinates, typename... Args>
+      requires internal::is_map_result<internal::map_dest_result_t<Dest>, NT>
+    void map(execution_space &, const Dest &dest, const Coordinates &coordinates, const Args &...args)
     {
       // Handles once here rather than per point in get().
       constexpr bool handles = internal::map_takes_handles<NT, KERNEL, ctype, dim, Coordinates, Args...>;
@@ -1026,23 +1076,25 @@ namespace DiFfRG
         for (uint idx = r.begin(); idx != r.end(); ++idx) {
           const auto dis_idx = coordinates.from_linear_index(idx);
           const auto pos = coordinates.forward(dis_idx);
+          internal::map_dest_result_t<Dest> result;
           // nested packs rather than tuple_cat, which would copy every argument per point
           device::apply(
               [&](const auto &...pargs) {
-                device::apply([&](const auto &...iargs) { get(dest[idx], pargs..., iargs...); }, m_args);
+                device::apply([&](const auto &...iargs) { get(result, pargs..., iargs...); }, m_args);
               },
               pos);
+          internal::store_result(dest, idx, result);
         }
       });
     }
 
-    /// See QuadratureIntegrator_fT::map.
-    template <typename OT, typename Coordinates, typename... Args>
-      requires internal::is_map_result<OT, NT>
-    auto map(OT *dest, const Coordinates &coordinates, const Args &...args)
+    /// See QuadratureIntegrator_fT::map; @p dest is a pointer, or a std::array of pointers for a MultiValue kernel.
+    template <typename Dest, typename Coordinates, typename... Args>
+      requires internal::is_map_result<internal::map_dest_result_t<Dest>, NT>
+    auto map(const Dest &dest, const Coordinates &coordinates, const Args &...args)
     {
       internal::scheduled_map<execution_space>(this->integrator_id(), Base::quadrature_volume(), dest, coordinates,
-                                               [&](auto *d, const auto &c) {
+                                               [&](const auto &d, const auto &c) {
                                                  // tbb::parallel_for writes straight into `dest`, so there is nothing
                                                  // to stage.
                                                  internal::run_or_queue_host([this, d, c, args...]() {
@@ -1052,6 +1104,14 @@ namespace DiFfRG
                                                  if (!MapCompletion::deferral_enabled()) MapCompletion::flush();
                                                });
       return execution_space();
+    }
+
+    /// See QuadratureIntegrator_fT::map with a braced list of MultiValue destinations.
+    template <typename OT, size_t N, typename Coordinates, typename... Args>
+      requires internal::is_map_result<MultiValue<OT, N>, NT>
+    auto map(OT *const (&dest)[N], const Coordinates &coordinates, const Args &...args)
+    {
+      return map(std::to_array(dest), coordinates, args...);
     }
 
   protected:
