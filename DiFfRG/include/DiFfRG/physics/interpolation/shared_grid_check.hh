@@ -29,8 +29,8 @@ namespace DiFfRG
    *
    * Generated kernels with "SharedGrids" compute the coordinate transform of a lookup once and reuse it for every
    * interpolator of the group (`f.at(f.index(x))`, then `g.at(...)` with the same index), which is only correct if
-   * the group really shares one grid. The generated map(), get() and map_points() call this in builds without
-   * NDEBUG, or with DIFFRG_CHECK_SHARED_GRIDS defined.
+   * the group really shares one grid. The generated map() and map_points() call this in builds without NDEBUG,
+   * or with DIFFRG_CHECK_SHARED_GRIDS defined.
    *
    * @param names the interpolators' names, for the error message
    */

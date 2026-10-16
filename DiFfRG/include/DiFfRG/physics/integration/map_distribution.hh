@@ -128,8 +128,8 @@ namespace DiFfRG
     /**
      * @brief Cost of a map() with @p n outputs relative to one with a single output, for MapScheduler.
      *
-     * Each extra projection of the same loop measured +25--30 % on an RTX 4070 (lambda4L groups of 1--3), not
-     * +100 %: the shared part of the integrand dominates.
+     * Each extra projection of the same loop adds about 27 % of a single-output map (measured on a GPU), not
+     * 100 %: the shared part of the integrand dominates. Applied to host execution spaces as well.
      */
     inline double multi_output_cost(const size_t n) { return 1. + 0.27 * double(n - 1); }
 

@@ -86,7 +86,8 @@ AUMPTestCase["SharedGrids shares the coordinate transform and checks the grid", 
         AUMPCHECK[containsAll[files["CT_map_1.cc"], {
             "#if !defined(NDEBUG) || defined(DIFFRG_CHECK_SHARED_GRIDS)",
             "DiFfRG::check_shared_grid(\"ZA, ZB\", ZA, ZB);"}]];
-        AUMPCHECK[StringContainsQ[files["CT_get.cc"], "DiFfRG::check_shared_grid(\"ZA, ZB\", ZA, ZB);"]];
+        (* not in get(), which is often called per point *)
+        AUMPCHECK[StringFreeQ[files["CT_get.cc"], "check_shared_grid"]];
     ];
 ];
 
