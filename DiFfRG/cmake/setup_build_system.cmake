@@ -295,7 +295,27 @@ endif()
 
 # Find deal.II
 diffrg_find_package(deal.II VERSION 9.4.2 HINTS ${BUNDLED_DIR})
-deal_ii_initialize_cached_variables()
+# Not deal_ii_initialize_cached_variables(): with a Release-only deal.II it forces CMAKE_BUILD_TYPE to Release, so a
+# Debug build silently compiled with -O3 -DNDEBUG. A Debug (or RelWithDebInfo) build links the Release deal.II
+# instead; it does not define deal.II's DEBUG, so headers and library agree.
+if(NOT DEAL_II_BUILD_TYPE MATCHES "Debug")
+  foreach(_target dealii::dealii dealii::dealii_release)
+    if(TARGET ${_target})
+      set_target_properties(
+        ${_target} PROPERTIES MAP_IMPORTED_CONFIG_DEBUG Release MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
+                              MAP_IMPORTED_CONFIG_MINSIZEREL Release)
+    endif()
+  endforeach()
+  # The Release deal.II exports NDEBUG to its consumers, which would turn the asserts of a Debug build off again.
+  # deal.II's own headers key on DEBUG, not NDEBUG, so dropping it in Debug does not change what they compile to.
+  if(TARGET dealii::dealii_release)
+    get_target_property(_defs dealii::dealii_release INTERFACE_COMPILE_DEFINITIONS)
+    if(_defs)
+      list(TRANSFORM _defs REPLACE "^NDEBUG$" "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")
+      set_target_properties(dealii::dealii_release PROPERTIES INTERFACE_COMPILE_DEFINITIONS "${_defs}")
+    endif()
+  endif()
+endif()
 message(STATUS "Found deal.II in  ${deal.II_DIR}")
 
 # ----------------------------------------------------------------------------
