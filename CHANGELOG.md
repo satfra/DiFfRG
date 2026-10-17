@@ -38,6 +38,9 @@
   data change advances a process-wide epoch (`physics/interpolation/data_epoch.hh`).
 - **Added:** compile definition `DIFFRG_MATSUBARA_SIGN_LOOP` evaluates the +-frequency pair as a loop, halving the
   code of finite-temperature kernels (for instruction-fetch-bound GPUs; off by default).
+- **Added:** Tutorial 9, momentum-dependent flows with NumTracer: installing NumTracer, `MakeNTKernelDiFfRG` and
+  `MakeNTKernelGroupDiFfRG`, and the codegen options for speed (kernel groups, `"SharedGrids"`, hoisting,
+  `"PointArguments"`), with a benchmark of each.
 - The four assemblers share one implementation of the EoM search, extractors, readouts, variables, constraints,
   mass matrix and timings (`internal::AssemblerCore`). Visible changes: the KT readouts see the unlimited
   3-point `"fe_hessians"` the KT extractors already saw (they were zero); KT reports the variables' residual time
