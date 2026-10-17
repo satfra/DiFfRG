@@ -3,6 +3,7 @@
 // DiFfRG
 #include <DiFfRG/common/kokkos.hh>
 #include <DiFfRG/common/math.hh>
+#include <DiFfRG/physics/interpolation/data_epoch.hh>
 #include <DiFfRG/physics/interpolation/interpolation_stencil.hh>
 #include <DiFfRG/physics/interpolation/interpolator_handle.hh>
 
@@ -147,6 +148,7 @@ namespace DiFfRG
      */
     template <typename NT2> void update(const NT2 *in_data)
     {
+      internal::bump_interpolator_data_epoch();
       // Host fill by memcpy/loop (complete on return), then one H2D copy on a named execution space instance: the
       // space-less deep_copy would fence every backend globally. The trailing fence lets the next update() refill
       // host_data without racing the copy.

@@ -54,6 +54,30 @@ namespace DiFfRG
         return int_prefactor * int_element * result;
       }
 
+      // Hoisted form (kernel_has_pre): forwarded, with the measure applied in post().
+      static constexpr bool has_pre = kernel_has_pre<KERNEL>;
+      static constexpr auto pre_reads = [] {
+        if constexpr (kernel_has_pre<KERNEL>)
+          return KERNEL::pre_reads;
+        else
+          return std::array<bool, 0>{};
+      }();
+
+      template <typename... T>
+      static KOKKOS_FORCEINLINE_FUNCTION auto pre(const ctype q, const ctype q0, const T &...t)
+        requires kernel_has_pre<KERNEL>
+      {
+        return KERNEL::pre(q, q0, t...);
+      }
+
+      template <typename PT, typename... T>
+      static KOKKOS_FORCEINLINE_FUNCTION NT post(const PT &P, const ctype q, const ctype q0, const T &...t)
+        requires kernel_has_pre<KERNEL>
+      {
+        using namespace DiFfRG::compute;
+        return int_prefactor * powr<sdim - 1>(q) * KERNEL::post(P, q, q0, t...);
+      }
+
       template <typename... T> static KOKKOS_FORCEINLINE_FUNCTION NT constant(const T &...t)
         requires provides_constant<NT, KERNEL, T...>
       {
