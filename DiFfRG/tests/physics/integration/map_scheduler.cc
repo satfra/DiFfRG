@@ -434,3 +434,44 @@ TEST_CASE("Multi-dimensional grids split, and the slices reproduce the base posi
                                 LinearCoordinates1D<double>(3, -1., 1.)));
   }
 }
+
+TEST_CASE("Maps with several destinations exchange every one of them", "[integration][mpi][scheduler]")
+{
+  // A MultiValue map writes the same slice of the grid into several arrays; mixed with plain maps in one batch.
+  // One rank has nothing to exchange; the scheduler is inactive there.
+  const uint n_ranks = GENERATE(2u, 3u, 5u);
+  constexpr size_t G = 64, n_dest[3] = {1, 3, 2};
+
+  Cluster cluster(n_ranks);
+  auto truth = [](const size_t f, const size_t j, const size_t i) { return 1000. * double(f) + 100. * j + double(i); };
+
+  // dest[p][f][j]: rank p's j-th destination array of flow f.
+  std::vector<std::vector<std::vector<std::vector<double>>>> dest(n_ranks);
+  for (uint p = 0; p < n_ranks; ++p) {
+    dest[p].resize(3);
+    for (size_t f = 0; f < 3; ++f)
+      dest[p][f].assign(n_dest[f], std::vector<double>(G, -1.));
+  }
+
+  for (size_t f = 0; f < 3; ++f)
+    for (uint p = 0; p < n_ranks; ++p) {
+      std::vector<void *> ptrs;
+      for (auto &d : dest[p][f])
+        ptrs.push_back(d.data());
+      const MapSlice s = cluster.raw[p]->schedule(f, std::span<void *const>(ptrs), sizeof(double), G, 6912, true,
+                                                  QUANTUM);
+      for (size_t j = 0; j < n_dest[f]; ++j)
+        for (size_t i = s.offset; i < s.offset + s.count; ++i)
+          dest[p][f][j][i] = truth(f, j, i);
+    }
+
+  cluster.exchange();
+
+  for (uint p = 0; p < n_ranks; ++p)
+    for (size_t f = 0; f < 3; ++f)
+      for (size_t j = 0; j < n_dest[f]; ++j)
+        for (size_t i = 0; i < G; ++i) {
+          INFO("rank " << p << ", flow " << f << ", destination " << j << ", point " << i);
+          CHECK(dest[p][f][j][i] == truth(f, j, i));
+        }
+}

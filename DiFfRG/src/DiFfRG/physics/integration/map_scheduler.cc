@@ -132,7 +132,7 @@ namespace DiFfRG
   NoMapsHere::~NoMapsHere() { no_maps_depth.fetch_sub(1, std::memory_order_relaxed); }
   bool NoMapsHere::active() { return no_maps_depth.load(std::memory_order_relaxed) > 0; }
 
-  MapSlice MapScheduler::schedule(const size_t integrator_id, void *dest, const size_t elem_size,
+  MapSlice MapScheduler::schedule(const size_t integrator_id, const std::span<void *const> dests, const size_t elem_size,
                                   const size_t grid_size, const size_t quadrature_volume, const bool splittable,
                                   const MapTarget target)
   {
@@ -184,7 +184,9 @@ namespace DiFfRG
       if (owners[j] == m_rank) mine = MapSlice{begin, end - begin};
     }
 
-    m_plan.push_back(Entry{integrator_id, dest, elem_size, grid_size, target.resource, owners});
+    m_plan.push_back(
+        Entry{integrator_id, std::vector<void *>(dests.begin(), dests.end()), elem_size, grid_size, target.resource,
+              owners});
     return mine;
   }
 
@@ -209,6 +211,7 @@ namespace DiFfRG
     mix(m_plan.size());
     for (const auto &e : m_plan) {
       mix(e.integrator_id);
+      mix(e.dests.size());
       mix(e.elem_size);
       mix(e.grid_size);
       mix(static_cast<uint64_t>(e.resource));
@@ -314,7 +317,8 @@ namespace DiFfRG
     for (const auto &e : m_plan)
       for (size_t j = 0; j < e.owners.size(); ++j)
         m_counts[e.owners[j]] += static_cast<int>(
-            (part(e.grid_size, e.owners.size(), j + 1) - part(e.grid_size, e.owners.size(), j)) * e.elem_size);
+            (part(e.grid_size, e.owners.size(), j + 1) - part(e.grid_size, e.owners.size(), j)) * e.elem_size *
+            e.dests.size());
 
     m_displs.assign(m_n_ranks, 0);
     size_t total = 0;
@@ -341,8 +345,10 @@ namespace DiFfRG
         if (e.owners[j] != m_rank) continue;
         const size_t begin = part(e.grid_size, r, j);
         const size_t bytes = (part(e.grid_size, r, j + 1) - begin) * e.elem_size;
-        std::memcpy(m_send.data() + off, static_cast<const char *>(e.dest) + begin * e.elem_size, bytes);
-        off += bytes;
+        for (const void *dest : e.dests) {
+          std::memcpy(m_send.data() + off, static_cast<const char *>(dest) + begin * e.elem_size, bytes);
+          off += bytes;
+        }
       }
     }
 
@@ -363,8 +369,10 @@ namespace DiFfRG
           if (e.owners[j] != p) continue;
           const size_t begin = part(e.grid_size, r, j);
           const size_t bytes = (part(e.grid_size, r, j + 1) - begin) * e.elem_size;
-          std::memcpy(static_cast<char *>(e.dest) + begin * e.elem_size, m_recv.data() + block, bytes);
-          block += bytes;
+          for (void *dest : e.dests) {
+            std::memcpy(static_cast<char *>(dest) + begin * e.elem_size, m_recv.data() + block, bytes);
+            block += bytes;
+          }
         }
       }
     }

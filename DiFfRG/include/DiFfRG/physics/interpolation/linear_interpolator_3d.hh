@@ -4,6 +4,7 @@
 #include "DiFfRG/common/utils.hh"
 #include <DiFfRG/common/kokkos.hh>
 #include <DiFfRG/common/math.hh>
+#include <DiFfRG/physics/interpolation/data_epoch.hh>
 #include <DiFfRG/physics/interpolation/interpolation_stencil.hh>
 #include <DiFfRG/physics/interpolation/interpolator_handle.hh>
 
@@ -237,6 +238,7 @@ namespace DiFfRG
      */
     template <typename NT2> void update(const NT2 *in_data)
     {
+      internal::bump_interpolator_data_epoch();
       // Filled element-wise: the views' storage layout need not be row-major. See
       // LinearInterpolator1D::update() for the copy and fence.
       for (size_t i = 0; i < sizes[0]; ++i)

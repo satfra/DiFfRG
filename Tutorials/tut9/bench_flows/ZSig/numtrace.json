@@ -1,0 +1,29 @@
+{
+  "class" : "ZSig_kernel",
+  "complex" : true,
+  "decorator" : "static KOKKOS_INLINE_FUNCTION",
+  "device" : true,
+  "gen_dir" : "../../gen",
+  "generated" : 1,
+  "generator" : "gen_zsig_num.cpp",
+  "kernels" : "kernels.hh",
+  "main_opt" : "-O1",
+  "maxw" : 0,
+  "maxw_b" : 0,
+  "name" : "ZSig",
+  "namespace" : "zsig",
+  "probe" : "probe_zsig.cpp",
+  "units" : 
+  [
+    "gen_zsig_num_u0.cpp",
+    "gen_zsig_num_u1.cpp",
+    "gen_zsig_num_u2.cpp",
+    "gen_zsig_num_u3.cpp",
+    "gen_zsig_num_u4.cpp",
+    "gen_zsig_num_u5.cpp",
+    "gen_zsig_num_u6.cpp",
+    "gen_zsig_num_u7.cpp"
+  ],
+  "verdict" : "numtrace_verdict.hh",
+  "verdict_macro" : "NT_ZSIG_VERDICT"
+}

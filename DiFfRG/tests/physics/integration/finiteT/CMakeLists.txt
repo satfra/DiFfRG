@@ -4,6 +4,9 @@
 
 setup_test(quadrature_integrator_fT.cc)
 setup_test(map_points_fT.cc)
+setup_test(multi_output_fT.cc)
+setup_test(hoisted_fT.cc)
+setup_test(hoisted_fT_signloop.cc)
 
 # ##############################################################################
 # Tests for derived integrators

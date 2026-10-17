@@ -4,6 +4,7 @@
 #include <DiFfRG/common/kokkos.hh>
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/discretization/coordinates/coordinates.hh>
+#include <DiFfRG/physics/interpolation/data_epoch.hh>
 #include <DiFfRG/physics/interpolation/interpolator_handle.hh>
 
 // std
@@ -213,6 +214,20 @@ namespace DiFfRG
     void update(const NT2 *in_data, const ctype lower_y1 = std::numeric_limits<ctype>::max(),
                 const ctype upper_y1 = std::numeric_limits<ctype>::max())
     {
+      // Identical data and end conditions leave the splines as they are: no rebuild, no copy to the device, and
+      // caches built from them (see data_epoch.hh) stay valid.
+      // Only for plain numbers: == on an autodiff value ignores its derivatives.
+      if (std::is_arithmetic_v<NT> && has_data && lower_y1 == last_y1[0] && upper_y1 == last_y1[1]) {
+        bool same = true;
+        for (size_t i = 0; i < sizes[0] && same; ++i)
+          for (size_t j = 0; j < sizes[1] && same; ++j)
+            same = host_values(i, j) == NT(in_data[i * sizes[1] + j]);
+        if (same) return;
+      }
+      has_data = true;
+      last_y1 = {lower_y1, upper_y1};
+      internal::bump_interpolator_data_epoch();
+
       // Copy values from input data (row-major)
       for (size_t i = 0; i < sizes[0]; ++i)
         for (size_t j = 0; j < sizes[1]; ++j)
@@ -327,6 +342,10 @@ namespace DiFfRG
     CoeffViewType device_coeffs;
     HostValueViewType host_values;
     HostCoeffViewType host_coeffs;
+
+    // What the last update() was given, so that an identical update can be skipped.
+    bool has_data = false;
+    device::array<ctype, 2> last_y1{};
 
     // The single-precision copy, allocated only if Twin::exists. Behind one host-side handle, so it
     // adds 24 B to this object, which kernels naming the interpolator type still receive in full.

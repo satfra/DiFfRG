@@ -39,11 +39,13 @@ appendKeyName[templateParameter_List, params_Association] :=
 appendKeyType::missingKey = "The key `1` is missing in the template parameters.";
 
 appendKeyType[templateParameter_List, params_Association, {}] :=
-    Module[{},
-        If[KeyExistsQ[params, "ComputeType"],
-            Append[templateParameter, ToString[params["ComputeType"]]],
-            Append[templateParameter, "double"]
-        ]
+    Module[{type},
+        type = If[KeyExistsQ[params, "ComputeType"], ToString[params["ComputeType"]], "double"];
+        (* a kernel group (MakeKernelGroup) returns one value per output *)
+        If[KeyExistsQ[params, "Outputs"],
+            type = "DiFfRG::MultiValue<" <> type <> ", " <> ToString[params["Outputs"]] <> ">"
+        ];
+        Append[templateParameter, type]
     ]
 
 appendKeyType[templateParameter_List, params_Association, ADReplacements_] :=

@@ -15,7 +15,18 @@ The options \"KernelReturnTransform\" and \"ConstantReturnTransform\" (default I
 The option \"ComputeType\" (default \"double\") is the value type the kernel is evaluated and integrated in: \"double\", \"float\", \"DiFfRG::complex<double>\" or \"DiFfRG::complex<float>\". With a float type the kernel, its literals and the integrator run in single precision, while map()/get() still write double results.
 The option \"MapPoints\" (default False) additionally emits map_points(dest, args...), which evaluates the integral at dest.size() points in one launch (dest is a DiFfRG::PointSpan); every argument is a DiFfRG::PointArg, i.e. a single value or one value per point (a DiFfRG::PointSpan or std::vector). A model's evaluate_batch calls this. Supported by the vacuum and finite-temperature integrators, not by the lattice ones.
 The lattice integrator \"Integrator\" -> \"DiFfRG::IntegratorLat\" with \"d\" -> 1..4 sums over the momenta of a periodic lattice; its \"IntegrationVariables\" are the momentum components {q0, ..., q(d-1)}, and the kernel must be even in every spatial component (and in q0 if q0_symmetric is set). It reads /integration/lattice/{N_t, N_s, a_t, a_s} and the optional q0_symmetric (default false) from the parameter file; d = 1 reads only N_t and a_t.
+The option \"SharedGrids\" lists groups of interpolator parameters that live on one coordinate grid, e.g. \"SharedGrids\" -> {{ZA, ZA3, ZA4}}. Lookups of a group with identical arguments then share the coordinate transform (one index(), then at() per interpolator). map() and map_points() check at run time that the group really shares one grid, in builds without NDEBUG or with DIFFRG_CHECK_SHARED_GRIDS.
 The option \"KernelTraits\" declares integrator traits on the emitted kernel class, as a list of names or name -> Boolean rules, e.g. \"KernelTraits\" -> {\"matsubara_finite_extent\"} or {\"matsubara_split\" -> True}. Each becomes a `static constexpr bool <name> = <value>;` member. \"MatsubaraEven\" stays a separate option because it carries a symbolic evenness check that a generic mechanism cannot.";
+
+MakeKernelGroup::usage = "MakeKernelGroup[{{kernelExpr1, constExpr1, \"output1\"}, {kernelExpr2, constExpr2, \"output2\"}, ...}, opts]
+Make one kernel that computes several integrals of the same loop at once, e.g. several projections of one diagram onto different tensor structures. The outputs share everything that is common to their integrands (lookups, propagators, subexpressions), which makes the group substantially cheaper than separate kernels. A member may also be given as {kernelExpr, \"output\"} (no constant).
+Takes the options of MakeKernel; all outputs share the parameters, integrator, coordinates and \"ComputeType\". \"KernelReturnTransform\" and \"ConstantReturnTransform\" may also be lists with one function per output.
+The generated <Name>_integrator returns a DiFfRG::MultiValue: map() takes one destination per output, e.g. flows.<Name>.map({&res[i], &res[j]}, coordinates, args...), get() a DiFfRG::MultiValue<double, N>&, and map_points() an array of PointSpans. The member output_names lists the outputs in order.
+Not available with \"AD\" -> True, the lattice integrators, \"SplitKernel\" or \"SeparateLookups\".";
+
+MakeKernelGroup::members = "MakeKernelGroup expects a list of at least two members {kernelExpr, constExpr, \"name\"} or {kernelExpr, \"name\"}, with distinct names.";
+
+MakeKernelGroup::unsupported = "MakeKernelGroup does not support `1`.";
 
 MakeKernel::Invalid = "The given arguments are invalid. See MakeKernel::usage";
 
@@ -156,14 +167,49 @@ kernelTraitMembers[traits_] :=
 
 (* Parameters of a map_points() method: the destination array, then every argument as a PointArg,
    so the caller decides per call which arguments vary between points. *)
-mapPointsParameters[returnType_String, args_List] :=
+mapPointsParameters[returnType_String, args_List, nOut_:None] :=
     Join[
-        {<|"Name" -> "dest", "Type" -> "DiFfRG::PointSpan<" <> returnType <> ">", "Const" -> True, "Reference" -> False|>}
+        {
+            If[nOut === None,
+                <|"Name" -> "dest", "Type" -> "DiFfRG::PointSpan<" <> returnType <> ">", "Const" -> True, "Reference" -> False|>
+                ,
+                <|"Name" -> "dest", "Type" -> "std::array<DiFfRG::PointSpan<" <> returnType <> ">, " <> ToString[nOut] <> ">", "Const" -> True, "Reference" -> True|>
+            ]
+        }
         ,
         Map[Merge[{#, <|"Type" -> "DiFfRG::PointArg<" <> #["Type"] <> ">", "Reference" -> True, "Const" -> True|>}, Last]&, args]
     ];
 
-Options[MakeKernel] = {"Coordinates" -> {}, "CoordinateArguments" -> {}, "IntegrationVariables" -> {}, "KernelDefinitions" -> $StandardKernelDefinitions, "Regulator" -> "DiFfRG::PolynomialExpRegulator", "RegulatorOpts" -> {"", ""}, "KernelBody" -> "", "KernelReturnType" -> "auto", "KernelReturnTransform" -> Identity, "ConstantBody" -> "", "ConstantReturnType" -> "auto", "ConstantReturnTransform" -> Identity, "Parameters" -> {}, "Name" -> "", "d" -> -1, "Integrator" -> "", "AD" -> False, "ComputeType" -> "double", "ctype" -> Automatic, "Device" -> "TBB", "Type" -> "double", "SplitKernel" -> False, "SeparateLookups" -> False, "Decorator" -> "static KOKKOS_FUNCTION", "MatsubaraEven" -> False, "KernelTraits" -> {}, "MapPoints" -> False};
+(* The run-time check that a "SharedGrids" group really shares one grid, for the bodies of map() and
+   map_points(); not get(), which is often called per point. Only the groups' members that are parameters
+   of this kernel count. *)
+sharedGridCheck[groups_List, paramNames_List] :=
+    Module[{names, checks},
+        names = Map[Select[Map[If[Head[#] === Symbol, SymbolName[#], ToString[#]]&, #], MemberQ[paramNames, #]&]&, groups];
+        checks = Map["DiFfRG::check_shared_grid(\"" <> StringRiffle[#, ", "] <> "\", " <> StringRiffle[#, ", "] <> ");\n"&,
+            Select[names, Length[#] > 1&]];
+        If[checks === {}, "", "#if !defined(NDEBUG) || defined(DIFFRG_CHECK_SHARED_GRIDS)\n" <> StringJoin[checks] <> "#endif\n"]
+    ];
+
+Options[MakeKernel] = {"Coordinates" -> {}, "CoordinateArguments" -> {}, "IntegrationVariables" -> {}, "KernelDefinitions" -> $StandardKernelDefinitions, "Regulator" -> "DiFfRG::PolynomialExpRegulator", "RegulatorOpts" -> {"", ""}, "KernelBody" -> "", "KernelReturnType" -> "auto", "KernelReturnTransform" -> Identity, "ConstantBody" -> "", "ConstantReturnType" -> "auto", "ConstantReturnTransform" -> Identity, "Parameters" -> {}, "Name" -> "", "d" -> -1, "Integrator" -> "", "AD" -> False, "ComputeType" -> "double", "ctype" -> Automatic, "Device" -> "TBB", "Type" -> "double", "SplitKernel" -> False, "SeparateLookups" -> False, "Decorator" -> "static KOKKOS_FUNCTION", "MatsubaraEven" -> False, "KernelTraits" -> {}, "MapPoints" -> False, "SharedGrids" -> {}};
+
+Options[MakeKernelGroup] = Options[MakeKernel];
+
+MakeKernelGroup[members_List, opts : OptionsPattern[]] :=
+    Module[{normalized},
+        normalized = Map[Replace[#, {{k_, n_String} :> {k, 0, n}, {k_, c_, n_String} :> {k, c, n}, _ :> $Failed}]&, members];
+        If[Length[members] < 2 || MemberQ[normalized, $Failed] || !DuplicateFreeQ[normalized[[All, 3]]],
+            Message[MakeKernelGroup::members];
+            Abort[]
+        ];
+        makeKernel[normalized[[All, 1]], normalized[[All, 2]], normalized[[All, 3]], opts]
+    ];
+
+MakeKernelGroup[___] :=
+    (
+        Message[MakeKernelGroup::members];
+        Abort[]
+    );
 
 MakeKernel[__] :=
     (
@@ -174,9 +220,14 @@ MakeKernel[__] :=
 MakeKernel[kernelExpr_, OptionsPattern[]] :=
     MakeKernel @@ (Join[{kernelExpr, 0}, Thread[Rule @@ {#, OptionValue[MakeKernel, #]}]& @ Keys[Options[MakeKernel]]]);
 
-MakeKernel[kernelExpr_, constExpr_, OptionsPattern[]] :=
-    Module[{expr, const, exec, kernel, constant, kernelClass, kernelHeader, integratorHeader, integratorCpp, integratorTemplateParams, tparams = <|"Name" -> "...t", "Type" -> "auto&&", "Reference" -> False, "Const" -> False|>, kernelDefs = OptionValue["KernelDefinitions"], coordinates = OptionValue["Coordinates"], getArgs = OptionValue["CoordinateArguments"], intVariables = OptionValue["IntegrationVariables"], preArguments, regulator, params, adSpecs, explParamAD, arguments, outputPath, sources, returnType, returnTypePointer, spec, parameters, parametersKernel, matsubaraEvenTrait, kernelTraits},
-        spec = Association @@ Thread[Rule @@ {#, OptionValue[MakeKernel, #]}]& @ Keys[Options[MakeKernel]];
+MakeKernel[kernelExpr_, constExpr_, opts : OptionsPattern[]] :=
+    makeKernel[kernelExpr, constExpr, None, opts];
+
+(* The body of MakeKernel and MakeKernelGroup. `outputs` is None for a single integral, otherwise the
+   output names of a group, with kernelExpr and constExpr lists of one expression per output. *)
+makeKernel[kernelExpr_, constExpr_, outputs_, OptionsPattern[MakeKernel]] :=
+    Module[{group = outputs =!= None, nOut, multiReturn, multiOpts, gridOpts, destParam, getDestType, gridCheck, sumUp, expr, const, exec, kernel, constant, kernelClass, kernelHeader, integratorHeader, integratorCpp, integratorTemplateParams, tparams = <|"Name" -> "...t", "Type" -> "auto&&", "Reference" -> False, "Const" -> False|>, kernelDefs = OptionValue["KernelDefinitions"], coordinates = OptionValue["Coordinates"], getArgs = OptionValue["CoordinateArguments"], intVariables = OptionValue["IntegrationVariables"], preArguments, regulator, params, adSpecs, explParamAD, arguments, outputPath, sources, returnType, returnTypePointer, spec, parameters, parametersKernel, matsubaraEvenTrait, kernelTraits},
+        spec = Association @@ Thread[Rule @@ {#, OptionValue[#]}]& @ Keys[Options[MakeKernel]];
         spec = resolveComputeType[spec];
         If[Not @ KernelSpecQ[spec],
             Message[MakeKernel::InvalidSpec];
@@ -186,8 +237,22 @@ MakeKernel[kernelExpr_, constExpr_, OptionsPattern[]] :=
             Message[MakeKernel::noMapPoints, spec["Integrator"]];
             Abort[]
         ];
-        expr = kernelExpr;
-        While[ListQ[expr], expr = Plus @@ expr];
+        If[group,
+            Scan[
+                If[#[[1]], Message[MakeKernelGroup::unsupported, #[[2]]]; Abort[]]&,
+                {{TrueQ[spec["AD"]], "\"AD\" -> True"}, {StringContainsQ[spec["Integrator"], "IntegratorLat"], "the lattice integrators"},
+                 {TrueQ[spec["SplitKernel"]], "\"SplitKernel\""}, {TrueQ[spec["SeparateLookups"]], "\"SeparateLookups\""}}];
+            spec["Outputs"] = Length[outputs]
+        ];
+        nOut = If[group, Length[outputs], None];
+        (* the integrator's value type; map()/get() hand back its double counterpart *)
+        multiReturn = If[group, "DiFfRG::MultiValue<" <> spec["ComputeType"] <> ", " <> ToString[nOut] <> ">", None];
+        (* passed to FunKit only when used, so that MakeKernel keeps working with a FunKit that predates them *)
+        multiOpts = If[group, {"MultiReturn" -> multiReturn}, {}];
+        gridOpts = If[OptionValue["SharedGrids"] === {}, {}, {"SharedGrids" -> OptionValue["SharedGrids"]}];
+        (* a member that is itself a list of contributions is summed, as for MakeKernel *)
+        sumUp[e_] := Module[{r = e}, While[ListQ[r], r = Plus @@ r]; r];
+        expr = If[group, Map[sumUp, kernelExpr], sumUp[kernelExpr]];
 (* Matsubara evenness: the finite-T integrator sums kernel(+xt)+kernel(-xt) over
    the Matsubara frequency (the last integration variable). If the kernel is
    GENUINELY even in that variable (kernel(+f0) == kernel(-f0)), the integrator
@@ -209,7 +274,8 @@ MakeKernel[kernelExpr_, constExpr_, OptionsPattern[]] :=
                         mVar["Name"]
                     ];
                 diff = expr - (expr /. s_Symbol /; SymbolName[s] === mVar :> -s);
-                isEven = TrueQ[Quiet @ TimeConstrained[PossibleZeroQ[Simplify[diff]], 180, False]];
+                (* a group is even only if every output is *)
+                isEven = AllTrue[Flatten[{diff}], TrueQ[Quiet @ TimeConstrained[PossibleZeroQ[Simplify[#]], 180, False]]&];
                 If[isEven,
                     matsubaraEvenTrait = {"static constexpr bool matsubara_even = true;"};
                     ,
@@ -217,8 +283,7 @@ MakeKernel[kernelExpr_, constExpr_, OptionsPattern[]] :=
                 ];
             ]
         ];
-        const = constExpr;
-        While[ListQ[const], const = Plus @@ const];
+        const = If[group, Map[sumUp, constExpr], sumUp[constExpr]];
         intVariables = FunKit`Private`prepParam /@ intVariables;
         intVariables = Map[Append[#, "Type" -> realType[spec]]&, intVariables];
         getArgs = FunKit`Private`prepParam /@ getArgs;
@@ -250,14 +315,14 @@ MakeKernel[kernelExpr_, constExpr_, OptionsPattern[]] :=
             ];
         kernel = withComputePrecision[spec,
             If[TrueQ[OptionValue["SplitKernel"]] || TrueQ[OptionValue["SeparateLookups"]],
-                FunKit`MakeCppFunctionSplit[expr, "Name" -> "kernel", "Return" -> OptionValue["KernelReturnType"], "Suffix" -> "", "Prefix" -> "static KOKKOS_INLINE_FUNCTION", "Decorator" -> OptionValue["Decorator"], "SeparateLookups" -> OptionValue["SeparateLookups"], "Parameters" -> Join[intVariables, getArgs, parametersKernel], "Body" -> StringTemplate["using namespace DiFfRG;using namespace DiFfRG::compute;\n`1`"][OptionValue["KernelBody"]], "ReturnTransform" -> OptionValue["KernelReturnTransform"]]
+                FunKit`MakeCppFunctionSplit[expr, "Name" -> "kernel", "Return" -> OptionValue["KernelReturnType"], "Suffix" -> "", "Prefix" -> "static KOKKOS_INLINE_FUNCTION", "Decorator" -> OptionValue["Decorator"], "SeparateLookups" -> OptionValue["SeparateLookups"], "Parameters" -> Join[intVariables, getArgs, parametersKernel], "Body" -> StringTemplate["using namespace DiFfRG;using namespace DiFfRG::compute;\n`1`"][OptionValue["KernelBody"]], "ReturnTransform" -> OptionValue["KernelReturnTransform"], Sequence @@ gridOpts]
                 ,
-                FunKit`MakeCppFunction[expr, "Name" -> "kernel", "Return" -> OptionValue["KernelReturnType"], "Suffix" -> "", "Prefix" -> "static KOKKOS_INLINE_FUNCTION", "Parameters" -> Join[intVariables, getArgs, parametersKernel], "Body" -> StringTemplate["using namespace DiFfRG;using namespace DiFfRG::compute;\n`1`"][OptionValue["KernelBody"]], "ReturnTransform" -> OptionValue["KernelReturnTransform"]]
+                FunKit`MakeCppFunction[expr, "Name" -> "kernel", "Return" -> OptionValue["KernelReturnType"], "Suffix" -> "", "Prefix" -> "static KOKKOS_INLINE_FUNCTION", "Parameters" -> Join[intVariables, getArgs, parametersKernel], "Body" -> StringTemplate["using namespace DiFfRG;using namespace DiFfRG::compute;\n`1`"][OptionValue["KernelBody"]], "ReturnTransform" -> OptionValue["KernelReturnTransform"], Sequence @@ gridOpts, Sequence @@ multiOpts]
             ]];
-        constant = withComputePrecision[spec, FunKit`MakeCppFunction[constExpr, "Name" -> "constant", "Return" -> OptionValue["ConstantReturnType"], "Suffix" -> "", "Prefix" -> "static KOKKOS_INLINE_FUNCTION", "Parameters" -> Join[getArgs, parametersKernel], "Body" -> StringTemplate["using namespace DiFfRG;using namespace DiFfRG::compute;\n`1`"][OptionValue["ConstantBody"]], "ReturnTransform" -> OptionValue["ConstantReturnTransform"]]];
+        constant = withComputePrecision[spec, FunKit`MakeCppFunction[const, "Name" -> "constant", "Return" -> OptionValue["ConstantReturnType"], "Suffix" -> "", "Prefix" -> "static KOKKOS_INLINE_FUNCTION", "Parameters" -> Join[getArgs, parametersKernel], "Body" -> StringTemplate["using namespace DiFfRG;using namespace DiFfRG::compute;\n`1`"][OptionValue["ConstantBody"]], "ReturnTransform" -> OptionValue["ConstantReturnTransform"], Sequence @@ gridOpts, Sequence @@ multiOpts]];
         kernelTraits = kernelTraitMembers[OptionValue["KernelTraits"]];
         kernelClass = FunKit`MakeCppClass["TemplateTypes" -> {"_Regulator"}, "Name" -> OptionValue["Name"] <> "_kernel", "MembersPublic" -> Join[{"using Regulator = _Regulator;"}, matsubaraEvenTrait, kernelTraits, {kernel, constant}], "MembersPrivate" -> kernelDefs];
-        kernelHeader = FunKit`MakeCppHeader["Includes" -> {"DiFfRG/physics/interpolation.hh", "DiFfRG/physics/physics.hh"}, "Body" -> {"namespace DiFfRG {", kernelClass, StringTemplate["} using DiFfRG::`1`_kernel;"][spec["Name"]]}];
+        kernelHeader = FunKit`MakeCppHeader["Includes" -> Join[{"DiFfRG/physics/interpolation.hh", "DiFfRG/physics/physics.hh"}, If[group, {"DiFfRG/common/multi_value.hh"}, {}]], "Body" -> {"namespace DiFfRG {", kernelClass, StringTemplate["} using DiFfRG::`1`_kernel;"][spec["Name"]]}];
         (********************************************************************)
         (* Next, the corresponding class holding the map and get functions *)
         (********************************************************************)
@@ -285,6 +350,15 @@ MakeKernel[kernelExpr_, constExpr_, OptionsPattern[]] :=
         integratorTemplateParams = StringRiffle[integratorTemplateParams, ", "];
         returnType = resultType[spec];
         returnTypePointer = StringTemplate["`1`*"][returnType];
+        (* map() writes one array per output of a group, get() a MultiValue *)
+        destParam =
+            If[group,
+                <|"Name" -> "dest", "Type" -> "std::array<" <> returnTypePointer <> ", " <> ToString[nOut] <> ">", "Const" -> True, "Reference" -> True|>
+                ,
+                <|"Name" -> "dest", "Type" -> returnTypePointer, "Const" -> False, "Reference" -> False|>
+            ];
+        getDestType = If[group, "DiFfRG::MultiValue<" <> returnType <> ", " <> ToString[nOut] <> ">", returnType];
+        gridCheck = sharedGridCheck[OptionValue["SharedGrids"], Map[#["Name"]&, params]];
         adSpecs =
             If[spec["AD"],
                 Map[Merge[{#, <|"IntegratorTemplateParams" -> StringRiffle[TemplateParameterGeneration[spec, #["Replacements"]], ", "], "ReturnType" -> resultType[spec] /. #["Replacements"], "Params" -> Last @ processParameters[params, #["Replacements"]]|>}, Last]&, $ADSpecializations]
@@ -318,13 +392,17 @@ MakeKernel[kernelExpr_, constExpr_, OptionsPattern[]] :=
                                     ,
                                     Map[StringTemplate["`1`<`2`> integrator_`3`;"][spec["Integrator"], #["IntegratorTemplateParams"], #["Suffix"]]&, adSpecs]
                                     ,
-                                    Map[FunKit`MakeCppFunction["Name" -> "map", "Return" -> exec, "Body" -> None, "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> returnTypePointer, "Const" -> False, "Reference" -> False|>, <|"Name" -> "coordinates", "Reference" -> True, "Type" -> #, "Const" -> True|>}, params]]&, coordinates]
+                                    Map[FunKit`MakeCppFunction["Name" -> "map", "Return" -> exec, "Body" -> None, "Parameters" -> Join[{destParam, <|"Name" -> "coordinates", "Reference" -> True, "Type" -> #, "Const" -> True|>}, params]]&, coordinates]
                                     ,
                                     If[Length[coordinates] > 0,
                                             #
                                             ,
                                             {}
-                                        ]& @ {FunKit`MakeCppFunction["Name" -> "map", "Return" -> exec, "Body" -> "return device::apply([&](const auto...t){return map(dest, coordinates, t...);}, args);", "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> "IT*", "Reference" -> False, "Const" -> False|>, <|"Name" -> "coordinates", "Reference" -> True, "Type" -> "C", "Const" -> True|>, <|"Name" -> "args", "Type" -> "device::tuple<T...>", "Reference" -> True, "Const" -> True|>}], "Templates" -> {"IT", "C", "...T"}]}
+                                        ]& @ {If[group,
+                                                FunKit`MakeCppFunction["Name" -> "map", "Return" -> exec, "Body" -> "return device::apply([&](const auto...t){return map(dest, coordinates, t...);}, args);", "Parameters" -> Join[{destParam, <|"Name" -> "coordinates", "Reference" -> True, "Type" -> "C", "Const" -> True|>, <|"Name" -> "args", "Type" -> "device::tuple<T...>", "Reference" -> True, "Const" -> True|>}], "Templates" -> {"C", "...T"}]
+                                                ,
+                                                FunKit`MakeCppFunction["Name" -> "map", "Return" -> exec, "Body" -> "return device::apply([&](const auto...t){return map(dest, coordinates, t...);}, args);", "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> "IT*", "Reference" -> False, "Const" -> False|>, <|"Name" -> "coordinates", "Reference" -> True, "Type" -> "C", "Const" -> True|>, <|"Name" -> "args", "Type" -> "device::tuple<T...>", "Reference" -> True, "Const" -> True|>}], "Templates" -> {"IT", "C", "...T"}]
+                                            ]}
                                     ,
                                     Flatten[
                                         Map[
@@ -336,16 +414,22 @@ MakeKernel[kernelExpr_, constExpr_, OptionsPattern[]] :=
                                         ]
                                     ]
                                     ,
-                                    {FunKit`MakeCppFunction["Name" -> "get", "Return" -> "void", "Body" -> None, "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> returnType, "Reference" -> True, "Const" -> False|>}, getArgs, params]], FunKit`MakeCppFunction["Name" -> "get", "Return" -> "void", "Body" -> "device::apply([&](const auto...t){get(dest, " <> preArguments <> "t...);}, args);", "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> "IT", "Reference" -> True, "Const" -> False|>}, getArgs, {<|"Name" -> "args", "Type" -> "device::tuple<T...>", "Reference" -> True, "Const" -> True|>}], "Templates" -> {"IT", "...T"}]}
+                                    {FunKit`MakeCppFunction["Name" -> "get", "Return" -> "void", "Body" -> None, "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> getDestType, "Reference" -> True, "Const" -> False|>}, getArgs, params]], FunKit`MakeCppFunction["Name" -> "get", "Return" -> "void", "Body" -> "device::apply([&](const auto...t){get(dest, " <> preArguments <> "t...);}, args);", "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> "IT", "Reference" -> True, "Const" -> False|>}, getArgs, {<|"Name" -> "args", "Type" -> "device::tuple<T...>", "Reference" -> True, "Const" -> True|>}], "Templates" -> {"IT", "...T"}]}
                                     ,
                                     Map[FunKit`MakeCppFunction["Name" -> "get", "Return" -> "void", "Body" -> None, "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> #["ReturnType"], "Reference" -> True, "Const" -> False|>}, getArgs, #["Params"]]]&, adSpecs]
                                     ,
                                     If[TrueQ[spec["MapPoints"]],
                                         Join[
-                                            {FunKit`MakeCppFunction["Name" -> "map_points", "Return" -> "void", "Body" -> None, "Parameters" -> mapPointsParameters[returnType, Join[getArgs, params]]]}
+                                            {FunKit`MakeCppFunction["Name" -> "map_points", "Return" -> "void", "Body" -> None, "Parameters" -> mapPointsParameters[returnType, Join[getArgs, params], nOut]]}
                                             ,
                                             Map[FunKit`MakeCppFunction["Name" -> "map_points", "Return" -> "void", "Body" -> None, "Parameters" -> mapPointsParameters[#["ReturnType"], Join[getArgs, #["Params"]]]]&, adSpecs]
                                         ]
+                                        ,
+                                        {}
+                                    ]
+                                    ,
+                                    If[group,
+                                        {"static constexpr std::array<const char*, " <> ToString[nOut] <> "> output_names{{" <> StringRiffle[Map["\"" <> # <> "\""&, outputs], ", "] <> "}};"}
                                         ,
                                         {}
                                     ]
@@ -386,11 +470,11 @@ MakeKernel[kernelExpr_, constExpr_, OptionsPattern[]] :=
                         ]
                     }
             ];
-        integratorCpp["CT", "get"] = FunKit`MakeCppBlock["Includes" -> {"../kernel.hh"}, "Body" -> {StringTemplate["#include \"../`Name`.hh\"\n"][spec], FunKit`MakeCppFunction["Name" -> "get", "Class" -> StringTemplate["`Name`_integrator"][spec], "Body" -> StringTemplate["integrator.get(dest, `1` `2`);"][preArguments, arguments], "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> returnType, "Reference" -> True, "Const" -> False|>}, getArgs, params], "Return" -> "void"]}];
+        integratorCpp["CT", "get"] = FunKit`MakeCppBlock["Includes" -> {"../kernel.hh"}, "Body" -> {StringTemplate["#include \"../`Name`.hh\"\n"][spec], FunKit`MakeCppFunction["Name" -> "get", "Class" -> StringTemplate["`Name`_integrator"][spec], "Body" -> StringTemplate["integrator.get(dest, `1` `2`);"][preArguments, arguments], "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> getDestType, "Reference" -> True, "Const" -> False|>}, getArgs, params], "Return" -> "void"]}];
         integratorCpp["AD", "get"] = FunKit`MakeCppBlock["Includes" -> {"../kernel.hh"}, "Body" -> Join[{StringTemplate["#include \"../`Name`.hh\"\n"][spec]}, Map[FunKit`MakeCppFunction["Name" -> "get", "Class" -> StringTemplate["`Name`_integrator"][spec], "Body" -> StringTemplate["integrator_`1`.get(dest, `2` `3`);"][#["Suffix"], preArguments, arguments], "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> #["ReturnType"], "Reference" -> True, "Const" -> False|>}, getArgs, #["Params"]], "Return" -> "void"]&, adSpecs]]];
-        integratorCpp["CT", "map_points"] = FunKit`MakeCppBlock["Includes" -> {"../kernel.hh"}, "Body" -> {StringTemplate["#include \"../`Name`.hh\"\n"][spec], FunKit`MakeCppFunction["Name" -> "map_points", "Class" -> StringTemplate["`Name`_integrator"][spec], "Body" -> StringTemplate["integrator.map_points(dest, `1` `2`);"][preArguments, arguments], "Parameters" -> mapPointsParameters[returnType, Join[getArgs, params]], "Return" -> "void"]}];
+        integratorCpp["CT", "map_points"] = FunKit`MakeCppBlock["Includes" -> {"../kernel.hh"}, "Body" -> {StringTemplate["#include \"../`Name`.hh\"\n"][spec], FunKit`MakeCppFunction["Name" -> "map_points", "Class" -> StringTemplate["`Name`_integrator"][spec], "Body" -> gridCheck <> StringTemplate["integrator.map_points(dest, `1` `2`);"][preArguments, arguments], "Parameters" -> mapPointsParameters[returnType, Join[getArgs, params], nOut], "Return" -> "void"]}];
         integratorCpp["AD", "map_points"] = FunKit`MakeCppBlock["Includes" -> {"../kernel.hh"}, "Body" -> Join[{StringTemplate["#include \"../`Name`.hh\"\n"][spec]}, Map[FunKit`MakeCppFunction["Name" -> "map_points", "Class" -> StringTemplate["`Name`_integrator"][spec], "Body" -> StringTemplate["integrator_`1`.map_points(dest, `2` `3`);"][#["Suffix"], preArguments, arguments], "Parameters" -> mapPointsParameters[#["ReturnType"], Join[getArgs, #["Params"]]], "Return" -> "void"]&, adSpecs]]];
-        integratorCpp["CT", "map"] = Map[FunKit`MakeCppBlock["Includes" -> {"../kernel.hh"}, "Body" -> {StringTemplate["#include \"../`Name`.hh\"\n"][spec], FunKit`MakeCppFunction["Name" -> "map", "Return" -> exec, "Class" -> StringTemplate["`Name`_integrator"][spec], "Body" -> StringTemplate["return integrator.map(dest, coordinates, `1`);"][arguments], "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> returnTypePointer, "Const" -> False, "Reference" -> False|>, <|"Name" -> "coordinates", "Reference" -> True, "Type" -> #, "Const" -> True|>}, params]]}]&, coordinates];
+        integratorCpp["CT", "map"] = Map[FunKit`MakeCppBlock["Includes" -> {"../kernel.hh"}, "Body" -> {StringTemplate["#include \"../`Name`.hh\"\n"][spec], FunKit`MakeCppFunction["Name" -> "map", "Return" -> exec, "Class" -> StringTemplate["`Name`_integrator"][spec], "Body" -> gridCheck <> StringTemplate["return integrator.map(dest, coordinates, `1`);"][arguments], "Parameters" -> Join[{destParam, <|"Name" -> "coordinates", "Reference" -> True, "Type" -> #, "Const" -> True|>}, params]]}]&, coordinates];
         integratorCpp["AD", "map"] =
             Map[
                 With[{coordinate = #},

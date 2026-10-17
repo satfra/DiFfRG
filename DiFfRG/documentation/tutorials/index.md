@@ -2,7 +2,8 @@
 
 The tutorials build on each other. Tutorials 1–2 introduce the structure of an application, 3–4 generate flow
 equations with the Mathematica toolchain, 5–7 cover extractors, batched (GPU) evaluation and the choice of
-discretization, and 8 couples a field-dependent potential to flowing couplings in a quark-meson model.
+discretization, 8 couples a field-dependent potential to flowing couplings in a quark-meson model, and 9 generates
+momentum-dependent flows with NumTracer and the codegen options that make them fast.
 
 ```{toctree}
 :maxdepth: 1
@@ -15,4 +16,5 @@ tut5
 tut6
 tut7
 tut8
+tut9
 ```

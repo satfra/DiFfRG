@@ -77,6 +77,7 @@ namespace DiFfRG
 #include <DiFfRG/discretization/coordinates/stack_coordinates.hh>
 
 #include <DiFfRG/physics/interpolation/linear_interpolator.hh>
+#include <DiFfRG/physics/interpolation/shared_grid_check.hh>
 
 #include <DiFfRG/physics/interpolation/spline_interpolator_1d.hh>
 #include <DiFfRG/physics/interpolation/spline_interpolator_1d_stack.hh>

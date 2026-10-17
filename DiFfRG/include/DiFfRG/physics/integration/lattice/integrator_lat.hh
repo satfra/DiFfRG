@@ -139,6 +139,8 @@ namespace DiFfRG
     requires(d >= 1 && d <= 4)
   class IntegratorLat : public AbstractIntegrator
   {
+    static_assert(!is_multi_value_v<NT>, "IntegratorLat does not support MultiValue kernels yet");
+
   public:
     using ctype = typename get_type::ctype<NT>;
     using execution_space = ExecutionSpace;

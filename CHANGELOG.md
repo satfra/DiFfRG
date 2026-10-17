@@ -28,6 +28,19 @@
   `PointSpan` or `std::vector`). Rank-local, unlike `map()`. `MakeKernel[..., "MapPoints" -> True]` emits the
   wrappers (`CT_map_points.cc`, `AD_map_points.cc`).
 - **Added:** `/discretization/batched/max_stacked_points` bounds the points of one stacked AD evaluation.
+- **Added:** hoisted finite-temperature kernels. A kernel that also provides `pre()`/`post()` and a `pre_reads`
+  mask (`kernel_has_pre`, emitted by NumTracer with `"Hoist" -> True`) has the part of its integrand that depends
+  only on the radial momentum, the frequency and the shared arguments evaluated once per (radial node, frequency
+  node) instead of at every quadrature point: in `map()`, `get()` and `map_points()` of `QuadratureIntegrator_fT`.
+  The table is reused across calls while its inputs are unchanged (`set_pre_table_reuse`). Same results; on
+  QuarkMeson full_p `-25..-30 %` on the momentum-grid maps and `5..14x` on the potential's `map_points()`.
+- **Added:** interpolator `update()` with unchanged spline data returns without rebuilding or copying, and every
+  data change advances a process-wide epoch (`physics/interpolation/data_epoch.hh`).
+- **Added:** compile definition `DIFFRG_MATSUBARA_SIGN_LOOP` evaluates the +-frequency pair as a loop, halving the
+  code of finite-temperature kernels (for instruction-fetch-bound GPUs; off by default).
+- **Added:** Tutorial 9, momentum-dependent flows with NumTracer: installing NumTracer, `MakeNTKernelDiFfRG` and
+  `MakeNTKernelGroupDiFfRG`, and the codegen options for speed (kernel groups, `"SharedGrids"`, hoisting,
+  `"PointArguments"`), with a benchmark of each.
 - The four assemblers share one implementation of the EoM search, extractors, readouts, variables, constraints,
   mass matrix and timings (`internal::AssemblerCore`). Visible changes: the KT readouts see the unlimited
   3-point `"fe_hessians"` the KT extractors already saw (they were zero); KT reports the variables' residual time

@@ -3,8 +3,9 @@
 */diagrams/
 */TBCache/
 */flows/
+*/gen/
 
-# tut3, tut4, tut6 and tut8 ship their generated flow equations so they build out-of-the-box.
+# tut3, tut4, tut6, tut8 and tut9 ship their generated flow equations so they build out-of-the-box.
 !tut3/flows/
 !tut3/flows/**
 !tut4/flows/
@@ -13,3 +14,5 @@
 !tut6/flows/**
 !tut8/flows/
 !tut8/flows/**
+!tut9/flows/
+!tut9/flows/**
