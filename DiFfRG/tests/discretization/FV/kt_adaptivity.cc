@@ -90,7 +90,10 @@ namespace
                            {{"start_adapt_at", 0.},
                             {"adapt_dt", 0.1},
                             {"level", 3},
+                            {"indicator", "auto"},
                             {"marking", "fraction"},
+                            {"tolerance", 3e-4},
+                            {"coarsen_tolerance", 3e-4 / 8.},
                             {"refine_percent", 0.3},
                             {"coarsen_percent", 0.},
                             {"coarsen_buffer", 0},
@@ -251,6 +254,36 @@ TEST_CASE("HAdaptivity refines a 1D KT mesh where the indicator is large", "[FV]
   const auto r = s.residual(s.u);
   for (const auto v : r)
     REQUIRE(std::isfinite(v));
+}
+
+TEST_CASE("HAdaptivity with indicator curvature+model refines where either indicator asks", "[FV][KT][adaptivity]")
+{
+  DiFfRG::Init();
+  // One adaptation with tolerance marking; returns the centres of the cells that were refined.
+  const auto refined_with = [](const std::string &indicator) {
+    Setup s;
+    s.config.set_string("/discretization/adaptivity/indicator", indicator);
+    s.config.set_string("/discretization/adaptivity/marking", "tolerance");
+    s.config.set_double("/discretization/adaptivity/tolerance", 2e-2);
+    s.config.set_double("/discretization/adaptivity/coarsen_tolerance", 0.);
+    s.config.set_uint("/discretization/adaptivity/level", 1);
+    s.interpolate();
+    HAdaptivity<Assembler> adaptor(s.assembler, s.config);
+    adaptor.adapt(s.u);
+    std::set<double> centres;
+    for (const auto &cell : s.discretization.get_triangulation().active_cell_iterators())
+      if (cell->level() > 0) centres.insert(cell->parent()->center()[0]);
+    return centres;
+  };
+  const auto curvature = refined_with("curvature"), model = refined_with("model");
+  const auto combined = refined_with("curvature+model");
+  // |u''| peaks near x = pi/6, the model's |u'| near x = 0 and x = pi/3: two different, non-empty sets.
+  REQUIRE(!curvature.empty());
+  REQUIRE(!model.empty());
+  REQUIRE(curvature != model);
+  std::set<double> both = curvature;
+  both.insert(model.begin(), model.end());
+  CHECK(combined == both);
 }
 
 TEST_CASE("HAdaptivity prolongates 1D KT cell averages with their slope", "[FV][KT][adaptivity]")

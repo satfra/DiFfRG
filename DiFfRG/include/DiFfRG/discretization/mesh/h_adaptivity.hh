@@ -65,6 +65,8 @@ namespace DiFfRG
    *   range \f$\max u_c - \min u_c\f$ over the domain. \f$h_K^2 |\partial^2 u|/8\f$ is the deviation of \f$u\f$ from
    *   its linear interpolant on the cell, so \f$\eta_K\f$ is about 8 times the relative resolution error. It grows
    *   wherever a kink, a shock or a narrow extremum forms and drops by 4 with each refinement.
+   * - `"curvature+model"`: per cell the larger of the two. The model's indicator then only adds refinement the
+   *   curvature does not ask for, e.g. ahead of a feature that the solution itself does not show yet.
    * - `"auto"` (default): `"model"` if the model defines cell_indicator or face_indicator, `"curvature"` otherwise.
    *
    * With `predict` (default), each cell's indicator is extrapolated to the next adaptation: its growth since the
@@ -110,7 +112,7 @@ namespace DiFfRG
    * | `/discretization/adaptivity/start_adapt_at`   | double | 0       | RG time of the first adaptation |
    * | `/discretization/adaptivity/adapt_dt`         | double | 0.2     | minimum RG time between two adaptations |
    * | `/discretization/adaptivity/level`            | uint   | 0       | maximum refinement level of a cell (absolute, counted from the coarse grid); 0 disables adaptivity |
-   * | `/discretization/adaptivity/indicator`        | string | "auto"  | "auto", "model" or "curvature", see above |
+   * | `/discretization/adaptivity/indicator`        | string | "auto"  | "auto", "model", "curvature" or "curvature+model", see above |
    * | `/discretization/adaptivity/marking`          | string | "tolerance" | "tolerance" or "fraction", see above |
    * | `/discretization/adaptivity/refine_percent`   | double | 0.1     | "fraction": fraction of the total indicator to refine |
    * | `/discretization/adaptivity/coarsen_percent`  | double | 0.05    | "fraction": fraction of the total indicator to coarsen |
@@ -154,16 +156,22 @@ namespace DiFfRG
       adapt_level = config.get_uint("/discretization/adaptivity/level", 0);
       adapt_upper = config.get_double("/discretization/adaptivity/refine_percent", 1e-1);
       adapt_lower = config.get_double("/discretization/adaptivity/coarsen_percent", 5e-2);
+      const auto join = [](const std::vector<std::string> &options) {
+        std::string joined = options[0];
+        for (size_t i = 1; i < options.size(); ++i)
+          joined += "\", \"" + options[i];
+        return joined;
+      };
       const auto choice = [&](const std::string &key, const std::string &fallback,
                               const std::vector<std::string> &options) {
         const auto value = config.get_string("/discretization/adaptivity/" + key, fallback);
         if (std::find(options.begin(), options.end(), value) == options.end())
           throw std::invalid_argument("HAdaptivity: /discretization/adaptivity/" + key + " must be one of \"" +
-                                      options[0] + "\", \"" + options[1] +
-                                      (options.size() > 2 ? "\", \"" + options[2] : "") + "\", not \"" + value + "\".");
+                                      join(options) + "\", not \"" + value + "\".");
         return value;
       };
-      const auto indicator = choice("indicator", "auto", {"auto", "model", "curvature"});
+      const auto indicator = choice("indicator", "auto", {"auto", "model", "curvature", "curvature+model"});
+      combined_indicator = indicator == "curvature+model";
       curvature_indicator =
           indicator == "curvature" ||
           (indicator == "auto" && !internal::defines_refinement_indicator<typename Discretization::Model>());
@@ -252,6 +260,12 @@ namespace DiFfRG
         compute_curvature_indicator(indicator, view.get());
       else
         assembler.refinement_indicator(indicator, view.get());
+      if (combined_indicator) {
+        Vector<double> curvature(indicator.size());
+        compute_curvature_indicator(curvature, view.get());
+        for (uint k = 0; k < indicator.size(); ++k)
+          indicator[k] = std::max(indicator[k], curvature[k]);
+      }
 
       if constexpr (Discretization::Mesh::is_parallel) {
         // Each rank fills only the entries of the cells it owns, so on a partitioned mesh every
@@ -526,7 +540,7 @@ namespace DiFfRG
     double adapt_t, adapt_dt, adapt_upper, adapt_lower;
     uint adapt_level;
     uint coarsen_buffer, coarsen_age;
-    bool curvature_indicator, tolerance_marking;
+    bool curvature_indicator, combined_indicator, tolerance_marking;
     double tolerance, coarsen_tolerance;
     /// Number of adaptations so far, and for each active cell the adaptation that created it (if any did).
     uint n_adaptations = 0;
