@@ -219,6 +219,14 @@ TEST_CASE("Test SUNDIALS IDA + Boost RK hybrid stepper", "[timestepping][sundial
                                          static_cast<double>(ImplicitTimestepperKind::ida_boost_rk)));
 }
 
+// Same problem with the variables integrated inside IDA: covers the variables residual and jacobian under MPI.
+TEST_CASE("Test SUNDIALS IDA with variables", "[timestepping][sundials_ida_boost][ida]")
+{
+  using Model = Testing::ModelHybridRollback<1>;
+  using TimeStepper = TimeStepperSUNDIALS_IDA<HybridAssembler<Model>>;
+  REQUIRE(run_hybrid<Model, TimeStepper>("test_sundials_ida_variables", 1e-3));
+}
+
 //--------------------------------------------
 // Diagnostic: smooth problem, ~1 explicit substep per IDA trial step.
 //

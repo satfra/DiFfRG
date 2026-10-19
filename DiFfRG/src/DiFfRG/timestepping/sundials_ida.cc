@@ -707,10 +707,6 @@ namespace DiFfRG
         return assembler.needs_restart(t, sol_view.get());
       };
 
-    // Scratch for the redundant variables computation; see compute_variables_into.
-    VectorType vars_scratch;
-    internal::reinit_local_variables_vector(vars_scratch, n_vars);
-
     // At output_dt intervals this function saves intermediate solutions
     double last_save = -1.;
     time_stepper.output_step = [&](const double t, const BlockVectorType &sol, const BlockVectorType &sol_dot,
@@ -772,9 +768,7 @@ namespace DiFfRG
             y_state.refresh(y.block(0));
             y_dot_state.refresh(y_dot.block(0));
             y_vars_state.refresh(y.block(1));
-            internal::compute_variables_into(res.block(1), vars_scratch, [&](VectorType &out) {
-              assembler.residual_variables(out, y_vars_state.get(), y_state.get());
-            });
+            assembler.residual_variables(res.block(1), y_vars_state.get(), y_state.get());
             assembler.residual(res.block(0), y_state.get(), 1., y_dot_state.get(), 1., y_vars_state.get());
             res.block(1) += y_dot.block(1);
             residual = &res;

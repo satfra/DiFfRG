@@ -86,6 +86,7 @@ namespace DiFfRG
       using Model = Model_;
       using NumberType = typename Discretization::NumberType;
       using VectorType = typename Discretization::VectorType;
+      using VariablesVector = DiFfRG::internal::VariablesVector<VectorType>;
       using SparseMatrixType = typename Discretization::SparseMatrixType;
       using Components = typename Discretization::Components;
       static constexpr uint dim = Discretization::dim;
@@ -97,7 +98,7 @@ namespace DiFfRG
       /// hold.
       static constexpr bool reads_derivatives = batch_reads_derivatives<Model>();
       static constexpr bool reads_hessians = reads_derivatives && batch_reads_hessians<Model>();
-      using Batch = PointBatch<dim, NumberType, n_fe, Extractors, VectorType, reads_derivatives, reads_hessians>;
+      using Batch = PointBatch<dim, NumberType, n_fe, Extractors, VariablesVector, reads_derivatives, reads_hessians>;
 
       using PhaseTimes = AssemblyPhaseTimes;
 
@@ -228,13 +229,15 @@ namespace DiFfRG
                             const VectorType &solution_dot, NumberType weight_mass,
                             const VectorType &variables = VectorType()) override
       {
+        const DiFfRG::internal::LocalVariables<VectorType> local_variables(variables);
         const auto state = this->constrained(solution, solution_dot);
         const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         DiFfRG::internal::PhaseTimer phase(residual_times);
         Extractors extracted_data{{}};
-        if constexpr (n_extr > 0) this->extract(extracted_data, solution_global, variables, true, false, true);
+        if constexpr (n_extr > 0)
+          this->extract(extracted_data, solution_global, local_variables.get(), true, false, true);
         phase.lap(&PhaseTimes::extract);
-        gather(solution_global, extracted_data, variables);
+        gather(solution_global, extracted_data, local_variables.get());
         phase.lap(&PhaseTimes::gather);
         {
           const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
@@ -318,15 +321,17 @@ namespace DiFfRG
                             const VectorType &solution_dot, NumberType alpha, NumberType beta,
                             const VectorType &variables = VectorType()) override
       {
+        const DiFfRG::internal::LocalVariables<VectorType> local_variables(variables);
         const auto state = this->constrained(solution, solution_dot);
         const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         DiFfRG::internal::PhaseTimer phase(jacobian_times);
         Extractors extracted_data{{}};
         if constexpr (n_extr > 0) {
-          if (this->extract_with_jacobian(extracted_data, solution_global, variables)) this->reinit_matrix(jacobian);
+          if (this->extract_with_jacobian(extracted_data, solution_global, local_variables.get()))
+            this->reinit_matrix(jacobian);
         }
         phase.lap(&PhaseTimes::extract);
-        gather(solution_global, extracted_data, variables);
+        gather(solution_global, extracted_data, local_variables.get());
         phase.lap(&PhaseTimes::gather);
         {
           const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
@@ -521,7 +526,7 @@ namespace DiFfRG
       }
 
       /// Phase 1: the solution at every quadrature point of the owned cells and their faces.
-      void gather(const VectorType &solution_global, const Extractors &extracted_data, const VectorType &variables)
+      void gather(const VectorType &solution_global, const Extractors &extracted_data, const VariablesVector &variables)
       {
         cell_batch.reinit(cells.size() * n_q);
         boundary_batch.reinit(topology.boundary_faces.size() * n_q_face);

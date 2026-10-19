@@ -107,8 +107,6 @@ namespace DiFfRG
       variable_dy = 0;
       spatial_eval_view.refresh(spatial_eval);
       assembler.residual_variables(variable_dy, variable_eval, spatial_eval_view.get());
-      // The model assigns entry by entry (=, as everywhere for the variables); a PETSc vector stages those writes.
-      variable_dy.compress(VectorOperation::insert);
       dealii_to_eigen(variable_dy, dxdt);
       dxdt *= -1;
       if constexpr (is_distributed_la<VectorType>)
@@ -607,10 +605,7 @@ namespace DiFfRG
 
     initial_data.block(0) = spatial_y;
     commit_variables(variable_y, spatial_y, t_stop);
-    VectorType variables_scratch;
-    internal::reinit_local_variables_vector(variables_scratch, n_vars);
-    internal::compute_variables_into(initial_data.block(1), variables_scratch,
-                                     [&](VectorType &out) { out = variable_y; });
+    internal::assign_owned(initial_data.block(1), variable_y);
     this->drain_output();
   }
 } // namespace DiFfRG

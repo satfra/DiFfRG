@@ -112,6 +112,7 @@ namespace DiFfRG
       using Model = Model_;
       using NumberType = typename Discretization::NumberType;
       using VectorType = typename Discretization::VectorType;
+      using VariablesVector = DiFfRG::internal::VariablesVector<VectorType>;
       using SparseMatrixType = typename Discretization::SparseMatrixType;
 
       using Components = typename Discretization::Components;
@@ -122,12 +123,12 @@ namespace DiFfRG
       static constexpr size_t n_extr = Components::count_extractors();
       using Extractors = std::array<NumberType, n_extr>;
       /// The batch of the main level: the values of all levels.
-      using MainBatch = LDGPointBatch<dim, NumberType, Components, Extractors, VectorType>;
+      using MainBatch = LDGPointBatch<dim, NumberType, Components, Extractors, VariablesVector>;
       static constexpr size_t n_all = MainBatch::n_fe_functions;
       /// The batch level `from` hands to the construction of level from + 1: its values, nothing shared.
       template <uint from>
       using LevelBatch = PointBatch<dim, NumberType, Components::count_fe_functions(from), std::array<NumberType, 0>,
-                                    VectorType, false, false>;
+                                    VariablesVector, false, false>;
 
       using PhaseTimes = AssemblyPhaseTimes;
 
@@ -465,17 +466,18 @@ namespace DiFfRG
                             const VectorType &solution_dot, NumberType weight_mass,
                             const VectorType &variables = VectorType()) override
       {
+        const DiFfRG::internal::LocalVariables<VectorType> local_variables(variables);
         const auto state = this->constrained(solution, solution_dot);
         const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         DiFfRG::internal::PhaseTimer phase(residual_times);
         // Find the EoM and extract whatever data is needed for the model; extract() builds the LDG levels.
         Extractors extracted_data{{}};
         if constexpr (n_extr > 0)
-          this->extract(extracted_data, solution_global, variables, true, false, true);
+          this->extract(extracted_data, solution_global, local_variables.get(), true, false, true);
         else
           rebuild_ldg_vectors(solution_global);
         phase.lap(&PhaseTimes::extract);
-        gather_main(solution_global, extracted_data, variables);
+        gather_main(solution_global, extracted_data, local_variables.get());
         phase.lap(&PhaseTimes::gather);
         {
           const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
@@ -544,13 +546,15 @@ namespace DiFfRG
                             NumberType weight, const VectorType &solution_dot, NumberType alpha, NumberType beta,
                             const VectorType &variables = VectorType()) override
       {
+        const DiFfRG::internal::LocalVariables<VectorType> local_variables(variables);
         const auto state = this->constrained(solution, solution_dot);
         const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
         DiFfRG::internal::PhaseTimer phase(jacobian_times);
         // Find the EoM and extract whatever data is needed for the model; extract() builds the LDG levels.
         Extractors extracted_data{{}};
         if constexpr (n_extr > 0) {
-          if (this->extract_with_jacobian(extracted_data, solution_global, variables)) this->reinit_matrix(jacobian);
+          if (this->extract_with_jacobian(extracted_data, solution_global, local_variables.get()))
+            this->reinit_matrix(jacobian);
         } else
           rebuild_ldg_vectors(solution_global);
         // The levels are current now, so the jacobians built from them are, too.
@@ -559,7 +563,7 @@ namespace DiFfRG
             rebuild_ldg_jacobian<k>(solution_global);
         });
         phase.lap(&PhaseTimes::extract);
-        gather_main(solution_global, extracted_data, variables);
+        gather_main(solution_global, extracted_data, local_variables.get());
         phase.lap(&PhaseTimes::gather);
         {
           const NoMapsHere no_maps_during_assembly; // map() is collective, the points are rank-local
@@ -869,7 +873,8 @@ namespace DiFfRG
       }
 
       /// Phase 1 of the main level: the values of all levels at every point.
-      void gather_main(const VectorType &solution_global, const Extractors &extracted_data, const VectorType &variables)
+      void gather_main(const VectorType &solution_global, const Extractors &extracted_data,
+                       const VariablesVector &variables)
       {
         gather(cell_batch, boundary_batch, face_batch,
                [&](MainBatch &batch, const size_t first, const auto &fe_values, const auto &buffer) {
@@ -1483,7 +1488,7 @@ namespace DiFfRG
       std::unique_ptr<tbb::enumerable_thread_specific<Scratch>> scratch;
       std::vector<LocalData> local_buffer;
       const std::array<NumberType, 0> no_extractors{};
-      const VectorType no_variables;
+      const VariablesVector no_variables;
 
       MainBatch cell_batch, boundary_batch;
       std::array<MainBatch, 2> face_batch;
@@ -1554,7 +1559,7 @@ namespace DiFfRG
       }
 
       template <typename Evaluation, typename Extractors_>
-      auto solution_tie(const Evaluation &e, const Extractors_ &extractors, const VectorType &variables) const
+      auto solution_tie(const Evaluation &e, const Extractors_ &extractors, const VariablesVector &variables) const
       {
         auto t = std::tuple_cat(vector_to_tuple<Components::count_fe_subsystems()>(e.solutions),
                                 std::tie(e.gradients[0], e.hessians[0], extractors, variables, e.potential.value,

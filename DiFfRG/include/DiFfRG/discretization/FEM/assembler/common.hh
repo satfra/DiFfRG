@@ -36,6 +36,7 @@ namespace DiFfRG
   public:
     using typename Core::Components;
     using typename Core::NumberType;
+    using typename Core::VariablesVector;
     using typename Core::VectorType;
     static constexpr uint dim = Core::dim;
 
@@ -75,7 +76,7 @@ namespace DiFfRG
 
   protected:
     template <typename Evaluation, typename Extractors>
-    static auto solution_tie(const Evaluation &e, const Extractors &extractors, const VectorType &variables)
+    static auto solution_tie(const Evaluation &e, const Extractors &extractors, const VariablesVector &variables)
     {
       return Core::e_tie(e.values[0], e.gradients[0], e.hessians[0], extractors, variables, e.potential.value,
                          e.potential.gradient, e.potential.mass_hessian);

@@ -27,6 +27,17 @@
 // external libraries
 #include <deal.II/base/kokkos.h>
 #include <deal.II/base/multithread_info.h>
+#include <deal.II/lac/la_parallel_block_vector.h>
+#include <deal.II/lac/la_parallel_vector.h>
+#include <deal.II/lac/vector_memory.h>
+#ifdef DEAL_II_WITH_PETSC
+#include <deal.II/lac/petsc_block_vector.h>
+#include <deal.II/lac/petsc_vector.h>
+#endif
+#ifdef DEAL_II_WITH_TRILINOS
+#include <deal.II/lac/trilinos_parallel_block_vector.h>
+#include <deal.II/lac/trilinos_vector.h>
+#endif
 #include <tbb/tbb.h>
 
 #ifdef KOKKOS_ENABLE_CUDA
@@ -41,6 +52,31 @@ namespace DiFfRG
 {
   namespace
   {
+    /// Whether Init initialized Kokkos, and therefore finalizes it.
+    bool owns_kokkos = false;
+
+    /**
+     * @brief Empty the vector pools that dealii::InitFinalize::finalize() empties, in the same order; constructs them
+     * on first call.
+     */
+    void release_vector_pools()
+    {
+#ifdef DEAL_II_WITH_MPI
+      dealii::GrowingVectorMemory<dealii::LinearAlgebra::distributed::Vector<double>>::release_unused_memory();
+      dealii::GrowingVectorMemory<dealii::LinearAlgebra::distributed::BlockVector<double>>::release_unused_memory();
+      dealii::GrowingVectorMemory<dealii::LinearAlgebra::distributed::Vector<float>>::release_unused_memory();
+      dealii::GrowingVectorMemory<dealii::LinearAlgebra::distributed::BlockVector<float>>::release_unused_memory();
+#ifdef DEAL_II_WITH_TRILINOS
+      dealii::GrowingVectorMemory<dealii::TrilinosWrappers::MPI::Vector>::release_unused_memory();
+      dealii::GrowingVectorMemory<dealii::TrilinosWrappers::MPI::BlockVector>::release_unused_memory();
+#endif
+#endif
+#ifdef DEAL_II_WITH_PETSC
+      dealii::GrowingVectorMemory<dealii::PETScWrappers::MPI::Vector>::release_unused_memory();
+      dealii::GrowingVectorMemory<dealii::PETScWrappers::MPI::BlockVector>::release_unused_memory();
+#endif
+    }
+
     class Watchdog
     {
     public:
@@ -588,36 +624,13 @@ namespace DiFfRG
         Watchdog::instance().start();
       }
 
-      // We initialize every library that deal.II's MPI_InitFinalize would, *except* Kokkos, and then
-      // hand the Kokkos lifecycle to deal.II via ensure_kokkos_initialized() below. The reason is a
-      // teardown-ordering bug:
-      //
-      // MPI_InitFinalize initializes Kokkos by calling Kokkos::initialize() directly, which leaves
-      // dealii::internal::dealii_initialized_kokkos == false. With that flag false, deal.II's
-      // GrowingVectorMemory installs a Kokkos finalize-hook (release_unused_memory) that dereferences
-      // a function-local-static memory pool. Because we finalize Kokkos from a std::atexit handler,
-      // that hook runs *after* the pool static has already been destroyed during normal static
-      // teardown -> dereference of freed memory -> intermittent segfault on program exit.
-      //
-      // ensure_kokkos_initialized() instead sets dealii_initialized_kokkos = true (so the dangerous
-      // finalize-hook is never installed) and registers Kokkos::finalize() itself via std::atexit.
-      // The vector-memory pool is then emptied by its own (~Pool) destructor while Kokkos is still
-      // alive, and Kokkos is finalized afterwards.
+      // Every library deal.II's MPI_InitFinalize would initialize, except Kokkos, which needs the device
+      // chosen below. The teardown is registered once Kokkos is up; see there.
       mpi_initialization = new dealii::InitFinalize(
           argc, argv,
           dealii::InitializeLibrary::MPI | dealii::InitializeLibrary::SLEPc | dealii::InitializeLibrary::PETSc |
               dealii::InitializeLibrary::Zoltan | dealii::InitializeLibrary::P4EST,
           max_num_threads);
-
-      std::atexit([]() {
-        if (initialized) {
-          Watchdog::instance().stop();
-          // Finalizes MPI/PETSc/... (but not Kokkos, which deal.II finalizes via its own atexit hook
-          // registered by ensure_kokkos_initialized()).
-          delete Init::mpi_initialization;
-          initialized = false;
-        }
-      });
 
       // From here on MPI_Init has run, so the node-local rank is finally knowable -- which is why
       // the automatic tier could not be folded into max_num_threads above.
@@ -650,17 +663,9 @@ namespace DiFfRG
 
       const int device = select_device(local_rank, local_size);
 
-      // Initialize Kokkos *after* registering the teardown above so that Kokkos::finalize() (also
-      // registered via std::atexit, here) runs before the MPI finalization, matching the order
-      // deal.II's own ~MPI_InitFinalize uses.
-      //
-      // With more than one rank we cannot simply call ensure_kokkos_initialized(): it offers no way
-      // to pick a device, and every rank would land on device 0. We therefore do exactly what it
-      // would have done -- including setting dealii_initialized_kokkos and registering the atexit
-      // hook, BOTH of which live inside its `if (!Kokkos::is_initialized())` branch and would
-      // otherwise be skipped. Getting that wrong reintroduces the teardown segfault described
-      // above: GrowingVectorMemory installs a Kokkos finalize-hook into an already-destroyed
-      // static, and nothing ever finalizes Kokkos.
+      // Kokkos is initialized here rather than by deal.II, which offers no way to pick a device. Setting
+      // dealii_initialized_kokkos tells deal.II that it is taken care of, so it neither initializes it
+      // again nor installs a finalize hook into its vector pools (see release_vector_pools).
       //
       // num_threads configures only Kokkos' host execution backend, which is Serial unless the
       // build enabled KOKKOS_THREADS; it never restricts CUDA kernel parallelism. It is passed
@@ -672,13 +677,13 @@ namespace DiFfRG
       if (arch_differs) arch_warning_filter.emplace(std::cerr, kokkos_arch_warning);
 #endif
 
-      if (device >= 0 && local_size > 1 && !Kokkos::is_initialized() && !Kokkos::is_finalized()) {
+      if (!Kokkos::is_initialized() && !Kokkos::is_finalized()) {
         dealii::internal::dealii_initialized_kokkos = true;
-        Kokkos::initialize(
-            Kokkos::InitializationSettings().set_device_id(device).set_num_threads(static_cast<int>(n_threads())));
-        std::atexit([]() { Kokkos::finalize(); });
-      } else {
-        dealii::internal::ensure_kokkos_initialized();
+        auto settings = Kokkos::InitializationSettings().set_num_threads(static_cast<int>(n_threads()));
+        // A single rank keeps Kokkos' own choice, which honours its environment variables.
+        if (device >= 0 && local_size > 1) settings.set_device_id(device);
+        Kokkos::initialize(settings);
+        owns_kokkos = true;
       }
 
 #if defined(DiFfRG_KERNEL_ARCH) && defined(DiFfRG_BUNDLE_ARCH)
@@ -689,6 +694,22 @@ namespace DiFfRG
                   << "built for " << DiFfRG_BUNDLE_ARCH << " and are the only ones this GPU has to JIT-compile."
                   << std::endl;
 #endif
+
+      // Teardown. Static objects and atexit handlers are destroyed in reverse order of creation, and
+      // ~InitFinalize empties deal.II's vector pools, which are function-local statics: a pool created
+      // after this registration would be destroyed before the handler runs, so all of them are created
+      // now. The handler empties them while PETSc and Kokkos are still alive, then finalizes Kokkos
+      // and, through ~InitFinalize, PETSc and MPI.
+      release_vector_pools();
+      std::atexit([]() {
+        if (initialized) {
+          Watchdog::instance().stop();
+          release_vector_pools();
+          if (owns_kokkos) Kokkos::finalize();
+          delete Init::mpi_initialization;
+          initialized = false;
+        }
+      });
 
       // The scheduler defaults are fine for most runs; expose them anyway, since the split width is
       // the one knob a scaling study may want to turn.

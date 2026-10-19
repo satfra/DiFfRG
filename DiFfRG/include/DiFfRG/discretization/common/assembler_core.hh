@@ -111,6 +111,8 @@ namespace DiFfRG
       using NumberType = typename Discretization::NumberType;
       using VectorType = typename Discretization::VectorType;
       using SparseMatrixType = typename Discretization::SparseMatrixType;
+      /// What the model sees the variables as; the public entry points convert to it.
+      using VariablesVector = internal::VariablesVector<VectorType>;
       using Components = typename Discretization::Components;
       static constexpr uint dim = Discretization::dim;
       using Extractors = std::array<NumberType, Components::count_extractors()>;
@@ -231,7 +233,7 @@ namespace DiFfRG
         if (dt_solution.size() > 0) fe_out.attach(dof_handler, state.u_dot(), names_dot);
         if (residual.size() > 0) fe_out.attach(dof_handler, residual, names_residual);
 
-        readouts(data_out, u, variables);
+        readouts(data_out, u, LocalVariables<VectorType>(variables).get());
       }
 
       /// The model's dt_variables, with the extractors at the EoM.
@@ -239,11 +241,15 @@ namespace DiFfRG
                                       const VectorType &spatial_solution) override
       {
         Timer timer;
+        const LocalVariables<VectorType> v(variables);
         Extractors extracted{};
         if constexpr (Components::count_extractors() > 0)
-          extract(extracted, constrained(spatial_solution).u(), variables, true, false, false);
-        model.dt_variables(residual, v_tie(variables, std::as_const(extracted)));
-        Kokkos::fence();
+          extract(extracted, constrained(spatial_solution).u(), v.get(), true, false, false);
+        compute_variables_into(residual, [&](VariablesVector &r) {
+          model.dt_variables(r, v_tie(v.get(), std::as_const(extracted)));
+          // Before r is read: map() calls the model left pending write into it.
+          Kokkos::fence();
+        });
         timings_variable_residual.push_back(timer.wall_time());
       }
 
@@ -251,10 +257,11 @@ namespace DiFfRG
                                       const VectorType &spatial_solution) override
       {
         Timer timer;
+        const LocalVariables<VectorType> v(variables);
         Extractors extracted{};
         if constexpr (Components::count_extractors() > 0)
-          extract(extracted, constrained(spatial_solution).u(), variables, true, false, false);
-        model.template jacobian_variables<0>(jacobian, v_tie(variables, std::as_const(extracted)));
+          extract(extracted, constrained(spatial_solution).u(), v.get(), true, false, false);
+        model.template jacobian_variables<0>(jacobian, v_tie(v.get(), std::as_const(extracted)));
         Kokkos::fence();
         timings_variable_jacobian.push_back(timer.wall_time());
       }
@@ -292,7 +299,7 @@ namespace DiFfRG
        * @param set_EoM store the located EoM.
        * @param postprocess apply the model's EoM_postprocess to the located point.
        */
-      void extract(Extractors &data, const VectorType &solution, const VectorType &variables, bool search_EoM,
+      void extract(Extractors &data, const VectorType &solution, const VariablesVector &variables, bool search_EoM,
                    bool set_EoM, bool postprocess) const
       {
         auto EoM = this->EoM;
@@ -445,7 +452,7 @@ namespace DiFfRG
 
       /// One readout per entry of the model's readouts_multiple, each at its own EoM.
       void readouts(OutputFrame<dim, VectorType> &data_out, const VectorType &solution,
-                    const VectorType &variables) const
+                    const VariablesVector &variables) const
       {
         derived().prepare_point_evaluation(solution);
         // The raw potential is a solve over the whole mesh; skip it if neither the model nor the output reads it.
@@ -462,7 +469,7 @@ namespace DiFfRG
       /// readouts() with the raw potential @p potential (or UnusedPotential) in the solution tuples.
       template <typename Potential>
       void readouts_with(OutputFrame<dim, VectorType> &data_out, const VectorType &solution,
-                         const VectorType &variables, const Potential &potential) const
+                         const VariablesVector &variables, const Potential &potential) const
       {
         // GCC 16 fails to find members inside `if constexpr` in this variadic lambda; keep `this->`.
         auto helper = [&](auto &&...args) {
@@ -502,7 +509,7 @@ namespace DiFfRG
        * @return whether that cell changed, in which case extractor_dof_indices is updated and the jacobian sparsity
        * rebuilt, so the caller has to reinit its jacobian. Agreed across ranks, because the rebuild is collective.
        */
-      bool extract_with_jacobian(Extractors &data, const VectorType &solution, const VectorType &variables)
+      bool extract_with_jacobian(Extractors &data, const VectorType &solution, const VariablesVector &variables)
       {
         constexpr uint n_extr = Components::count_extractors();
         constexpr uint n_fe = Components::count_fe_functions();

@@ -140,10 +140,7 @@ namespace DiFfRG
         }
         if (m_data.n_blocks() > 1) {
           // The variables block is owned by rank 0; compute on every rank and keep the owned entries.
-          VectorType scratch;
-          internal::reinit_local_variables_vector(scratch, block_structure[1]);
-          internal::compute_variables_into(m_data.block(1), scratch,
-                                           [&](VectorType &out) { model.initial_condition_variables(out); });
+          internal::compute_variables_into(m_data.block(1), [&](auto &out) { model.initial_condition_variables(out); });
         }
       }
 
@@ -250,10 +247,7 @@ namespace DiFfRG
         }
         if (m_data.n_blocks() > 1) {
           // The variables block is owned by rank 0; compute on every rank and keep the owned entries.
-          VectorType scratch;
-          internal::reinit_local_variables_vector(scratch, block_structure[1]);
-          internal::compute_variables_into(m_data.block(1), scratch,
-                                           [&](VectorType &out) { model.initial_condition_variables(out); });
+          internal::compute_variables_into(m_data.block(1), [&](auto &out) { model.initial_condition_variables(out); });
         }
       }
 

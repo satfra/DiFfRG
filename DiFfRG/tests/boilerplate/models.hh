@@ -229,7 +229,8 @@ namespace DiFfRG
       {
         values[0] = u_exact(0.);
       }
-      template <typename Vector> void initial_condition_variables(Vector &values) const { values[0] = v0; }
+      // Raw-pointer access, as models hand the variables to interpolators and map(): must compile in MPI builds, too.
+      template <typename Vector> void initial_condition_variables(Vector &values) const { values.data()[0] = v0; }
 
       // du/dt = K u (1 - u);  the residual convention is u_dot = -source.
       template <typename NT, typename Solution>
@@ -257,8 +258,8 @@ namespace DiFfRG
       template <typename Vector, typename Solution> void dt_variables(Vector &r_a, const Solution &sol) const
       {
         const auto u = get<"extractors">(sol)[0];
-        const auto v = get<"variables">(sol)[0];
-        r_a[0] = v * u * u;
+        const auto *v = get<"variables">(sol).data();
+        r_a.data()[0] = v[0] * u * u;
       }
 
       // exact FEM solution (validated by the standard test harness, block 0)

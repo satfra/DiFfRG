@@ -479,6 +479,7 @@ namespace DiFfRG
         using JacobianReconstructor = JacobianReconstructor_;
         using NumberType = typename Discretization::NumberType;
         using VectorType = typename Discretization::VectorType;
+        using VariablesVector = DiFfRG::internal::VariablesVector<VectorType>;
         using SparseMatrixType = typename Discretization::SparseMatrixType;
 
         using Components = typename Discretization::Components;
@@ -659,7 +660,7 @@ namespace DiFfRG
 
         /// The named tuple the model's extract() and readouts see (internal::AssemblerCore interface).
         template <typename Evaluation, typename Extractors_>
-        static auto solution_tie(const Evaluation &e, const Extractors_ &extractors, const VectorType &variables)
+        static auto solution_tie(const Evaluation &e, const Extractors_ &extractors, const VariablesVector &variables)
         {
           return Base::e_tie(e.values, e.gradients, e.hessians, extractors, variables, e.potential.value,
                              e.potential.gradient, e.potential.mass_hessian);
@@ -1019,7 +1020,7 @@ namespace DiFfRG
          */
         template <typename ExtractorArray>
         void probe_diffusion_flux_conditioning(const SolutionReconstructionCache &reconstruction_cache,
-                                               const ExtractorArray &extractors, const VectorType &variables) const
+                                               const ExtractorArray &extractors, const VariablesVector &variables) const
         {
           // Probe the MODEL, not the current data. Using the solution's actual gradient fails
           // whenever the flow starts from flat initial data: the local variation is then ~0 and
@@ -1150,10 +1151,10 @@ namespace DiFfRG
         /// The extractor values the model sees, as the assembler passes them.
         using Extractors = std::array<NumberType, Components::count_extractors()>;
         using FluxTraces =
-            internal::TraceBatch<dim, NumberType, n_components, Extractors, VectorType, internal::TraceKind::flux>;
-        using DiffusionTraces =
-            internal::TraceBatch<dim, NumberType, n_components, Extractors, VectorType, internal::TraceKind::diffusion>;
-        using SourcePoints = internal::TraceBatch<dim, NumberType, n_components, Extractors, VectorType,
+            internal::TraceBatch<dim, NumberType, n_components, Extractors, VariablesVector, internal::TraceKind::flux>;
+        using DiffusionTraces = internal::TraceBatch<dim, NumberType, n_components, Extractors, VariablesVector,
+                                                     internal::TraceKind::diffusion>;
+        using SourcePoints = internal::TraceBatch<dim, NumberType, n_components, Extractors, VariablesVector,
                                                   source_uses_hessians ? internal::TraceKind::source_hessians
                                                                        : internal::TraceKind::source>;
         using TraceFlux = std::array<Tensor<1, dim, NumberType>, n_components>;
@@ -1204,7 +1205,7 @@ namespace DiFfRG
 
         /// Phase 1: the advection and diffusion traces of every face the owned cells need.
         void gather_traces(const SolutionReconstructionCache &cache, const Extractors &extractors,
-                           const VectorType &variables)
+                           const VariablesVector &variables)
         {
           const size_t n_traces = 2 * trace_faces.size();
           flux_traces.reinit(n_traces);
@@ -1252,7 +1253,7 @@ namespace DiFfRG
         /// Phase 1: the solution the source sees at every quadrature point of the owned cells.
         template <def::HasReconstructor ActiveReconstructor>
         void gather_sources(const SolutionReconstructionCache &cache, const Extractors &extractors,
-                            const VectorType &variables)
+                            const VariablesVector &variables)
         {
           const size_t n_q = quadrature.size();
           source_points.reinit(cells.size() * n_q);
@@ -1776,6 +1777,7 @@ namespace DiFfRG
                               const VectorType &solution_dot, NumberType weight_mass,
                               const VectorType &variables = VectorType()) override
         {
+          const DiFfRG::internal::LocalVariables<VectorType> local_variables(variables);
           const auto state = this->constrained(solution, solution_dot);
           const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
           // The extractors at the EoM, as in the FEM assemblers; extract() also lets the model refresh state its
@@ -1783,22 +1785,22 @@ namespace DiFfRG
           DiFfRG::internal::PhaseTimer phase(residual_times);
           Extractors extracted{};
           if constexpr (Components::count_extractors() > 0)
-            this->extract(extracted, solution_global, variables, true, false, true);
+            this->extract(extracted, solution_global, local_variables.get(), true, false, true);
           const SharedScope shared_scope{*this};
           phase.lap(&PhaseTimes::extract);
 
           rebuild_solution_reconstruction_cache<Reconstructor>(solution_global, residual_reconstruction_cache);
           const auto &reconstruction_cache = residual_reconstruction_cache;
           run_pre_assembly(AssemblyStage::residual, reconstruction_cache);
-          gather_traces(reconstruction_cache, extracted, variables);
-          gather_sources<Reconstructor>(reconstruction_cache, extracted, variables);
+          gather_traces(reconstruction_cache, extracted, local_variables.get());
+          gather_sources<Reconstructor>(reconstruction_cache, extracted, local_variables.get());
           phase.lap(&PhaseTimes::gather);
 
           // Only on the first residual assembly, where (at k = Lambda) a flux baseline is largest.
           if (diagnose_flux_conditioning && !flux_conditioning_probed) {
             flux_conditioning_probed = true;
             const NoMapsHere no_maps_during_assembly; // the probe calls the model's per-point diffusion flux
-            probe_diffusion_flux_conditioning(reconstruction_cache, extracted, variables);
+            probe_diffusion_flux_conditioning(reconstruction_cache, extracted, local_variables.get());
           }
 
           {
@@ -1854,6 +1856,7 @@ namespace DiFfRG
                               const VectorType &solution_dot, NumberType alpha, NumberType beta,
                               const VectorType &variables = VectorType()) override
         {
+          const DiFfRG::internal::LocalVariables<VectorType> local_variables(variables);
           const auto state = this->constrained(solution, solution_dot);
           const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
           // See residual(): keep the model's extractor-driven state consistent with the point the jacobian is
@@ -1862,15 +1865,15 @@ namespace DiFfRG
           DiFfRG::internal::PhaseTimer phase(jacobian_times);
           Extractors extracted{};
           if constexpr (Components::count_extractors() > 0)
-            this->extract(extracted, solution_global, variables, true, false, true);
+            this->extract(extracted, solution_global, local_variables.get(), true, false, true);
           const SharedScope shared_scope{*this};
           phase.lap(&PhaseTimes::extract);
 
           rebuild_solution_reconstruction_cache<JacobianReconstructor>(solution_global, jacobian_reconstruction_cache);
           const auto &reconstruction_cache = jacobian_reconstruction_cache;
           run_pre_assembly(AssemblyStage::jacobian, reconstruction_cache);
-          gather_traces(reconstruction_cache, extracted, variables);
-          gather_sources<JacobianReconstructor>(reconstruction_cache, extracted, variables);
+          gather_traces(reconstruction_cache, extracted, local_variables.get());
+          gather_sources<JacobianReconstructor>(reconstruction_cache, extracted, local_variables.get());
           phase.lap(&PhaseTimes::gather);
 
           {

@@ -366,6 +366,9 @@ namespace DiFfRG
       /**
        * @name Variables
        * Unknowns without field-space dependence, \f$\partial_t v_a = -D_a(v, e)\f$.
+       *
+       * The model sees them, and writes their initial values and residual, as process-local `dealii::Vector`s
+       * holding all variables, also in MPI builds; `.data()` is a contiguous array.
        */
       //@{
 

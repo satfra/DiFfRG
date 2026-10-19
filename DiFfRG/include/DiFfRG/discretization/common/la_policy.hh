@@ -12,6 +12,8 @@
 #include <DiFfRG/discretization/common/solution_view.hh>
 
 // std
+#include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace DiFfRG
@@ -137,32 +139,68 @@ namespace DiFfRG
       }
     }
 
-    /// Run @p compute on a local vector of all variables, then copy the owned entries into @p dst (serial: directly).
-    template <typename VectorType, typename Fn>
-    void compute_variables_into(VectorType &dst, VectorType &scratch, Fn &&compute)
+    /// The vector type through which the model reads and writes its variables, in serial and distributed runs alike.
+    template <typename VectorType> using VariablesVector = dealii::Vector<get_type::NumberType<VectorType>>;
+
+    /// Copy the entries of @p src that @p dst owns into @p dst. @p src must hold all entries on this rank.
+    template <typename Dst, typename Src> void assign_owned(Dst &dst, const Src &src)
     {
-      if constexpr (!is_distributed_la<VectorType>) {
-        (void)scratch;
-        compute(dst);
+      if constexpr (!is_distributed_la<Dst>) {
+        dst = src;
       } else {
-        scratch = 0;
-        compute(scratch);
-        // The model wrote through VectorBase::operator(), which stages rather than stores.
-        scratch.compress(dealii::VectorOperation::insert);
         for (const auto i : dst.locally_owned_elements())
-          dst(i) = scratch(i);
+          dst(i) = src(i);
         dst.compress(dealii::VectorOperation::insert);
       }
     }
 
-    /// Size a process-local vector holding all variables.
-    template <typename VectorType>
-    void reinit_local_variables_vector(VectorType &vec, const dealii::types::global_dof_index n_vars)
+    /**
+     * @brief The variables as the model sees them: a VariablesVector. Refers to @p variables if it already is one,
+     * otherwise holds a copy.
+     *
+     * A distributed @p variables must be a replica, i.e. hold all entries on this rank (see SolutionView).
+     */
+    template <typename VectorType> class LocalVariables
     {
-      if constexpr (is_distributed_la<VectorType>) {
-        if (n_vars > 0) vec.reinit(dealii::complete_index_set(n_vars), MPI_COMM_SELF);
+    public:
+      using Vector = VariablesVector<VectorType>;
+
+      explicit LocalVariables(const VectorType &variables)
+      {
+        if constexpr (std::is_same_v<VectorType, Vector>) {
+          ptr = &variables;
+        } else {
+          if constexpr (is_distributed_la<VectorType>)
+            if (variables.locally_owned_size() != variables.size())
+              throw std::logic_error("LocalVariables: the variables vector is not replicated on this rank.");
+          copy.reinit(variables.size());
+          for (dealii::types::global_dof_index i = 0; i < variables.size(); ++i)
+            copy[i] = variables(i);
+          ptr = &copy;
+        }
+      }
+      LocalVariables(const LocalVariables &) = delete;
+      LocalVariables &operator=(const LocalVariables &) = delete;
+
+      const Vector &get() const { return *ptr; }
+
+    private:
+      Vector copy;
+      const Vector *ptr = nullptr;
+    };
+
+    /**
+     * @brief Let @p compute write all variables into a VariablesVector, then store the entries @p dst owns. Every rank
+     * computes; serially, and if @p dst already is a VariablesVector, @p compute writes into @p dst directly.
+     */
+    template <typename VectorType, typename Fn> void compute_variables_into(VectorType &dst, Fn &&compute)
+    {
+      if constexpr (std::is_same_v<VectorType, VariablesVector<VectorType>>) {
+        compute(dst);
       } else {
-        vec.reinit(n_vars);
+        VariablesVector<VectorType> local(dst.size());
+        compute(local);
+        assign_owned(dst, local);
       }
     }
 

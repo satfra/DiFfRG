@@ -1,3 +1,6 @@
 build/
 .venv/
 
+
+# uv lockfile (not used; pins go stale)
+uv.lock
