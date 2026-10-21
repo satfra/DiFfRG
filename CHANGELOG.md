@@ -34,6 +34,11 @@
   node) instead of at every quadrature point: in `map()`, `get()` and `map_points()` of `QuadratureIntegrator_fT`.
   The table is reused across calls while its inputs are unchanged (`set_pre_table_reuse`). Same results; on
   QuarkMeson full_p `-25..-30 %` on the momentum-grid maps and `5..14x` on the potential's `map_points()`.
+- **Added:** hoisted vacuum kernels. `QuadratureIntegrator` (and through it `Integrator_p2`, `_p2_1ang`,
+  `_p2_4D_2ang`, `_p2_4D_3ang`) evaluates the `pre()` of a `kernel_has_pre` kernel once per node of the first
+  integration variable, in `get()`, `map()` and `map_points()` on Kokkos execution spaces; `set_hoist(false)`
+  turns it off. `kernel_has_pre` and the pre() table now live in `physics/integration/hoist.hh`, shared with
+  `QuadratureIntegrator_fT`.
 - **Added:** interpolator `update()` with unchanged spline data returns without rebuilding or copying, and every
   data change advances a process-wide epoch (`physics/interpolation/data_epoch.hh`).
 - **Added:** compile definition `DIFFRG_MATSUBARA_SIGN_LOOP` evaluates the +-frequency pair as a loop, halving the
@@ -280,6 +285,10 @@
   -inf, so the first adaptation happens as soon as `start_adapt_at` is reached.
 - `DiFfRG.phasediagram.get_command` without a folder passed the run name as `-o`, which the
   executables ignore; it now sets `/output/name`.
+- MPI runs whose model calls `map()` in `extract()` hung at the first output frame. `OutputSession::write_frame`
+  ran its contributor (attach_data_output, and with it the readouts and `extract()`) on rank 0 only, so rank 0
+  entered the collective `map()` alone; model state changed in `extract()` also drifted between ranks. The
+  contributor now runs on every rank, on a frame that discards its output on ranks other than 0.
 
 ## Version 1.1.0
 

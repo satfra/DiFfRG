@@ -11,6 +11,7 @@
 #include <DiFfRG/common/utils.hh>
 #include <DiFfRG/discretization/coordinates/coordinates.hh>
 #include <DiFfRG/physics/integration/abstract_integrator.hh>
+#include <DiFfRG/physics/integration/hoist.hh>
 #include <DiFfRG/physics/integration/map_completion.hh>
 #include <DiFfRG/physics/integration/map_distribution.hh>
 #include <DiFfRG/physics/integration/point_arg.hh>
@@ -380,6 +381,9 @@ namespace DiFfRG
    * precision. Interpolators (see is_interpolator) are passed as their lightweight handle in precision `ctype` if the
    * kernel accepts that, e.g. when it takes them as `const auto &`. See also provides_kernel.
    *
+   * A kernel in hoisted form (kernel_has_pre) has its pre() evaluated once per node of the first integration variable
+   * and reused for all other nodes, external points and map_points() points; see set_hoist().
+   *
    * @tparam dim number of integration variables, 1 to 5 (map() adds one dimension for the external grid, and Kokkos
    * supports at most 6)
    * @tparam NT type of the result, e.g. `double`, `float`, `complex<double>` or an autodiff type
@@ -430,6 +434,88 @@ namespace DiFfRG
         grid_start[i] = grid_extents[0][i];
         grid_scale[i] = (grid_extents[1][i] - grid_extents[0][i]);
       }
+    }
+
+    // ---- Hoisting (kernel_has_pre) ---------------------------------------------------------------
+    // The pre() table holds pre() at every node of the first integration variable.
+
+    /// Whether this kernel can be hoisted at all: pre() reads no integration variable but the first.
+    static constexpr bool can_hoist = kernel_has_pre<KERNEL> && !internal::pre_reads_any<KERNEL>(1, dim);
+
+    /// Use the hoisted form of a kernel_has_pre kernel where it applies (default on); off evaluates kernel() only.
+    void set_hoist(const bool hoist) { m_hoist = hoist; }
+
+    /**
+     * @brief Turn reuse of the pre() table across calls on or off (default on).
+     *
+     * A table is reused while the first axis, every argument pre() reads and the data of every interpolator
+     * (data_epoch.hh) are unchanged; otherwise it is rebuilt.
+     */
+    void set_pre_table_reuse(const bool reuse) { m_pre_table.set_reuse(reuse); }
+
+    /// pre() with the first integration variable at @p q, external position @p pos and arguments @p args.
+    template <typename PosArr, typename ArgTuple>
+    KOKKOS_INLINE_FUNCTION static auto pre_value(const ctype q, const PosArr &pos, const ArgTuple &args)
+    {
+      // pre() reads only the first variable, so the others are passed as zero.
+      device::array<ctype, dim> x{};
+      x[0] = q;
+      return device::apply(
+          [&](const auto &...xargs) {
+            return device::apply(
+                [&](const auto &...pargs) {
+                  return device::apply([&](const auto &...iargs) { return KERNEL::pre(xargs..., pargs..., iargs...); },
+                                       args);
+                },
+                pos);
+          },
+          x);
+    }
+
+    /// kernel() at @p x, @p pos, @p args, from its pre() table entry @p P.
+    template <typename PT, typename PosArr, typename ArgTuple>
+    KOKKOS_INLINE_FUNCTION static NT hoisted_value(const PT &P, const device::array<ctype, dim> &x, const PosArr &pos,
+                                                   const ArgTuple &args)
+    {
+      return device::apply(
+          [&](const auto &...xargs) {
+            return device::apply(
+                [&](const auto &...pargs) {
+                  return device::apply(
+                      [&](const auto &...iargs) { return NT(KERNEL::post(P, xargs..., pargs..., iargs...)); }, args);
+                },
+                pos);
+          },
+          x);
+    }
+
+    /// Fill the pre() table on @p space. Public only because nvcc rejects extended device lambdas inside non-public
+    /// member functions.
+    template <typename PT, typename PosArr, typename ArgTuple>
+    void fill_pre_table(ExecutionSpace &space, PT *table, const PosArr &pos, const ArgTuple &args) const
+    {
+      const auto &n = nodes;
+      const auto &start = grid_start;
+      const auto &scale = grid_scale;
+      Kokkos::parallel_for(
+          "QuadratureIntegrator_pre_table", Kokkos::RangePolicy<ExecutionSpace>(space, 0, grid_size[0]),
+          KOKKOS_LAMBDA(const size_t e) { table[e] = pre_value(Kokkos::fma(scale[0], n[0][e], start[0]), pos, args); });
+    }
+
+    /// fill_pre_table() for map_points(), with the arguments of point 0, whose per-point values pre() does not read.
+    /// Public for the same reason.
+    template <typename PT, typename DeviceArgs> void fill_pre_table_points(PT *table, const DeviceArgs &device_args)
+    {
+      const auto &n = nodes;
+      const auto &start = grid_start;
+      const auto &scale = grid_scale;
+      Kokkos::parallel_for(
+          "QuadratureIntegrator_pre_table", Kokkos::RangePolicy<ExecutionSpace>(space, 0, grid_size[0]),
+          KOKKOS_LAMBDA(const size_t e) {
+            const ctype q = Kokkos::fma(scale[0], n[0][e], start[0]);
+            table[e] = device::apply(
+                [&](const auto &...a) { return pre_value(q, device::tuple<>{}, device::tie(a(0)...)); }, device_args);
+          });
     }
 
     /**
@@ -489,6 +575,31 @@ namespace DiFfRG
       const auto &w = weights;
       const auto &start = grid_start;
       const auto &scale = grid_scale;
+
+      if constexpr (can_hoist) {
+        if (m_hoist) {
+          using PT = decltype(pre_value(ctype(0), device::tuple<>{}, args));
+          const PT *table = prepare_pre_table<PT>(space, device::tuple<>{}, args, dim, t...);
+          auto functor = KOKKOS_LAMBDA(const device::array<size_t, dim> &idx, NT &update)
+          {
+            device::array<ctype, dim> x;
+            ctype weight = 1;
+            bool is_first = true;
+            for (size_t i = 0; i < dim; ++i) {
+              x[i] = Kokkos::fma(scale[i], n[i][idx[i]], start[i]);
+              weight *= w[i][idx[i]] * scale[i];
+              is_first &= idx[i] == 0;
+            }
+            update += weight * hoisted_value(table[idx[0]], x, device::tuple<>{}, args);
+            device::apply([&](const auto &...iargs) { update += is_first ? KERNEL::constant(iargs...) : NT(0); },
+                          args);
+          };
+          Kokkos::parallel_reduce("QuadratureIntegral_hoisted_" + std::to_string(dim) + "D",
+                                  make_kokkos_nd_range<dim, ExecutionSpace>(space, {0}, grid_size),
+                                  internal::KokkosNDLambdaWrapperReduction<dim, decltype(functor)>(functor), dest);
+          return;
+        }
+      }
 
       auto functor = KOKKOS_LAMBDA(const device::array<size_t, dim> &idx, NT &update)
       {
@@ -599,6 +710,36 @@ namespace DiFfRG
       // handling of if-constexpr inside extended class lambdas.
       const bool pos_cached_rt = has_cacheable_positions_v<Coordinates>;
 
+      // Hoisted: pre() must not read the external position, which sits right after the integration variables.
+      bool hoisted = false;
+      if constexpr (can_hoist && has_cacheable_positions_v<Coordinates> &&
+                    !internal::pre_reads_any<KERNEL>(dim, dim + cdim)) {
+        if (m_hoist) {
+          const device::array<pos_ctype, cdim> pos0{};
+          using PT = decltype(pre_value(ctype(0), pos0, m_args));
+          const PT *table = prepare_pre_table<PT>(space, pos0, m_args, dim + cdim, args...);
+          auto functor = KOKKOS_LAMBDA(const device::array<size_t, 1 + dim> &idx)
+          {
+            auto subview = device::apply([&](const auto &...i) { return Kokkos::subview(cache, i...); }, idx);
+
+            device::array<pos_ctype, cdim> pos;
+            for (size_t d = 0; d < cdim; ++d)
+              pos[d] = static_cast<pos_ctype>(pos_view(idx[0] * cdim + d));
+
+            device::array<ctype, dim> x;
+            ctype weight = 1;
+            for (int i = 0; i < dim; ++i) {
+              x[i] = Kokkos::fma(scale[i], n[i][idx[1 + i]], start[i]);
+              weight *= w[i][idx[1 + i]] * scale[i];
+            }
+            subview() = weight * hoisted_value(table[idx[1]], x, pos, m_args);
+          };
+          Kokkos::parallel_for(make_kokkos_nd_range_divisible<1 + dim, ExecutionSpace>(space, {0}, extents),
+                               internal::KokkosNDLambdaWrapper<1 + dim, decltype(functor)>(functor));
+          hoisted = true;
+        }
+      }
+
       // Two complete functors, selected by a HOST-level if constexpr. nvcc's extended-lambda
       // transformation miscompiles `if constexpr` INSIDE the lambda body here (wrong or
       // unregistered kernel stubs: cudaErrorInvalidResourceHandle, or a silently zero RHS), while
@@ -610,7 +751,9 @@ namespace DiFfRG
       // 1.3-1.5x it appeared to give was GPU clock ramp, not tiling. Not worth the coupling: Kokkos
       // hard-aborts when the tile product exceeds LaunchBounds, so an explicit tile turns a future
       // launch-bounds change into a runtime abort.
-      if constexpr (has_cacheable_positions_v<Coordinates>) {
+      if (hoisted) {
+        // launched above
+      } else if constexpr (has_cacheable_positions_v<Coordinates>) {
         auto functor = KOKKOS_LAMBDA(const device::array<size_t, 1 + dim> &idx)
         {
           // make subview
@@ -874,10 +1017,123 @@ namespace DiFfRG
       constexpr bool handles = internal::takes_handles<NT, KERNEL, ctype, dim, T...>;
       internal::check_kernel_precision<handles, ctype, T...>();
       const auto device_args = m_map_points.template stage<ctype, handles>(space, n, args...);
+      if constexpr (can_hoist) {
+        // Hoisted unless pre() reads an argument given per point.
+        bool hoist = m_hoist;
+        size_t i = dim;
+        ((hoist = hoist && !(args.per_point() && internal::pre_reads<KERNEL>(i)), ++i), ...);
+        if (hoist) {
+          using PT = decltype(device::apply(
+              [](const auto &...a) { return pre_value(ctype(0), device::tuple<>{}, device::tie(a(0)...)); },
+              device_args));
+          PT *table = pre_table_storage<PT>();
+          m_pre_table.refresh(pre_table_key<PT>(dim, args.value...), space, space,
+                              [&] { fill_pre_table_points(table, device_args); });
+          m_map_points.run(space, dest,
+                           [&](const auto &result) { launch_map_points_hoisted(result, n, device_args, table); });
+          return;
+        }
+      }
       m_map_points.run(space, dest, [&](const auto &result) { launch_map_points(result, n, device_args); });
     }
 
+    /// Storage for the pre() table with entries of type PT.
+    template <typename PT> PT *pre_table_storage() const { return m_pre_table.template storage<PT>(grid_size[0]); }
+
+    /// The key of a pre() table with entries PT for the kernel() parameters @p rest, the first being @p first; see
+    /// PreTable::key.
+    template <typename PT, typename... A> std::string pre_table_key(const size_t first, const A &...rest) const
+    {
+      return m_pre_table.template key<KERNEL, PT>(
+          [&](std::string &key) {
+            internal::append_bytes(key, nodes[0].data());
+            internal::append_bytes(key, nodes[0].size());
+            internal::append_bytes(key, grid_start[0]);
+            internal::append_bytes(key, grid_scale[0]);
+          },
+          first, rest...);
+    }
+
+    /// The pre() table for kernel() parameters @p rest (see pre_table_key()), rebuilt on @p space if stale.
+    template <typename PT, typename PosArr, typename ArgTuple, typename... A>
+    const PT *prepare_pre_table(ExecutionSpace &space, const PosArr &pos, const ArgTuple &args, const size_t first,
+                                const A &...rest) const
+    {
+      PT *table = pre_table_storage<PT>();
+      m_pre_table.refresh(pre_table_key<PT>(first, rest...), space, this->space,
+                          [&] { fill_pre_table(space, table, pos, args); });
+      return table;
+    }
+
   public:
+    /// The kernel launch of map_points() for a hoisted kernel, from the pre() table @p table. Public for the same
+    /// reason as launch_map_points().
+    template <typename ResultView, typename DeviceArgs, typename PT>
+    void launch_map_points_hoisted(const ResultView &result, const size_t n, const DeviceArgs &device_args,
+                                   const PT *table)
+    {
+      using OT = typename ResultView::value_type;
+
+      const auto &nd = nodes;
+      const auto &w = weights;
+      const auto &start = grid_start;
+      const auto &scale = grid_scale;
+      const auto args = device_args;
+
+      size_t total = 1;
+      for (int d = 0; d < dim; ++d)
+        total *= grid_size[d];
+      device::array<size_t, dim> strides;
+      strides[dim - 1] = 1;
+      for (int d = dim - 2; d >= 0; --d)
+        strides[d] = strides[d + 1] * grid_size[d + 1];
+
+      // As the team branch of launch_map_points(), with every node taking its pre() from the table. Always a team per
+      // point: the remaining work per node is small, so the points alone rarely fill the device.
+      using TeamType = typename Kokkos::TeamPolicy<ExecutionSpace>::member_type;
+      constexpr int vector_width = 32;
+      const size_t n_outer = (total + vector_width - 1) / vector_width;
+      Kokkos::parallel_for(
+          "QuadratureIntegrator_map_points_hoisted",
+          Kokkos::TeamPolicy<ExecutionSpace>(space, n, Kokkos::AUTO, vector_width),
+          KOKKOS_LAMBDA(const TeamType &team) {
+            const size_t i = team.league_rank();
+            // References, not copies: a shared argument may be an interpolator.
+            const auto point_args = device::apply([&](const auto &...a) { return device::tie(a(i)...); }, args);
+            NT integral{};
+            Kokkos::parallel_reduce(
+                Kokkos::TeamThreadRange(team, n_outer),
+                [&](const size_t outer, NT &team_update) {
+                  NT vec_sum{};
+                  Kokkos::parallel_reduce(
+                      Kokkos::ThreadVectorRange(team, vector_width),
+                      [&](const size_t inner, NT &vec_update) {
+                        const size_t flat = outer * vector_width + inner;
+                        if (flat >= total) return;
+                        device::array<ctype, dim> x;
+                        ctype weight = 1;
+                        size_t remainder = flat;
+                        for (int d = 0; d < dim; ++d) {
+                          const size_t id = remainder / strides[d];
+                          remainder -= id * strides[d];
+                          x[d] = Kokkos::fma(scale[d], nd[d][id], start[d]);
+                          weight *= w[d][id] * scale[d];
+                        }
+                        vec_update +=
+                            weight * hoisted_value(table[flat / strides[0]], x, device::tuple<>{}, point_args);
+                      },
+                      vec_sum);
+                  team_update += vec_sum;
+                },
+                integral);
+            Kokkos::single(Kokkos::PerTeam(team), [&]() {
+              NT sum = device::apply([&](const auto &...a) { return NT(KERNEL::constant(a(i)...)); }, args);
+              sum += integral;
+              result(i) = static_cast<OT>(sum);
+            });
+          });
+    }
+
     /// The kernel launch of map_points(). Public only because nvcc rejects extended device lambdas
     /// inside non-public member functions.
     template <typename ResultView, typename DeviceArgs>
@@ -1008,6 +1264,9 @@ namespace DiFfRG
     mutable Kokkos::View<NT, typename ExecutionSpace::memory_space> m_result_view;
     mutable typename Kokkos::View<NT, typename ExecutionSpace::memory_space>::host_mirror_type m_result_host;
     mutable bool m_result_views_initialized = false;
+    // The pre() table of a hoisted kernel (see kernel_has_pre), and whether to use it.
+    internal::PreTable<ExecutionSpace> m_pre_table;
+    bool m_hoist = true;
   };
 
   /**

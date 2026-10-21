@@ -424,7 +424,7 @@ namespace DiFfRG
 
         commit_variables(variable_y, sol, t);
         assembler.set_time(t);
-        // Refreshed here, OUTSIDE write_frame: it runs its contributor on rank 0 only, and a refresh communicates.
+        // Replicas of the distributed state for the frame (collective).
         sol_view.refresh(sol);
         sol_dot_view.refresh(sol_dot);
         residual_view.refresh(*residual);

@@ -1306,9 +1306,10 @@ namespace DiFfRG
       //
       // Two things force this, and either alone is fatal:
       //  * distribute_dofs() on a parallel triangulation is collective (MPI_Allgather inside
-      //    ParallelShared::distribute_dofs), while this whole call chain runs inside readouts(),
-      //    which OutputSession invokes on rank 0 only. Rank 0 would enter a collective nobody
-      //    else reaches, and the run hangs with no diagnostic.
+      //    ParallelShared::distribute_dofs), while this call chain may run on rank 0 alone: the
+      //    readouts reconstruct the raw potential only where it is written
+      //    (OutputFrame::writes_raw_potential). Rank 0 would enter a collective nobody else
+      //    reaches, and the run hangs with no diagnostic.
       //  * even if it did not hang, the assembly over a partitioned mesh visits only the calling
       //    rank's (owned) cells, so the potential system would be assembled with entire rows left
       //    at zero -- a singular matrix handed to UMFPACK, or silently wrong readouts.

@@ -809,7 +809,7 @@ namespace DiFfRG
       if (!is_close(last_save, t, 1e-10)) {
         assembler.set_time(t);
         commit_variables(variable_y, sol, t);
-        // Refreshed here, OUTSIDE write_frame: it runs its contributor on rank 0 only, and a refresh communicates.
+        // Replicas of the distributed state for the frame (collective).
         sol_view.refresh(sol);
         sol_dot_view.refresh(sol_dot);
         residual_view.refresh(*residual);

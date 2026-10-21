@@ -13,13 +13,12 @@
 #include <DiFfRG/physics/integration/map_completion.hh>
 #include <DiFfRG/physics/integration/map_distribution.hh>
 // for has_cacheable_positions_v, shared with the vacuum integrator
+#include <DiFfRG/physics/integration/hoist.hh>
 #include <DiFfRG/physics/integration/quadrature_integrator.hh>
-#include <DiFfRG/physics/interpolation/data_epoch.hh>
 
 // std
 #include <cstdio>
 #include <string>
-#include <typeinfo>
 
 namespace DiFfRG
 {
@@ -63,71 +62,7 @@ namespace DiFfRG
   // whose large kernels stall on instruction fetch, as measured on A100; to be verified there before it becomes the
   // default.
 
-  /**
-   * @brief Whether `K` provides its integrand in hoisted form.
-   *
-   * Such a kernel declares `static constexpr bool has_pre = true`, a `static constexpr std::array<bool, N> pre_reads`
-   * with one flag per kernel() parameter (in kernel()'s order: box variables, frequency, then the rest), and
-   * - `pre(a...)`, taking kernel()'s parameters and returning (as a trivially copyable value, e.g. a device::tuple)
-   *   the part of the integrand that depends only on the parameters flagged in `pre_reads`;
-   * - `post(P, a...)` with `P = pre(a...)`, which returns `kernel(a...)`.
-   *
-   * QuadratureIntegrator_fT then evaluates pre() once per (first box node, frequency node) and only post() at every
-   * quadrature point, which gives the same result with less work whenever the integrand has a part that depends on
-   * the radial loop momentum and the frequency alone. It does so only where pre() reads no box variable but the
-   * first, no external coordinate (map()) and no argument given per point (map_points()); otherwise it uses
-   * kernel(). Not combined with kernel_has_matsubara_split.
-   */
-  template <class K>
-  inline constexpr bool kernel_has_pre = requires {
-    requires K::has_pre;
-    K::pre_reads.size();
-  };
-
-  namespace internal
-  {
-    /// Whether the pre() of `K` reads kernel() parameter @p i; true for an index beyond `K::pre_reads`.
-    template <class K> constexpr bool pre_reads(const size_t i)
-    {
-      if constexpr (kernel_has_pre<K>)
-        return i >= K::pre_reads.size() || K::pre_reads[i];
-      else
-        return true;
-    }
-
-    /// Whether the pre() of `K` reads any of the kernel() parameters [begin, end).
-    template <class K> constexpr bool pre_reads_any(const size_t begin, const size_t end)
-    {
-      for (size_t i = begin; i < end; ++i)
-        if (pre_reads<K>(i)) return true;
-      return false;
-    }
-
-    /**
-     * @brief Append an identity of @p v to @p key; false if @p v has none, in which case nothing built from it is
-     * reused.
-     *
-     * An interpolator is identified by its data pointer and grid; changes of its data are tracked by the interpolator
-     * data epoch (data_epoch.hh), which the caller adds. Any other trivially copyable value by its bytes, which is
-     * conservative: padding may make two equal values look different, never two different values look equal.
-     */
-    template <typename T> bool append_identity(std::string &key, const T &v)
-    {
-      if constexpr (requires {
-                      v.data();
-                      v.get_coordinates().to_string();
-                    }) {
-        const void *p = v.data();
-        key.append(reinterpret_cast<const char *>(&p), sizeof(p));
-        key += v.get_coordinates().to_string();
-        return true;
-      } else if constexpr (std::is_trivially_copyable_v<T>) {
-        key.append(reinterpret_cast<const char *>(&v), sizeof(T));
-        return true;
-      } else
-        return false;
-    }
-  } // namespace internal
+  // Hoisted kernels (kernel_has_pre): see hoist.hh. Not combined with kernel_has_matsubara_split.
 
   /**
    * @brief Like QuadratureIntegrator, with the last integration variable replaced by a sum over bosonic Matsubara
@@ -472,11 +407,7 @@ namespace DiFfRG
      * A table is reused while the frequency rule, the first box axis, every argument pre() reads and the data of
      * every interpolator (data_epoch.hh) are unchanged; otherwise it is rebuilt.
      */
-    void set_pre_table_reuse(const bool reuse)
-    {
-      m_pre_reuse = reuse;
-      m_pre_key.clear();
-    }
+    void set_pre_table_reuse(const bool reuse) { m_pre_table.set_reuse(reuse); }
 
     /// Fill the pre() table on @p space. Public only because nvcc rejects extended device lambdas inside non-public
     /// member functions.
@@ -1110,13 +1041,8 @@ namespace DiFfRG
         if (hoist) {
           using PT = decltype(pre_value_points(device::array<ctype, sdim>{}, ctype(0), device_args));
           PT *table = pre_table_storage<PT>();
-          std::string key = pre_table_key<PT>(sdim + 1, args.value...);
-          if (key.empty() || key != m_pre_key) {
-            fill_pre_table_points(table, device_args);
-            m_pre_key = std::move(key);
-            note_pre_fill(space);
-          } else
-            wait_for_pre_fill(space);
+          m_pre_table.refresh(pre_table_key<PT>(sdim + 1, args.value...), space, space,
+                              [&] { fill_pre_table_points(table, device_args); });
           m_map_points.run(space, dest,
                            [&](const auto &result) { launch_map_points_hoisted(result, n, device_args, table); });
           return;
@@ -1272,54 +1198,25 @@ namespace DiFfRG
     /// Number of pre() table rows: first box nodes times frequency nodes.
     size_t pre_table_entries() const { return (sdim > 0 ? size_t(grid_size[0]) : size_t(1)) * grid_size[dim - 1]; }
 
-    /// Storage for the pre() table with entries of type PT; invalidates the table if it had to grow.
-    template <typename PT> PT *pre_table_storage() const
-    {
-      static_assert(std::is_trivially_copyable_v<PT>, "pre() must return a trivially copyable value.");
-      const size_t bytes = 2 * pre_table_entries() * sizeof(PT);
-      if (m_pre_table.extent(0) < bytes) {
-        m_pre_table = Kokkos::View<char *, typename ExecutionSpace::memory_space>(
-            Kokkos::view_alloc(Kokkos::WithoutInitializing, "QuadratureIntegrator_fT_pre_table"), bytes);
-        m_pre_key.clear();
-      }
-      return reinterpret_cast<PT *>(m_pre_table.data());
-    }
+    /// Storage for the pre() table with entries of type PT.
+    template <typename PT> PT *pre_table_storage() const { return m_pre_table.template storage<PT>(2 * pre_table_entries()); }
 
-    /**
-     * @brief What a pre() table with entries PT for the kernel() parameters @p rest (the first being parameter
-     * @p first) is computed from; empty if that cannot be told or reuse is off, and then the table is always rebuilt.
-     */
+    /// The key of a pre() table with entries PT for the kernel() parameters @p rest, the first being @p first; see
+    /// PreTable::key.
     template <typename PT, typename... A> std::string pre_table_key(const size_t first, const A &...rest) const
     {
-      if (!m_pre_reuse) return {};
-      std::string key = typeid(PT).name();
-      const auto add = [&](const auto &v) { key.append(reinterpret_cast<const char *>(&v), sizeof(v)); };
-      add(internal::current_interpolator_data_epoch());
-      add(matsubara_nodes.data());
-      add(matsubara_nodes.size());
-      if constexpr (sdim > 0) {
-        add(nodes[0].data());
-        add(nodes[0].size());
-        add(grid_start[0]);
-        add(grid_scale[0]);
-      }
-      bool known = true;
-      size_t i = first;
-      ((known = known && (!internal::pre_reads<KERNEL>(i) || internal::append_identity(key, rest)), ++i), ...);
-      return known ? key : std::string();
-    }
-
-    /// Record that the pre() table was just filled on @p space.
-    void note_pre_fill(const ExecutionSpace &space) const
-    {
-      m_pre_fill_space = space;
-      m_pre_fill_elsewhere = &space != &this->space;
-    }
-
-    /// Before reusing the pre() table on @p space: wait for its fill if that ran on another stream instance.
-    void wait_for_pre_fill(const ExecutionSpace &space) const
-    {
-      if (m_pre_fill_elsewhere || &space != &this->space) m_pre_fill_space.fence();
+      return m_pre_table.template key<KERNEL, PT>(
+          [&](std::string &key) {
+            internal::append_bytes(key, matsubara_nodes.data());
+            internal::append_bytes(key, matsubara_nodes.size());
+            if constexpr (sdim > 0) {
+              internal::append_bytes(key, nodes[0].data());
+              internal::append_bytes(key, nodes[0].size());
+              internal::append_bytes(key, grid_start[0]);
+              internal::append_bytes(key, grid_scale[0]);
+            }
+          },
+          first, rest...);
     }
 
     /// The pre() table for kernel() parameters @p rest (see pre_table_key()), rebuilt on @p space if stale.
@@ -1328,13 +1225,8 @@ namespace DiFfRG
                                 const A &...rest) const
     {
       PT *table = pre_table_storage<PT>();
-      std::string key = pre_table_key<PT>(first, rest...);
-      if (key.empty() || key != m_pre_key) {
-        fill_pre_table(space, table, pos, args);
-        m_pre_key = std::move(key);
-        note_pre_fill(space);
-      } else
-        wait_for_pre_fill(space);
+      m_pre_table.refresh(pre_table_key<PT>(first, rest...), space, this->space,
+                          [&] { fill_pre_table(space, table, pos, args); });
       return table;
     }
 
@@ -1384,13 +1276,8 @@ namespace DiFfRG
     mutable Kokkos::View<NT, typename ExecutionSpace::memory_space> m_result_view;
     mutable typename Kokkos::View<NT, typename ExecutionSpace::memory_space>::host_mirror_type m_result_host;
     mutable bool m_result_views_initialized = false;
-    // The pre() table of a hoisted kernel (see kernel_has_pre), raw bytes of its entry type; what it was computed
-    // from (pre_table_key(), empty: rebuild on next use); the stream it was last filled on.
-    mutable Kokkos::View<char *, typename ExecutionSpace::memory_space> m_pre_table;
-    mutable std::string m_pre_key;
-    mutable ExecutionSpace m_pre_fill_space;
-    mutable bool m_pre_fill_elsewhere = false;
-    bool m_pre_reuse = true;
+    // The pre() table of a hoisted kernel (see kernel_has_pre).
+    internal::PreTable<ExecutionSpace> m_pre_table;
   };
 
   /**

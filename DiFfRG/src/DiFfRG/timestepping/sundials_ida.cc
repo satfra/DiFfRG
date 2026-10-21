@@ -355,9 +355,7 @@ namespace DiFfRG
                                    unsigned int /*step_number*/) {
       if (!is_close(last_save, t, 1e-10)) {
         assembler.set_time(t);
-        // Refreshed here, OUTSIDE write_frame: refreshing a ghosted replica communicates, while
-        // write_frame runs its contributor on rank 0 only. Doing it inside would have rank 0 enter a
-        // collective the other ranks never reach.
+        // Replicas of the distributed state for the frame (collective).
         sol_view.refresh(sol);
         sol_dot_view.refresh(sol_dot);
         residual_view.refresh(*residual);
@@ -713,9 +711,7 @@ namespace DiFfRG
                                    unsigned int /*step_number*/) {
       if (!is_close(last_save, t, 1e-10)) {
         assembler.set_time(t);
-        // Refreshed here, OUTSIDE write_frame: refreshing a ghosted replica communicates, while
-        // write_frame runs its contributor on rank 0 only. Doing it inside would have rank 0 enter a
-        // collective the other ranks never reach.
+        // Replicas of the distributed state for the frame (collective).
         sol_view.refresh(sol.block(0));
         vars_view.refresh(sol.block(1));
         sol_dot_view.refresh(sol_dot.block(0));

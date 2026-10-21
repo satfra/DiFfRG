@@ -39,57 +39,72 @@ namespace DiFfRG
    * Created by OutputSession::write_frame and handed to the callback; it cannot be copied or kept. Everything added
    * to it is written when the callback returns. If the callback or the write throws, the session refuses all further
    * frames.
+   *
+   * On ranks other than 0 the frame discards everything added to it, but the callback still runs there: see
+   * OutputSession_impl::write_frame.
    */
   template <uint dim, typename VectorType> class OutputFrame
   {
   public:
-    /// Adds FE fields to a field series; see FEOutput::attach.
+    /// Adds FE fields to a field series; see FEOutput::attach. Discards them on a non-writing rank.
     class FieldCollector
     {
     public:
       /// Add a scalar field named @p name.
       void attach(const DoFHandler<dim> &dof_handler, const VectorType &solution, const std::string &name)
       {
-        sink->attach(dof_handler, solution, name);
+        if (sink) sink->attach(dof_handler, solution, name);
       }
       /// Add a vector-valued field, one name per component.
       void attach(const DoFHandler<dim> &dof_handler, const VectorType &solution, const std::vector<std::string> &names)
       {
-        sink->attach(dof_handler, solution, names);
+        if (sink) sink->attach(dof_handler, solution, names);
       }
 
     private:
-      explicit FieldCollector(FEOutput<dim, VectorType> &sink) : sink(&sink) {}
+      explicit FieldCollector(FEOutput<dim, VectorType> *sink) : sink(sink) {}
       FEOutput<dim, VectorType> *sink;
       friend class OutputFrame;
     };
 
-    /// Adds one row to a CSV table; see CsvOutput.
+    /// Adds one row to a CSV table; see CsvOutput. Discards it on a non-writing rank.
     class TableRecord
     {
     public:
       /// Set column @p name of this frame's row.
-      void value(const std::string &name, double value) { sink->value(name, value); }
+      void value(const std::string &name, double value)
+      {
+        if (sink) sink->value(name, value);
+      }
       /// See CsvOutput::set_Lambda; by default the table uses `/physical/Lambda`.
-      void set_Lambda(double Lambda) { sink->set_Lambda(Lambda); }
+      void set_Lambda(double Lambda)
+      {
+        if (sink) sink->set_Lambda(Lambda);
+      }
 
     private:
-      explicit TableRecord(CsvOutput &sink) : sink(&sink) {}
+      explicit TableRecord(CsvOutput *sink) : sink(sink) {}
       CsvOutput *sink;
       friend class OutputFrame;
     };
 
-    /// Adds scalars and maps to an HDF5 file; see HDF5Output.
+    /// Adds scalars and maps to an HDF5 file; see HDF5Output. Discards them on a non-writing rank.
     class Hdf5Record
     {
     public:
       /// See HDF5Output::scalar.
-      template <typename... Args> void scalar(Args &&...args) { sink->scalar(std::forward<Args>(args)...); }
+      template <typename... Args> void scalar(Args &&...args)
+      {
+        if (sink) sink->scalar(std::forward<Args>(args)...);
+      }
       /// See HDF5Output::map.
-      template <typename... Args> void map(Args &&...args) { sink->map(std::forward<Args>(args)...); }
+      template <typename... Args> void map(Args &&...args)
+      {
+        if (sink) sink->map(std::forward<Args>(args)...);
+      }
 
     private:
-      explicit Hdf5Record(HDF5Output &sink) : sink(&sink) {}
+      explicit Hdf5Record(HDF5Output *sink) : sink(sink) {}
       HDF5Output *sink;
       friend class OutputFrame;
     };
@@ -100,23 +115,31 @@ namespace DiFfRG
     OutputFrame &operator=(OutputFrame &&) = delete;
 
     /// The main field series (VTK `<run>.pvd`, HDF5 group `/FE`).
-    FieldCollector fields() { return FieldCollector(session.fe_out); }
+    FieldCollector fields() { return FieldCollector(writes() ? &session.fe_out : nullptr); }
     /**
      * @brief An additional field series @p name, created on first use: VTK `<run>_<name>.pvd` (if `/output/vtk`),
      * HDF5 group `/<name>` in the run's `.h5` file (if `/output/hdf5`).
      *
      * @p name is a single path component and not one of FE, potential, eom_potential, scalars, maps, coordinates.
      */
-    FieldCollector fields(const std::string &name) { return FieldCollector(session.field_output(name)); }
+    FieldCollector fields(const std::string &name)
+    {
+      return FieldCollector(writes() ? &session.field_output(name) : nullptr);
+    }
     /**
      * @brief The CSV table `<run>_<name>`, e.g. table("data.csv") writes `<run>_data.csv`. Created on first use;
      * from then on every frame must write the same columns.
      */
-    TableRecord table(const std::string &name) { return TableRecord(session.csv(name)); }
+    TableRecord table(const std::string &name) { return TableRecord(writes() ? &session.csv(name) : nullptr); }
     /// The extra HDF5 file `<run>_<name>.h5`, created on first use; written regardless of `/output/hdf5`.
-    Hdf5Record hdf5(const std::string &name) { return Hdf5Record(session.hdf5(name)); }
+    Hdf5Record hdf5(const std::string &name) { return Hdf5Record(writes() ? &session.hdf5(name) : nullptr); }
     /// The run's HDF5 file `<run>.h5`; throws std::logic_error if `/output/hdf5` is false.
-    Hdf5Record hdf5() { return Hdf5Record(session.hdf5()); }
+    Hdf5Record hdf5()
+    {
+      // Checked on every rank, so that a misconfigured run fails everywhere rather than on rank 0 alone.
+      if (!session.use_hdf5) throw std::logic_error("OutputSession::hdf5: HDF5 output is disabled.");
+      return Hdf5Record(writes() ? &session.hdf5() : nullptr);
+    }
     /// Handle for diagnostic CSV tables `<run>_<table>`, usable outside of frames.
     DiagnosticPort diagnostics() const { return session.diagnostic_port(); }
 
@@ -180,7 +203,7 @@ namespace DiFfRG
     void dump_table(const std::string &name, const std::vector<std::vector<double>> &values, bool append = false,
                     const std::vector<std::string> &header = {})
     {
-      session.dump_to_csv(name, values, append, header);
+      if (writes()) session.dump_to_csv(name, values, append, header);
     }
 
     /// The run name (`/output/name`).
@@ -196,6 +219,8 @@ namespace DiFfRG
 
   private:
     explicit OutputFrame(OutputSession_impl<dim, VectorType> &session) : session(session) {}
+    /// Whether this rank writes what is added to the frame.
+    bool writes() const noexcept { return session.active; }
     OutputSession_impl<dim, VectorType> &session;
     std::set<std::string> readout_ids;
     friend class OutputSession_impl<dim, VectorType>;
@@ -263,8 +288,11 @@ namespace DiFfRG
     /**
      * @brief Write one frame at RG time @p time: call `contributor(OutputFrame &)`, then write what it added.
      *
-     * A second frame at the same time as the previous one is skipped. Does nothing on ranks other than 0. After an
-     * error, every further call rethrows it.
+     * A second frame at the same time as the previous one is skipped. After an error, every further call rethrows it.
+     *
+     * Collective: call it on every rank. Ranks other than 0 write nothing, but still run @p contributor (on a frame
+     * that discards what is added to it), because the readouts in it may call collective code such as map(), or
+     * update model state that has to stay the same on every rank.
      */
     template <typename Contributor> void write_frame(const double time, Contributor &&contributor)
     {
@@ -272,9 +300,20 @@ namespace DiFfRG
       rethrow_deferred_error();
       if (terminal_error) std::rethrow_exception(terminal_error);
       if (finished) throw std::logic_error("OutputSession::write_frame: session has already been finished.");
-      if (!active) return;
       // Consecutive run segments (snapshots) both write the frame at their common time; keep the first.
       if (last_frame_time && std::abs(time - *last_frame_time) <= 1e-12 * std::max(1., std::abs(time))) return;
+
+      if (!active) {
+        try {
+          OutputFrame<dim, VectorType> frame(*this);
+          std::forward<Contributor>(contributor)(frame);
+          last_frame_time = time;
+        } catch (...) {
+          terminal_error = std::current_exception();
+          throw;
+        }
+        return;
+      }
 
       try {
         current_frame = internal::FrameTimings{};

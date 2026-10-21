@@ -159,9 +159,11 @@ namespace DiFfRG
      * @brief Local error control for an ABMWithErrorEstimate, driven by /timestepping/explicit/error_control.
      *
      * The local error estimate, scaled by abs_tol + rel_tol |x|, must stay below 1, else the step is retaken at half
-     * the size -- down to minimal_dt. After 2 * Steps steps in a row with an error below 1/4 the step doubles back
-     * towards base_dt. The estimate does not fall like dt^(Steps + 1) in practice -- right-hand sides read at an EoM or
-     * from interpolated spatial data are not smooth on the scale of dt -- so the growth test cannot rely on that.
+     * the size -- down to minimal_dt. After Steps steps in a row with an error below 1/4 the step doubles back
+     * towards base_dt: a doubling leaves Steps points of history at the new size, and Steps more steps refill it to
+     * the 2 * Steps a further doubling resamples from, so the multistep order is kept throughout. The estimate does
+     * not fall like dt^(Steps + 1) in practice -- right-hand sides read at an EoM or from interpolated spatial data are
+     * not smooth on the scale of dt -- so the growth test cannot rely on that.
      *
      * With `aligned`, the step only grows where the time is a multiple of the grown step from t0, so all steps stay
      * on the grid t0 + n base_dt / 2^k and a run whose length is a multiple of base_dt ends exactly on its last step.
@@ -208,7 +210,7 @@ namespace DiFfRG
           t += dt;
           if (prm.enabled) {
             calm_steps = err < 0.25 ? calm_steps + 1 : 0;
-            if (calm_steps >= 2 * Stepper::steps && dt < prm.base_dt && may_grow(t, dt)) {
+            if (calm_steps >= Stepper::steps && dt < prm.base_dt && may_grow(t, dt)) {
               dt = std::min(2. * dt, prm.base_dt);
               calm_steps = 0;
             }
