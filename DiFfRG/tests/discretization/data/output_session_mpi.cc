@@ -9,6 +9,9 @@
 
 #include <filesystem>
 
+// Without MPI, deal.II's MPI_COMM_WORLD stand-in lives in namespace dealii; DiFfRG/common/mpi.hh re-exports it.
+using namespace DiFfRG;
+
 // Readouts in a frame's contributor may call collective code (map()) or update model state, so the contributor has
 // to run on every rank, while only rank 0 writes.
 TEST_CASE("OutputSession runs the frame contributor on every rank and writes on rank 0 only", "[output][session][mpi]")

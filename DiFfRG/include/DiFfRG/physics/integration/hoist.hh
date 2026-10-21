@@ -24,7 +24,7 @@ namespace DiFfRG
    * Such a kernel declares `static constexpr bool has_pre = true`, a `static constexpr std::array<bool, N> pre_reads`
    * with one flag per kernel() parameter (in kernel()'s order: box variables, frequency for a finite-temperature
    * kernel, external coordinates, then the rest), and
-   * - `pre(a...)`, taking kernel()'s parameters and returning (as a trivially copyable value, e.g. a device::tuple)
+   * - `pre(a...)`, taking kernel()'s parameters and returning (as a trivially copy-constructible value, e.g. a device::tuple)
    *   the part of the integrand that depends only on the parameters flagged in `pre_reads`;
    * - `post(P, a...)` with `P = pre(a...)`, which returns `kernel(a...)`.
    *
@@ -111,7 +111,9 @@ namespace DiFfRG
       /// Storage for @p n_entries entries of type PT; forgets the table if it had to grow.
       template <typename PT> PT *storage(const size_t n_entries) const
       {
-        static_assert(std::is_trivially_copyable_v<PT>, "pre() must return a trivially copyable value.");
+        // Not is_trivially_copyable: std::tuple (device::tuple without CUDA) has a non-trivial copy assignment.
+        static_assert(std::is_trivially_copy_constructible_v<PT> && std::is_trivially_destructible_v<PT>,
+                      "pre() must return a trivially copy-constructible and destructible value.");
         const size_t bytes = n_entries * sizeof(PT);
         if (m_data.extent(0) < bytes) {
           m_data = Kokkos::View<char *, typename ExecutionSpace::memory_space>(
