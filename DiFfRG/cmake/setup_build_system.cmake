@@ -455,7 +455,7 @@ if(_diffrg_kokkos_opts MATCHES "-arch=sm_([0-9]+)")
           "sm_${DiFfRG_CUDA_ARCH_BUNDLED}. DiFfRG's own kernels will be correct, but Kokkos aborts at "
           "startup on a GPU older than the architecture it was compiled for, so this build will not run "
           "there. Install a bundle whose architecture is at most sm_${_diffrg_arch_min} (the pre-built "
-          "CUDA bundle is sm_75), or build the dependencies from source with -DKokkos_ARCH_LIST=.")
+          "CUDA bundle is sm_70), or build the dependencies from source with -DKokkos_ARCH_LIST=.")
     endif()
 
     _diffrg_cuda_arch_flags(_diffrg_arch_flags ${DiFfRG_CUDA_ARCH_RESOLVED})

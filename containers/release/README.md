@@ -100,8 +100,8 @@ The full set is `cpu` and `cuda12`, each also as an Open MPI build
 
 - **cpu** (`linux-x86_64-v3-cpu`): the baseline, described above.
 - **cuda12** (`linux-x86_64-v3-cuda12`, `build-release.sh -V ...`): CUDA-enabled
-  Kokkos at the sm_75/Turing floor -- Kokkos allows exactly one CUDA arch per
-  build, and sm_75 embeds compute_75 PTX so every newer GPU runs the bundle's
+  Kokkos at the sm_70/Volta floor -- Kokkos allows exactly one CUDA arch per
+  build, and sm_70 embeds compute_70 PTX so every newer GPU runs the bundle's
   own kernels via JIT (cached after first launch); libDiFfRG and applications
   compile for the local GPU through `DiFfRG_CUDA_ARCH`. Consumers need the CUDA 12 toolkit anyway (their
   apps compile device code), so the bundle resolves the host's libcudart. The

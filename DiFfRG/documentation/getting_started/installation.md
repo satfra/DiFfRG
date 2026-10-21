@@ -158,13 +158,13 @@ cmake .. -DDiFfRG_CUDA_ARCH="80;90"   # one binary for both A100 and H100
 
 Left unset it detects the GPUs of the build machine, which is the right answer whenever you build where you run. Set it by hand on a driverless build node, or when the compute nodes have different GPUs than the login node. An application inherits the value the library was built with, so the two always agree unless the application overrides it.
 
-The pre-built CUDA bundle is deliberately built for the *oldest* supported architecture (`sm_75`, Turing), which is what lets one download serve everything from Turing to Blackwell. Only the bundle's own Kokkos and deal.II kernels are affected by that floor — a few hundred small plumbing kernels, JIT-compiled once and cached. Nothing you compile is: the setting above retargets it all natively.
+The pre-built CUDA bundle is deliberately built for the *oldest* supported architecture (`sm_70`, Volta), which is what lets one download serve everything from Volta to Blackwell. Only the bundle's own Kokkos and deal.II kernels are affected by that floor — a few hundred small plumbing kernels, JIT-compiled once and cached. Nothing you compile is: the setting above retargets it all natively.
 
 The one direction that does not work is asking for a GPU *older* than the bundle: DiFfRG's kernels would be right, but Kokkos' own would be above the device and abort. Configure warns about that; the fix is a bundle with a low enough floor, or a source install with `-DKokkos_ARCH_LIST=` (the installer's `--cuda-arch` sets both).
 
 Two consequences of that split are worth knowing:
 
-- Kokkos would print `running kernels compiled for compute capability 7.5 on device with compute capability 9.0` at startup. It detects this with a probe kernel that lives inside the bundled `libkokkoscore`, so the warning is about the bundle and says nothing about DiFfRG's kernels. `DiFfRG::Init()` suppresses that one line and prints an accurate one instead; every other Kokkos warning is untouched.
+- Kokkos would print `running kernels compiled for compute capability 7.0 on device with compute capability 9.0` at startup. It detects this with a probe kernel that lives inside the bundled `libkokkoscore`, so the warning is about the bundle and says nothing about DiFfRG's kernels. `DiFfRG::Init()` suppresses that one line and prints an accurate one instead; every other Kokkos warning is untouched.
 - `KOKKOS_IMPL_ARCH_NVIDIA_GPU` is baked into the bundle's installed headers and stays at the bundle's floor. It gates only half-precision conversions and 16-byte lock-free atomics, neither of which DiFfRG's double-precision kernels use. A source install (`--mode source`, which builds Kokkos for the architecture you choose) removes even that.
 
 #### Offline CUDA builds on clusters (driverless build nodes)

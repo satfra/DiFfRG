@@ -1,5 +1,5 @@
 # On-demand build of the pre-built CUDA dependency bundle
-# (diffrg-deps-<version>-linux-x86_64-v3-cuda12.tar.zst, sm_75/Turing floor;
+# (diffrg-deps-<version>-linux-x86_64-v3-cuda12.tar.zst, sm_70/Volta floor;
 # applications retarget themselves to the local GPU via DiFfRG_CUDA_ARCH).
 #
 # GitHub-hosted runners have no GPU, so validation here is build-only: the
@@ -17,7 +17,7 @@ on:
         required: true
       cuda_arch:
         description: "Kokkos CUDA architecture floor (applications retarget via DiFfRG_CUDA_ARCH)"
-        default: TURING75
+        default: VOLTA70
       mpi:
         description: "MPI implementation the bundle links (openmpi adds the -openmpi variant: PETSc, hypre, MUMPS)"
         type: choice

@@ -354,8 +354,9 @@ detect_cuda_arch() {
 # pre-selected; the remaining common families are offered so that a node without
 # a visible GPU can still be configured for the one it will run on.
 ask_cuda_arch() {
-  local caps=(7.5 8.0 8.6 8.9 9.0 10.0 12.0)
+  local caps=(7.0 7.5 8.0 8.6 8.9 9.0 10.0 12.0)
   local labels=(
+    "7.0   Volta         (V100, Titan V)"
     "7.5   Turing        (RTX 20xx, T4, Quadro RTX)"
     "8.0   Ampere        (A100)"
     "8.6   Ampere        (RTX 30xx, A10, A40)"
@@ -547,7 +548,7 @@ case "${prefix}" in /*) ;; *) prefix="$(pwd)/${prefix}" ;; esac
 case "${build_dir}" in /*) ;; *) build_dir="$(pwd)/${build_dir}" ;; esac
 
 # With an NVIDIA GPU or the CUDA toolkit present, offer the CUDA bundle
-# (Turing/sm_75 or newer; needs the CUDA 12 toolkit to build applications).
+# (Volta/sm_70 or newer; needs the CUDA 12 toolkit to build applications).
 # nvcc alone counts: a cluster build node often has no GPU or nvidia-smi.
 if [[ ${mode} == prebuilt && -z ${deps_variant} && -z ${deps_file} && "$(uname -s)" == Linux ]] &&
   { command -v nvidia-smi || command -v nvcc; } >/dev/null 2>&1; then
@@ -558,7 +559,7 @@ if [[ ${mode} == prebuilt && -z ${deps_variant} && -z ${deps_file} && "$(uname -
   fi
   choose _c "${gpu_note} -- which bundle?" \
     "CPU bundle -- no GPU support" \
-    "CUDA bundle -- GPU-enabled (Turing/RTX 20xx or newer; requires the CUDA >=12 toolkit)"
+    "CUDA bundle -- GPU-enabled (Volta/V100 or newer; requires the CUDA >=12 toolkit)"
   [[ ${_c} -eq 1 ]] && deps_variant="linux-x86_64-v3-cuda12"
 fi
 
@@ -647,6 +648,12 @@ if [[ ${mode} == source && ${opt_gpu} -eq 1 ]] ||
   [[ ${mode} == prebuilt && ${deps_variant} == *cuda* ]]; then
   [[ -z ${cuda_arch} ]] && ask_cuda_arch
   normalize_cuda_arch
+  # CUDA 13 dropped Volta, so nvcc would only fail deep inside the build.
+  if [[ ${cuda_arch} =~ (^|;)7[02](;|$) ]] && command -v nvcc >/dev/null 2>&1; then
+    nvcc_major="$(nvcc --version | sed -n 's/.*release \([0-9]*\)\..*/\1/p')"
+    [[ -n ${nvcc_major} && ${nvcc_major} -ge 13 ]] &&
+      warn "Volta (sm_70/72) needs a CUDA 12 toolkit, but nvcc is CUDA ${nvcc_major}; the build will fail. Put a CUDA 12 nvcc on PATH first."
+  fi
 fi
 
 if [[ -z ${examples_dir} ]]; then

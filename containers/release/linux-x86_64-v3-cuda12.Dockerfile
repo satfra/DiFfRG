@@ -1,10 +1,10 @@
 # Relocatable DiFfRG dependency bundle: linux x86_64, -march=x86-64-v3,
-# CUDA 12 (sm_75/Turing floor). --build-arg mpi=openmpi builds the MPI variant
+# CUDA 12 (sm_70/Volta floor). --build-arg mpi=openmpi builds the MPI variant
 # linux-x86_64-v3-cuda12-openmpi, exactly as in linux-x86_64-v3-cpu.Dockerfile.
 #
 # Mirrors linux-x86_64-v3-cpu.Dockerfile with a CUDA-enabled Kokkos. Kokkos
 # takes one CUDA arch per build, so the bundle is compiled for the oldest
-# architecture DiFfRG supports and runs on everything from Turing to Blackwell
+# architecture DiFfRG supports and runs on everything from Volta to Blackwell
 # via its embedded PTX. Only the bundle's own kernels are affected by that:
 # libDiFfRG and every application retarget themselves to the local GPU through
 # DiFfRG_CUDA_ARCH, so no user code is ever JIT-compiled.
@@ -61,14 +61,14 @@ WORKDIR /src
 COPY . /src
 
 ARG threads=6
-ARG cuda_arch=TURING75
+ARG cuda_arch=VOLTA70
 
 # GPU=ON with a pinned Kokkos arch: no GPU is present at build time, so the
 # arch cannot be auto-detected and MUST be given explicitly.
 #
 # The floor is deliberately the oldest architecture DiFfRG supports. Kokkos
 # aborts at startup when its compiled architecture is *above* the device, so
-# this is what makes one bundle usable from Turing to Blackwell; the cost is
+# this is what makes one bundle usable from Volta to Blackwell; the cost is
 # only that its own (small) kernels are JIT-compiled on newer GPUs. Nothing the
 # user compiles is affected -- DiFfRG_CUDA_ARCH retargets the library and every
 # application to the GPU actually in use.

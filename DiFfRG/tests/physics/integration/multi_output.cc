@@ -136,8 +136,11 @@ namespace
       {
         DeferredMaps defer;
         multi.map({d0.data(), d1.data(), d2.data()}, coordinates, a);
-        CHECK(d0[0] == sentinel);
-        CHECK(d2[n - 1] == sentinel);
+        // Without a device backend every map runs immediately, so there is nothing to defer.
+        if constexpr (DiFfRG::internal::has_device_backend) {
+          CHECK(d0[0] == sentinel);
+          CHECK(d2[n - 1] == sentinel);
+        }
       }
       check_close(ref, {{d0.data(), d1.data(), d2.data()}}, n, tolerance);
     }
