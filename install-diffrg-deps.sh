@@ -64,7 +64,10 @@ REPO="satfra/DiFfRG"
 BUILD_PREFIX="/opt/diffrg" # canonical prefix baked into release bundles
 
 os_name="$(uname -s)"
-case "${os_name}-$(uname -m)" in
+machine="$(uname -m)"
+# Under Rosetta, uname reports x86_64 on an Apple Silicon Mac.
+[[ ${os_name} == Darwin && "$(sysctl -n hw.optional.arm64 2>/dev/null)" == 1 ]] && machine=arm64
+case "${os_name}-${machine}" in
 Linux-x86_64) DEFAULT_VARIANT="linux-x86_64-v3-cpu" ;;
 Darwin-arm64) DEFAULT_VARIANT="macos-arm64-cpu" ;;
 *) DEFAULT_VARIANT="" ;;
@@ -117,7 +120,7 @@ esac
 
 # ------------------------------------------------------------ platform gate --
 [[ -n $DEFAULT_VARIANT ]] \
-  || err "Pre-built bundles exist for Linux x86_64 and macOS arm64 only ($(uname -s) $(uname -m) detected). Use install_diffrg.sh --mode source to build from source."
+  || err "Pre-built bundles exist for Linux x86_64 and macOS arm64 only (${os_name} ${machine} detected). Use install_diffrg.sh --mode source to build from source."
 
 [[ -z $variant ]] && variant="$DEFAULT_VARIANT"
 if [[ $want_mpi -eq 1 && $variant != *-openmpi ]]; then
@@ -140,16 +143,20 @@ fi
 # curl/sha256sum are only needed for the download path; a local --file install
 # (e.g. air-gapped) works without them.
 required_tools=(tar sed grep cmake)
-[[ -z $tarball ]] && required_tools+=(curl sha256sum)
+[[ -z $tarball ]] && required_tools+=(curl)
 for tool in "${required_tools[@]}"; do
   command -v "$tool" >/dev/null || err "'$tool' is required but not installed."
 done
+[[ -n $tarball ]] || command -v sha256sum >/dev/null || command -v shasum >/dev/null \
+  || err "'sha256sum' (or 'shasum') is required but not installed."
 tar --zstd --version >/dev/null 2>&1 || command -v zstd >/dev/null \
   || err "zstd is required to unpack the bundle (install the 'zstd' package)."
 
 # ----------------------------------------------------------------- download --
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [[ -z $tarball ]]; then
   if [[ -z $version ]]; then

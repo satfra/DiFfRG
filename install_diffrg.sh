@@ -94,26 +94,37 @@ err() {
 info() { echo -e "\033[1;32m==>\033[0m $*"; }
 warn() { echo -e "\033[1;33mWARNING:\033[0m $*" >&2; }
 
-# reset_stale_build <build-subdir> <expected-install-prefix>
-#
-# The build folder is reused between runs on purpose -- that is what makes
-# re-running this script cheap. But a CMake cache remembers absolute paths that
-# CMake will not re-derive once they are set: deal.II_DIR above all. Reusing a
-# tree that was configured for a *different* prefix therefore builds the library
-# against the previous install's deal.II while installing into the new one, and
-# bakes that deal.II's flags (-Xcudafe on a CUDA build, its -march, ...) into
-# DiFfRGTargets.cmake. Nothing fails here; the first application built against
-# the result fails instead, far from the cause.
-#
-# So keep the cache when the prefix is unchanged, and drop it when it is not.
-reset_stale_build() {
-  local dir="$1" want="$2" cache="$1/CMakeCache.txt" had
-  [[ -f ${cache} ]] || return 0
-  had="$(sed -n 's/^CMAKE_INSTALL_PREFIX:PATH=//p' "${cache}" | head -1)"
-  [[ -n ${had} && ${had} != "${want}" ]] || return 0
-  info "Build folder was configured for ${had}; starting it fresh for ${want}."
-  rm -rf "${dir}"
+# On Apple Silicon, a shell running under Rosetta reports x86_64: that hides
+# the arm64 bundles and makes every compiler it starts target x86_64. Re-run
+# natively. /bin/bash is a universal binary, unlike an Intel Homebrew bash.
+if [[ "$(uname -s)" == Darwin && "$(sysctl -n sysctl.proc_translated 2>/dev/null)" == 1 ]]; then
+  [[ -f $0 ]] || err "This shell runs under Rosetta (x86_64 emulation). Run the installer natively:
+  arch -arm64 /bin/bash <(curl -sL https://raw.githubusercontent.com/satfra/DiFfRG/main/install_diffrg.sh)"
+  info "This shell runs under Rosetta; restarting the installer natively (arm64)."
+  exec arch -arm64 /bin/bash "$0" "$@"
+fi
+
+# Everything temporary lives in ${work_dir}, a fresh folder inside the build
+# folder. It is removed on exit, including Ctrl+C, but kept after a failure so
+# that the build logs can be read. The build folder itself is removed only when
+# this script created it and it is empty afterwards.
+work_dir=''
+created_build_dir=''
+cleanup() {
+  local rc=$?
+  if [[ -n ${work_dir} && -d ${work_dir} ]]; then
+    if [[ ${rc} -ne 0 && ${rc} -ne 130 && ${rc} -ne 143 ]]; then
+      warn "Keeping ${work_dir} for the build logs; delete it when done."
+      return
+    fi
+    echo "Removing the temporary build folder ${work_dir}..."
+    rm -rf "${work_dir}"
+  fi
+  if [[ -n ${created_build_dir} ]]; then rmdir "${created_build_dir}" 2>/dev/null || true; fi
 }
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # ------------------------------------------------------------------ defaults --
 ref=''
@@ -249,6 +260,10 @@ if [[ ${assume_yes} -eq 0 ]] && { exec 3</dev/tty 4>/dev/tty; } 2>/dev/null; the
   interactive=1
 fi
 _c=0 # menu-selection result of choose()
+# Wait for the rest of an arrow-key escape sequence; bash 3.2 (macOS) only
+# takes whole seconds.
+esc_timeout=0.05
+[[ ${BASH_VERSINFO[0]} -ge 4 ]] || esc_timeout=1
 
 # choose <varname> <title> <option>... -- arrow-key menu (falls back to a
 # numbered prompt on terminals without ANSI support). Sets <varname> to the
@@ -269,7 +284,7 @@ choose() {
       else printf '   %s\n' "${opts[${i}]}" >&4; fi
     done
     IFS= read -rsn1 key <&3 || { key=''; }
-    [[ ${key} == $'\x1b' ]] && { IFS= read -rsn2 -t 0.05 key <&3 || key=''; }
+    [[ ${key} == $'\x1b' ]] && { IFS= read -rsn2 -t "${esc_timeout}" key <&3 || key=''; }
     case "${key}" in
     '[A') [[ ${cur} -gt 0 ]] && cur=$((cur - 1)) ;;
     '[B') [[ ${cur} -lt $((${#opts[@]} - 1)) ]] && cur=$((cur + 1)) ;;
@@ -321,7 +336,7 @@ toggles() {
         else printf '   %s %s\n' "${box}" "${names[${i}]}" >&4; fi
       done
       IFS= read -rsn1 key <&3 || key=''
-      [[ ${key} == $'\x1b' ]] && { IFS= read -rsn2 -t 0.05 key <&3 || key=''; }
+      [[ ${key} == $'\x1b' ]] && { IFS= read -rsn2 -t "${esc_timeout}" key <&3 || key=''; }
       case "${key}" in
       '[A') [[ ${cur} -gt 0 ]] && cur=$((cur - 1)) ;;
       '[B') [[ ${cur} -lt $((${#names[@]} - 1)) ]] && cur=$((cur + 1)) ;;
@@ -366,7 +381,7 @@ ask_cuda_arch() {
     "12.0  Blackwell     (RTX 50xx, RTX PRO)"
   )
   local detected=() cap i found
-  mapfile -t detected < <(detect_cuda_arch)
+  while IFS= read -r cap; do detected+=("${cap}"); done < <(detect_cuda_arch)
 
   # A capability we have no label for (a Jetson, or hardware newer than this
   # script) still has to be offerable, so append it rather than dropping it.
@@ -467,7 +482,7 @@ list_releases() {
 # of just the hashed paths (a few seconds); empty on failure.
 ref_inputs_hash() {
   local tmp hash=''
-  tmp="$(mktemp -d)"
+  tmp="$(mktemp -d "${work_dir}/deps-hash.XXXXXX")"
   if git -c advice.detachedHead=false clone -q --depth 1 --branch "$1" --filter=blob:none \
     --no-checkout "${REPO_URL}" "${tmp}" 2>/dev/null &&
     git -C "${tmp}" sparse-checkout set --no-cone /superbuild.cmake /dependencies/ /patches/ /containers/release/ &&
@@ -512,7 +527,9 @@ echo "   DiFfRG installer"
 echo "  ============================================="
 
 # --------------------------------------------------------------------- wizard --
-mapfile -t releases < <(list_releases)
+# No mapfile here and below: macOS ships bash 3.2.
+releases=()
+while IFS= read -r _l; do releases+=("${_l}"); done < <(list_releases)
 if [[ -z ${ref} ]]; then
   if [[ ${#releases[@]} -eq 0 ]]; then
     warn "Could not list DiFfRG releases; installing main."
@@ -546,6 +563,9 @@ ask prefix "Install prefix" "${prefix}"
 ask build_dir "Temporary build folder" "${build_dir}"
 case "${prefix}" in /*) ;; *) prefix="$(pwd)/${prefix}" ;; esac
 case "${build_dir}" in /*) ;; *) build_dir="$(pwd)/${build_dir}" ;; esac
+[[ -e ${build_dir} ]] || created_build_dir="${build_dir}"
+mkdir -p "${build_dir}"
+work_dir="$(mktemp -d "${build_dir}/diffrg-install.XXXXXX")"
 
 # With an NVIDIA GPU or the CUDA toolkit present, offer the CUDA bundle
 # (Volta/sm_70 or newer; needs the CUDA 12 toolkit to build applications).
@@ -598,7 +618,8 @@ if [[ ${mode} == prebuilt && -z ${deps_file} && -z ${deps_version} ]]; then
   [[ ${opt_mpi} -eq 1 && ${bundle_variant} != *-openmpi ]] && bundle_variant="${bundle_variant}-openmpi"
 
   info "Looking for a dependency bundle matching ${ref} (${bundle_variant})..."
-  mapfile -t versions < <(curl -fsSL "${REPO_API}/releases?per_page=100" 2>/dev/null |
+  versions=()
+  while IFS= read -r _l; do versions+=("${_l}"); done < <(curl -fsSL "${REPO_API}/releases?per_page=100" 2>/dev/null |
     grep -oE '"tag_name": *"deps-v[0-9]+\.[0-9]+\.[0-9]+"' |
     grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -rV || true)
   [[ ${#versions[@]} -gt 0 ]] ||
@@ -716,20 +737,9 @@ if [[ ${interactive} -eq 1 ]]; then
 fi
 
 # ------------------------------------------------------------------ checkout --
-mkdir -p "${build_dir}"
-src="${build_dir}/DiFfRG"
-# The bundle was chosen for ${ref}, so building any other revision is an error,
-# not something to warn about and continue.
-if [[ -d ${src}/.git ]]; then
-  info "Switching the existing checkout in ${src} to ${ref}..."
-  if [[ ${ref} == main ]]; then checkout_args=(-B main); else checkout_args=(--detach); fi
-  { git -C "${src}" fetch --depth 1 origin "${ref}" &&
-    git -C "${src}" -c advice.detachedHead=false checkout "${checkout_args[@]}" FETCH_HEAD; } ||
-    err "Could not switch ${src} to ${ref}. Delete ${src} and re-run."
-else
-  info "Cloning DiFfRG ${ref} into ${src}..."
-  git -c advice.detachedHead=false clone --depth 1 --branch "${ref}" "${REPO_URL}" "${src}"
-fi
+src="${work_dir}/DiFfRG"
+info "Cloning DiFfRG ${ref}..."
+git -c advice.detachedHead=false clone --depth 1 --branch "${ref}" "${REPO_URL}" "${src}"
 
 # --------------------------------------------------------------------- build --
 if [[ ${mode} == prebuilt ]]; then
@@ -755,17 +765,16 @@ if [[ ${mode} == prebuilt ]]; then
   # A local tarball is whatever variant it is; --mpi only selects downloads.
   [[ -z ${deps_file} && ${opt_mpi} -eq 1 ]] && variant_arg="${variant_arg} --mpi"
   if [[ -n ${deps_file} ]]; then
-    bash "${src}/install-diffrg-deps.sh" --file "${deps_file}" --prefix "${prefix}" ${variant_arg} ${force_arg}
+    "${BASH}" "${src}/install-diffrg-deps.sh" --file "${deps_file}" --prefix "${prefix}" ${variant_arg} ${force_arg}
   else
-    bash "${src}/install-diffrg-deps.sh" --version "${deps_version}" --prefix "${prefix}" ${variant_arg} ${force_arg}
+    "${BASH}" "${src}/install-diffrg-deps.sh" --version "${deps_version}" --prefix "${prefix}" ${variant_arg} ${force_arg}
   fi
 
   info "Building the DiFfRG library against the bundle..."
   # CMAKE_INSTALL_LIBDIR=lib keeps the library's cmake config at
   # <prefix>/lib/cmake/DiFfRG on every distro (EL-family GNUInstallDirs would
   # otherwise choose lib64), matching the find_package hint printed below.
-  reset_stale_build "${build_dir}/library-build" "${prefix}"
-  cmake -S "${src}/DiFfRG" -B "${build_dir}/library-build" \
+  cmake -S "${src}/DiFfRG" -B "${work_dir}/library-build" \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUNDLED_DIR="${prefix}/bundled" \
     -DCMAKE_INSTALL_PREFIX="${prefix}" \
@@ -773,8 +782,8 @@ if [[ ${mode} == prebuilt ]]; then
     ${mathematica_dir:+-DDiFfRG_MATHEMATICA_INSTALL_DIR="${mathematica_dir}"} \
     ${cuda_arch:+-DDiFfRG_CUDA_ARCH="${cuda_arch}"} \
     -DDIFFRG_DOCS="$([[ ${opt_docs} -eq 1 ]] && echo ON || echo OFF)"
-  cmake --build "${build_dir}/library-build" -j "${threads}"
-  cmake --install "${build_dir}/library-build"
+  cmake --build "${work_dir}/library-build" -j "${threads}"
+  cmake --install "${work_dir}/library-build"
 else
   info "Configuring the full superbuild (this will take a while)..."
   [[ ${opt_mumps} -eq 2 ]] && opt_mumps=${opt_mpi}
@@ -788,8 +797,7 @@ else
   fi
   # BUILD_JOBS is a core-count hint the superbuild halves for its sub-builds;
   # 2x threads makes those sub-builds use exactly ${threads} jobs.
-  reset_stale_build "${build_dir}/superbuild" "${prefix}"
-  cmake -S "${src}" -B "${build_dir}/superbuild" \
+  cmake -S "${src}" -B "${work_dir}/superbuild" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="${prefix}" \
     -DMPI="$([[ ${opt_mpi} -eq 1 ]] && echo ON || echo OFF)" \
@@ -803,8 +811,8 @@ else
     -DBUILD_JOBS=$((2 * threads)) \
     -DDEALII_MAX_JOBS="${threads}" \
     -DPETSC_MAX_JOBS="${threads}"
-  info "Building (logs of individual dependencies are in ${build_dir}/superbuild)..."
-  cmake --build "${build_dir}/superbuild" -- -j "${threads}"
+  info "Building (logs of individual dependencies are in ${work_dir}/superbuild)..."
+  cmake --build "${work_dir}/superbuild" -- -j "${threads}"
 fi
 
 # ------------------------------------------------------------ examples & docs --
@@ -827,5 +835,3 @@ echo "  Use it from your own project's CMakeLists.txt with:"
 echo "      find_package(DiFfRG REQUIRED HINTS ${prefix}/lib/cmake/DiFfRG)"
 [[ -n ${examples_dir} ]] && echo "  Examples and tutorials: ${examples_dir}"
 echo "  Documentation: ${DOCS_URL}"
-echo "  The build folder ${build_dir} can be deleted to reclaim space"
-echo "  (keep it to speed up future updates)."
