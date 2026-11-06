@@ -1,0 +1,104 @@
+name: installer-macos
+
+# Manual test of the interactive installer on GitHub's Apple Silicon (M1)
+# runners. Each leg runs the wizard on a pseudo-terminal, takes every default
+# (containers/ci/installer_pty.py), fails if the pre-built bundle was never
+# offered, and by default goes through with the install and its verification.
+# With `ssh`, one runner opens an SSH session instead, to run it by hand.
+
+on:
+  workflow_dispatch:
+    inputs:
+      installer:
+        description: "'checkout': install_diffrg.sh of the selected ref; 'published': raw main, what the README's curl line fetches"
+        type: choice
+        options: [checkout, published]
+        default: checkout
+      full_install:
+        description: "Go through with the install (otherwise abort at the summary)"
+        type: boolean
+        default: true
+      ssh:
+        description: "Only open an SSH (tmate) session on a macos-15 runner"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_CLEANUP: 1
+
+jobs:
+  wizard:
+    if: ${{ !inputs.ssh }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, bash: /opt/homebrew/bin/bash }
+          - { runner: macos-15, bash: /opt/homebrew/bin/bash }
+          - { runner: macos-15, bash: /bin/bash } # Apple's bash 3.2
+          - { runner: macos-15, bash: arch -x86_64 /bin/bash } # under Rosetta
+    name: ${{ matrix.runner }} / ${{ matrix.bash }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prerequisites (the README's macOS list)
+        run: brew install cmake gcc gsl python3 bash
+
+      - name: Rosetta
+        if: startsWith(matrix.bash, 'arch -x86_64')
+        run: arch -x86_64 /usr/bin/true 2>/dev/null || sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Machine
+        run: |
+          sw_vers
+          echo "uname -s -m:     $(uname -s) $(uname -m)"
+          echo "CPU:             $(sysctl -n machdep.cpu.brand_string)"
+          echo "proc_translated: $(sysctl -n sysctl.proc_translated 2>/dev/null)"
+          echo "under test:      $(${{ matrix.bash }} -c 'echo "bash ${BASH_VERSION}, uname -m $(uname -m)"')"
+          which -a bash uname
+          sysctl -n hw.ncpu hw.memsize
+
+      - name: Fetch the installer
+        run: |
+          if [[ ${{ inputs.installer }} == published ]]; then
+            curl -fsSL https://raw.githubusercontent.com/satfra/DiFfRG/main/install_diffrg.sh \
+              -o "${RUNNER_TEMP}/install_diffrg.sh"
+          else
+            cp install_diffrg.sh "${RUNNER_TEMP}/install_diffrg.sh"
+          fi
+
+      - name: Run the wizard, taking every default
+        run: |
+          expect=(--expect "How should DiFfRG's dependencies be installed?")
+          if [[ ${{ inputs.full_install }} == true ]]; then
+            expect+=(--expect "DiFfRG is installed at")
+          else
+            expect+=(--abort)
+          fi
+          # 3 cores / 7 GB per runner: the installer's default of 6 jobs can run out of memory.
+          THREADS=3 python3 containers/ci/installer_pty.py "${expect[@]}" -- \
+            ${{ matrix.bash }} "${RUNNER_TEMP}/install_diffrg.sh" --prefix "${RUNNER_TEMP}/diffrg"
+
+  ssh:
+    if: ${{ inputs.ssh }}
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prerequisites (the README's macOS list)
+        run: brew install cmake gcc gsl python3 bash
+      # Prints the ssh command in the log. Only the keys of whoever started
+      # the run (their GitHub SSH keys) are let in. `touch continue` ends it.
+      - uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
