@@ -19,7 +19,7 @@ on:
         type: boolean
         default: true
       ssh:
-        description: "Only open an SSH (tmate) session on a macos-15 runner"
+        description: "Only open an SSH (tmate) session on a macos-26 runner"
         type: boolean
         default: false
 
@@ -41,10 +41,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { runner: macos-14, bash: /opt/homebrew/bin/bash }
           - { runner: macos-15, bash: /opt/homebrew/bin/bash }
-          - { runner: macos-15, bash: /bin/bash } # Apple's bash 3.2
-          - { runner: macos-15, bash: arch -x86_64 /bin/bash } # under Rosetta
+          - { runner: macos-26, bash: /opt/homebrew/bin/bash }
+          - { runner: macos-26, bash: /bin/bash } # Apple's bash 3.2
+          - { runner: macos-26, bash: arch -x86_64 /bin/bash } # under Rosetta
     name: ${{ matrix.runner }} / ${{ matrix.bash }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -91,7 +91,7 @@ jobs:
 
   ssh:
     if: ${{ inputs.ssh }}
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
