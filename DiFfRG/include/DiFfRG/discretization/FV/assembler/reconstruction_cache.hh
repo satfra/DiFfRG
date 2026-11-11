@@ -275,8 +275,11 @@ namespace DiFfRG
             data.u[i] = solution_global(topology.dof_indices[i]);
         }
 
+        /// The face state from the two side stencils. Without @p with_diffusion, the diffusion entries (and the 1D
+        /// third derivatives, which only the diffusion flux reads) stay zero.
         template <
-            def::HasReconstructor Reconstructor, int dim, typename NumberType, size_t n_components,
+            def::HasReconstructor Reconstructor, bool with_diffusion = true, int dim, typename NumberType,
+            size_t n_components,
             typename DiffusionReconstructor = def::CorrectedWeightedLeastSquaresDiffusionReconstructor<dim, NumberType>>
         FaceReconstructionState<dim, NumberType, n_components>
         compute_interior_face_reconstruction_state(const CellStencilData<dim, NumberType, n_components> &minus_stencil,
@@ -294,6 +297,7 @@ namespace DiFfRG
               plus_stencil.cell.x, x_q, plus_stencil.cell.u, plus_stencil.neighbors.x, plus_stencil.neighbors.u);
           state.u_minus = reconstruct_u(minus_stencil.cell.u, minus_stencil.cell.x, x_q, state.center_grad_minus);
           state.u_plus = reconstruct_u(plus_stencil.cell.u, plus_stencil.cell.x, x_q, state.center_grad_plus);
+          if constexpr (!with_diffusion) return state;
           const auto diffusion_state =
               DiffusionReconstructor::template compute_face_state<n_components>(minus_stencil, plus_stencil);
           state.diffusion_u_minus = diffusion_state.u_minus;
@@ -777,7 +781,8 @@ namespace DiFfRG
                   make_ghost_boundary_side_stencil(boundary_reconstruction_stencil, physical_cell_stencil, model)};
         }
 
-        template <def::HasReconstructor Reconstructor, typename Model, typename NumberType, size_t n_components>
+        template <def::HasReconstructor Reconstructor, bool with_diffusion = true, typename Model, typename NumberType,
+                  size_t n_components>
         FaceReconstructionState<1, NumberType, n_components> compute_boundary_face_reconstruction_state(
             BoundaryStencilData<1, NumberType, n_components> boundary_stencil,
             const CellStencilData<1, NumberType, n_components> &physical_cell_stencil, const dealii::Point<1> &x_q,
@@ -785,20 +790,23 @@ namespace DiFfRG
         {
           const auto [physical_stencil, ghost_stencil] =
               make_model_boundary_reconstruction_side_stencils(boundary_stencil, physical_cell_stencil, x_q, model);
-          return compute_interior_face_reconstruction_state<Reconstructor>(physical_stencil, ghost_stencil, x_q);
+          return compute_interior_face_reconstruction_state<Reconstructor, with_diffusion>(physical_stencil,
+                                                                                           ghost_stencil, x_q);
         }
 
-        template <def::HasReconstructor Reconstructor, typename Model, typename NumberType, size_t n_components>
+        template <def::HasReconstructor Reconstructor, bool with_diffusion = true, typename Model, typename NumberType,
+                  size_t n_components>
         FaceReconstructionState<1, NumberType, n_components> compute_boundary_face_reconstruction_state(
             BoundaryReconstructionStencilData<1, NumberType, n_components> boundary_reconstruction_stencil,
             const CellStencilData<1, NumberType, n_components> &physical_cell_stencil, const dealii::Point<1> &x_q,
             const Model &model)
         {
-          return compute_boundary_face_reconstruction_state<Reconstructor>(boundary_reconstruction_stencil.primary,
-                                                                           physical_cell_stencil, x_q, model);
+          return compute_boundary_face_reconstruction_state<Reconstructor, with_diffusion>(
+              boundary_reconstruction_stencil.primary, physical_cell_stencil, x_q, model);
         }
 
-        template <def::HasReconstructor Reconstructor, typename Model, typename NumberType, size_t n_components>
+        template <def::HasReconstructor Reconstructor, bool with_diffusion = true, typename Model, typename NumberType,
+                  size_t n_components>
         FaceReconstructionState<2, NumberType, n_components> compute_boundary_face_reconstruction_state(
             BoundaryStencilData<2, NumberType, n_components> boundary_stencil,
             const CellStencilData<2, NumberType, n_components> &physical_cell_stencil, const dealii::Point<2> &x_q,
@@ -806,10 +814,12 @@ namespace DiFfRG
         {
           const auto [physical_stencil, ghost_stencil] =
               make_model_boundary_reconstruction_side_stencils(boundary_stencil, physical_cell_stencil, x_q, model);
-          return compute_interior_face_reconstruction_state<Reconstructor>(physical_stencil, ghost_stencil, x_q);
+          return compute_interior_face_reconstruction_state<Reconstructor, with_diffusion>(physical_stencil,
+                                                                                           ghost_stencil, x_q);
         }
 
-        template <def::HasReconstructor Reconstructor, typename Model, typename NumberType, size_t n_components>
+        template <def::HasReconstructor Reconstructor, bool with_diffusion = true, typename Model, typename NumberType,
+                  size_t n_components>
         FaceReconstructionState<2, NumberType, n_components> compute_boundary_face_reconstruction_state(
             BoundaryReconstructionStencilData<2, NumberType, n_components> boundary_reconstruction_stencil,
             const CellStencilData<2, NumberType, n_components> &physical_cell_stencil, const dealii::Point<2> &x_q,
@@ -817,7 +827,8 @@ namespace DiFfRG
         {
           const auto [physical_stencil, ghost_stencil] = make_model_boundary_reconstruction_side_stencils(
               boundary_reconstruction_stencil, physical_cell_stencil, x_q, model);
-          return compute_interior_face_reconstruction_state<Reconstructor>(physical_stencil, ghost_stencil, x_q);
+          return compute_interior_face_reconstruction_state<Reconstructor, with_diffusion>(physical_stencil,
+                                                                                           ghost_stencil, x_q);
         }
 
         template <int dim, typename NumberType, size_t n_components>

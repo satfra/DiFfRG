@@ -35,6 +35,13 @@ TEST_CASE("Test Coordinate template constraints", "[coordinates]")
   STATIC_REQUIRE(is_coordinates<FocusedLogLinLinPeriodicCoordinates>);
   STATIC_REQUIRE(is_coordinates<FocusedBosonicCoordinates1DFiniteT>);
   STATIC_REQUIRE(is_coordinates<FocusedFermionicCoordinates1DFiniteT>);
+  STATIC_REQUIRE(is_coordinates<FocusedRootCoordinates>);
+  STATIC_REQUIRE(is_coordinates<FocusedRootCoordinates1D<float>>);
+  STATIC_REQUIRE(is_coordinates<FocusedRootLinLinPeriodicCoordinates>);
+  STATIC_REQUIRE(is_coordinates<FocusedRootBosonicCoordinates1DFiniteT>);
+  STATIC_REQUIRE(is_coordinates<FocusedRootFermionicCoordinates1DFiniteT>);
+  STATIC_REQUIRE(std::is_same_v<rebind_ctype_t<FocusedRootLinCoordinates, float>,
+                                CoordinatePackND<FocusedRootCoordinates1D<float>, LinearCoordinates1D<float>>>);
 
   // the radial axis of the finite-T coordinates is a template parameter which defaults to the
   // logarithmic one, so the historical two-argument spellings must keep working

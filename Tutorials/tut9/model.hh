@@ -58,7 +58,7 @@ class QuarkMeson : public def::AbstractModel<QuarkMeson, Components>,
 public:
   static constexpr uint dim = 1;
   // evaluate_batch reads values and first derivatives only.
-  static constexpr bool batch_reads_hessians = false;
+  static constexpr bool use_hessians = false;
 
   using Coordinates = BosonicCoordinates1DFiniteT<int, double, LogarithmicCoordinates1D<double>>;
   using Interpolator = SplineInterpolator1DStack<double, Coordinates>;

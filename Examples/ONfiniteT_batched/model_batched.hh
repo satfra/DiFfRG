@@ -52,7 +52,7 @@ namespace ON_batched
   {
   public:
     static constexpr uint dim = 1;
-    static constexpr bool batch_reads_hessians = false;
+    static constexpr bool use_hessians = false;
 
   protected:
     const Parameters prm;
@@ -262,7 +262,7 @@ namespace ON_batched
   template <Backend backend = Backend::TBB, bool batched = true>
   class ModelKT : public def::AbstractModel<ModelKT<backend, batched>, Components>,
                   public def::fRG,
-                  public def::RhoSymmetricLinearExtrapolationBoundaries<ModelKT<backend, batched>>,
+                  public def::FVDefaultBoundaries<ModelKT<backend, batched>>,
                   public def::AD<ModelKT<backend, batched>>
   {
   public:

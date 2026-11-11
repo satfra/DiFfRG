@@ -26,17 +26,24 @@ namespace
    * third derivatives, and a gradient-dependent source. With `batched`, the model evaluates all three itself in
    * evaluate_batch from the batch columns; otherwise it uses the default, which calls flux, diffusion_flux and
    * source per point.
+   *
+   * With Diffusion::zero the diffusion flux vanishes; Diffusion::absent also declares that through
+   * `use_diffusion_flux = false`, so the assembler skips it.
    */
   using Components = ComponentDescriptor<FEFunctionDescriptor<Scalar<"u">, Scalar<"v">>>;
 
-  template <uint dim, bool batched>
-  class Model : public def::AbstractModel<Model<dim, batched>, Components>,
+  enum class Diffusion { on, zero, absent };
+
+  template <uint dim, bool batched, Diffusion diffusion_mode = Diffusion::on>
+  class Model : public def::AbstractModel<Model<dim, batched, diffusion_mode>, Components>,
                 public def::Time,
-                public def::LLFFlux<Model<dim, batched>>,
-                public def::FlowBoundaries<Model<dim, batched>>,
-                public def::AD<Model<dim, batched>>
+                public def::LLFFlux<Model<dim, batched, diffusion_mode>>,
+                public def::FlowBoundaries<Model<dim, batched, diffusion_mode>>,
+                public def::AD<Model<dim, batched, diffusion_mode>>
   {
   public:
+    static constexpr bool use_diffusion_flux = diffusion_mode != Diffusion::absent;
+
     static std::array<double, 2> exact(const Point<dim> &x)
     {
       const double y = dim > 1 ? x[dim - 1] : 0.;
@@ -65,9 +72,10 @@ namespace
     static void diffusion(std::array<Tensor<1, dim, NT>, 2> &D, const std::array<NT, 2> &u,
                           const std::array<Tensor<1, dim, NT>, 2> &du, const Third &third)
     {
+      const double scale = diffusion_mode == Diffusion::on ? 1. : 0.;
       for (uint d = 0; d < dim; ++d) {
-        D[0][d] = -(0.3 + 0.1 * u[1] * u[1]) * du[0][d] + 0.01 * third(0, d);
-        D[1][d] = -0.2 * (1. + u[0]) * du[1][d] + 0.02 * u[0] * du[0][d] + 0.01 * third(1, d);
+        D[0][d] = scale * (-(0.3 + 0.1 * u[1] * u[1]) * du[0][d] + 0.01 * third(0, d));
+        D[1][d] = scale * (-0.2 * (1. + u[0]) * du[1][d] + 0.02 * u[0] * du[0][d] + 0.01 * third(1, d));
       }
     }
     template <typename NT>
@@ -181,8 +189,8 @@ namespace
   }
 
   /// One KT assembler on its own mesh, with a nonsmooth state (so the limiter is active somewhere).
-  template <uint dim, bool batched> struct Setup {
-    using M = Model<dim, batched>;
+  template <uint dim, bool batched, Diffusion diffusion_mode = Diffusion::on> struct Setup {
+    using M = Model<dim, batched, diffusion_mode>;
     // Serial on purpose: this tests serial linear algebra, and a plain RectangularMesh is partitioned in an MPI build.
     using Discretization = FV::Discretization<M, RectangularMeshSerial<dim>, double>;
     using Assembler = FV::KurganovTadmor::Assembler<Discretization, M>;
@@ -302,4 +310,23 @@ TEST_CASE("KT assembly does not depend on the thread count", "[FV][KT][batch]")
   const auto [worst, scale] = matrix_deviation(J_all, J_one);
   REQUIRE(scale > 0.);
   REQUIRE(worst <= rounding_tol * scale);
+}
+
+// A model without diffusion flux that says so (use_diffusion_flux = false) skips the diffusion reconstruction and
+// jacobian, but must assemble what the same model with a zero diffusion flux assembles.
+TEST_CASE("use_diffusion_flux = false matches a zero diffusion flux under KT", "[FV][KT][batch]")
+{
+  DiFfRG::Init();
+  SECTION("1D")
+  {
+    Setup<1, false, Diffusion::absent> absent("0:0.05:1");
+    Setup<1, false, Diffusion::zero> zero("0:0.05:1");
+    require_same_assembly(absent, zero, rounding_tol);
+  }
+  SECTION("2D")
+  {
+    Setup<2, true, Diffusion::absent> absent("0:0.125:1");
+    Setup<2, true, Diffusion::zero> zero("0:0.125:1");
+    require_same_assembly(absent, zero, rounding_tol);
+  }
 }

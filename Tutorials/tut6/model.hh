@@ -93,7 +93,7 @@ public:
   static constexpr uint dim = 1;
   // The flux reads values and first derivatives, never hessians: the assembler then skips them, in the batch and
   // in the AD jacobian.
-  static constexpr bool batch_reads_hessians = false;
+  static constexpr bool use_hessians = false;
 
   ON_CG(const ConfigTree &config) : ONCommon(config) {}
 
@@ -143,7 +143,7 @@ public:
 template <Backend backend>
 class ON_KT : public def::AbstractModel<ON_KT<backend>, Components>,
               public ONCommon,
-              public def::RhoSymmetricLinearExtrapolationBoundaries<ON_KT<backend>>,
+              public def::FVDefaultBoundaries<ON_KT<backend>>,
               public def::AD<ON_KT<backend>>
 {
 public:

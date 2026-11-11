@@ -10,6 +10,9 @@
 #include <deal.II/base/point.h>
 #include <deal.II/base/tensor.h>
 
+#include <Eigen/Dense>
+#include <random>
+
 #include <boilerplate/kt_models.hh>
 #include <boilerplate/kt_trace_evaluation.hh>
 
@@ -378,4 +381,55 @@ TEST_CASE("compute_speed_derivatives 1D 2-component — asymmetric plus/minus FD
     const NumberType da_fd = (a_minus_fwd - a_minus_bwd) / (2.0 * eps);
     CHECK(da_minus[0][c] == Catch::Approx(da_fd).epsilon(1e-4));
   }
+}
+
+// The 2-component closed forms against a direct Eigen eigendecomposition: spectral radius = max |lambda|, and for a
+// real dominant eigenvalue its derivative sgn(lambda) w^T H v / (w^T v).
+TEST_CASE("2-component closed form matches Eigen", "[FV][wave_speed]")
+{
+  constexpr int dim = 1;
+  constexpr size_t nc = 2;
+  using Matrix = Eigen::Matrix<double, 2, 2>;
+  std::mt19937 rng(42);
+  std::uniform_real_distribution<double> uniform(-3., 3.);
+  size_t n_real = 0, n_complex = 0;
+
+  for (int trial = 0; trial < 2000; ++trial) {
+    std::array<JacobianMatrix<NumberType, nc>, dim> J{};
+    HessianTensor<NumberType, dim, nc> H{};
+    Matrix M;
+    for (size_t i = 0; i < nc; ++i)
+      for (size_t j = 0; j < nc; ++j) {
+        J[0][i][j] = M(i, j) = uniform(rng);
+        for (size_t c = 0; c < nc; ++c)
+          H[0][i][j][c] = uniform(rng);
+      }
+
+    Eigen::EigenSolver<Matrix> es(M);
+    Eigen::Index idx;
+    const double radius = es.eigenvalues().cwiseAbs().maxCoeff(&idx);
+    CHECK(MaxEigenvalueWaveSpeed::compute_speeds<NumberType, dim, nc>(J, J)[0] ==
+          Catch::Approx(radius).epsilon(1e-12));
+
+    const auto lambda = es.eigenvalues()(idx);
+    if (lambda.imag() != 0.) {
+      ++n_complex;
+      continue;
+    }
+    ++n_real;
+    const Eigen::Vector2d v = es.eigenvectors().col(idx).real();
+    const Eigen::Vector2d w = es.eigenvectors().inverse().row(idx).transpose().real();
+    const auto [da, da_minus] = MaxEigenvalueWaveSpeed::compute_speed_derivatives<NumberType, dim, nc>(J, J, H, H);
+    for (size_t c = 0; c < nc; ++c) {
+      double contraction = 0.;
+      for (size_t i = 0; i < nc; ++i)
+        for (size_t j = 0; j < nc; ++j)
+          contraction += w(i) * v(j) * H[0][i][j][c];
+      const double expected = (lambda.real() >= 0. ? 1. : -1.) * contraction / w.dot(v);
+      CHECK(da[0][c] == Catch::Approx(expected).epsilon(1e-9).margin(1e-12));
+      CHECK(da_minus[0][c] == da[0][c]);
+    }
+  }
+  CHECK(n_real > 100);
+  CHECK(n_complex > 100);
 }

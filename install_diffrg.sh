@@ -82,7 +82,6 @@ EOF
 }
 
 REPO_URL="${DIFFRG_REPO_URL:-https://github.com/satfra/DiFfRG.git}"
-REPO_API="https://api.github.com/repos/satfra/DiFfRG"
 # Oldest release the installer offers.
 MIN_RELEASE=1.10.0
 DOCS_URL="https://satfra.github.io/DiFfRG"
@@ -618,10 +617,11 @@ if [[ ${mode} == prebuilt && -z ${deps_file} && -z ${deps_version} ]]; then
   [[ ${opt_mpi} -eq 1 && ${bundle_variant} != *-openmpi ]] && bundle_variant="${bundle_variant}-openmpi"
 
   info "Looking for a dependency bundle matching ${ref} (${bundle_variant})..."
+  # From the deps-v* tags, not the GitHub API: its anonymous limit of 60
+  # requests/h per IP runs out behind shared addresses (CI, university NAT).
   versions=()
-  while IFS= read -r _l; do versions+=("${_l}"); done < <(curl -fsSL "${REPO_API}/releases?per_page=100" 2>/dev/null |
-    grep -oE '"tag_name": *"deps-v[0-9]+\.[0-9]+\.[0-9]+"' |
-    grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -rV || true)
+  while IFS= read -r _l; do versions+=("${_l}"); done < <(git ls-remote --tags --refs "${REPO_URL}" 'deps-v*' 2>/dev/null |
+    grep -oE 'refs/tags/deps-v[0-9]+\.[0-9]+\.[0-9]+$' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -rV || true)
   [[ ${#versions[@]} -gt 0 ]] ||
     err "No dependency bundle releases found -- re-run with --mode source, or check your network."
   want_hash="$(ref_inputs_hash "${ref}" "${bundle_variant}")"

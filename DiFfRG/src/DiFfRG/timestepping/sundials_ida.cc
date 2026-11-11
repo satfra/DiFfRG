@@ -346,7 +346,7 @@ namespace DiFfRG
     if (assembler.requests_restarts())
       time_stepper.step_needs_restart = [&](const double t, const VectorType &sol, const VectorType &) {
         sol_view.refresh(sol);
-        return assembler.needs_restart(t, sol_view.get());
+        return assembler.needs_restart(t, sol_view.get(), VectorType());
       };
 
     // At output_dt intervals this function saves intermediate solutions
@@ -702,7 +702,8 @@ namespace DiFfRG
     if (assembler.requests_restarts())
       time_stepper.step_needs_restart = [&](const double t, const BlockVectorType &sol, const BlockVectorType &) {
         sol_view.refresh(sol.block(0));
-        return assembler.needs_restart(t, sol_view.get());
+        vars_view.refresh(sol.block(1));
+        return assembler.needs_restart(t, sol_view.get(), vars_view.get());
       };
 
     // At output_dt intervals this function saves intermediate solutions

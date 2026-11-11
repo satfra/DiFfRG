@@ -245,6 +245,10 @@ namespace DiFfRG
   using FocusedBosonicCoordinates1DFiniteT = BosonicCoordinates1DFiniteT<int, double, FocusedLogCoordinates1D<double>>;
   using FocusedFermionicCoordinates1DFiniteT =
       FermionicCoordinates1DFiniteT<int, double, FocusedLogCoordinates1D<double>>;
+  using FocusedRootBosonicCoordinates1DFiniteT =
+      BosonicCoordinates1DFiniteT<int, double, FocusedRootCoordinates1D<double>>;
+  using FocusedRootFermionicCoordinates1DFiniteT =
+      FermionicCoordinates1DFiniteT<int, double, FocusedRootCoordinates1D<double>>;
 
   /// See rebind_ctype in coordinates.hh.
   template <typename Idx, typename NT0, typename Radial, typename NT>

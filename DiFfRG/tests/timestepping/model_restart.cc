@@ -28,7 +28,7 @@ class ModelSwitch
 {
 public:
   static constexpr uint dim = 1;
-  static constexpr bool batch_reads_derivatives = false;
+  static constexpr bool use_derivatives = false;
   static constexpr double u0 = 0., v0 = 1., u_c = 0.37;
   static constexpr double a = 1., b = -3., alpha = 2., beta = 0.5;
 

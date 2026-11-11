@@ -110,8 +110,10 @@ namespace DiFfRG
      * time @p t (see DiFfRG::HasNeedsRestart). Called once per accepted implicit step. Default: never.
      *
      * @param solution A vector in which every dof is readable (a refreshed SolutionView).
+     * @param variables The variables at @p t, replicated on every rank; empty if the system has none.
      */
-    virtual bool needs_restart([[maybe_unused]] const double t, [[maybe_unused]] const VectorType &solution) const
+    virtual bool needs_restart([[maybe_unused]] const double t, [[maybe_unused]] const VectorType &solution,
+                               [[maybe_unused]] const VectorType &variables) const
     {
       return false;
     }

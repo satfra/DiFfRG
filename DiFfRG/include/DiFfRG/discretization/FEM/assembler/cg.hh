@@ -60,8 +60,8 @@ namespace DiFfRG
      * mass, flux and source, or evaluate_batch (all quadrature points in one call; the default calls flux and source
      * per point, a model can override it to evaluate its momentum integrals in one map() call, on the CPU or GPU);
      * boundary_numflux; cell_indicator for mesh adaptation; the extractor and readout hooks. A model whose flux and
-     * source read no derivatives declares `static constexpr bool batch_reads_derivatives = false`, one that reads
-     * gradients but no hessians `batch_reads_hessians = false`; the assembler then neither gathers nor differentiates
+     * source read no derivatives declares `static constexpr bool use_derivatives = false`, one that reads
+     * gradients but no hessians `use_hessians = false`; the assembler then neither gathers nor differentiates
      * them.
      *
      * ### Parameters
@@ -105,10 +105,9 @@ namespace DiFfRG
       static constexpr size_t n_fe = Components::count_fe_functions();
       static constexpr size_t n_extr = Components::count_extractors();
       using Extractors = std::array<NumberType, n_extr>;
-      /// Which inputs the model reads (batch_reads_derivatives / batch_reads_hessians), and hence which the batches
-      /// hold.
-      static constexpr bool reads_derivatives = batch_reads_derivatives<Model>();
-      static constexpr bool reads_hessians = reads_derivatives && batch_reads_hessians<Model>();
+      /// Which inputs the model reads (use_derivatives / use_hessians), and hence which the batches hold.
+      static constexpr bool reads_derivatives = Model::use_derivatives;
+      static constexpr bool reads_hessians = reads_derivatives && Model::use_hessians;
       using Batch = PointBatch<dim, NumberType, n_fe, Extractors, VariablesVector, reads_derivatives, reads_hessians>;
 
       using PhaseTimes = AssemblyPhaseTimes;

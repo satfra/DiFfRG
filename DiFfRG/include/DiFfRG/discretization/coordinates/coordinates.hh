@@ -821,6 +821,191 @@ namespace DiFfRG
     bool pure_log;
   };
 
+  /**
+   * @brief Points on [start, stop] (start > 0) clustered around an interior scale `center`, with an inverse map that
+   * needs no transcendental functions.
+   *
+   * With \f$\beta = 2^{-m}\f$, m = `root_depth`, and grid index i (real values allowed), the grid is uniform in
+   * \f[
+   *   t(y) = \frac{r}{1 + r}\,, \qquad r = (y/\mathrm{center})^{\beta}\,,
+   * \f]
+   * i.e. \f$i = (t(y) - t(\mathrm{start}))/a\f$ with \f$a = (t(\mathrm{stop}) - t(\mathrm{start}))/(N - 1)\f$, N =
+   * grid_extent. backward() costs m square roots and one division, against two logarithms and a square root for
+   * FocusedLogCoordinates1D, which makes lookups on this grid cheaper on GPUs.
+   *
+   * In \f$u = \ln y\f$ the point density is \f$\propto \beta\, t(1 - t)\f$: highest at center and falling off like
+   * \f$e^{-\beta |u - u_0|}\f$, \f$u_0 = \ln(\mathrm{center})\f$. Smaller \f$\beta\f$ (larger m) means a flatter
+   * distribution; m plays the role of 1/focus. Density at 5 decades from center relative to the peak, for comparison
+   * with FocusedLogCoordinates1D (\f$\approx 0.09, 0.04, 0.02\f$ for focus 1, 2, 4): m = 1: 0.013, m = 2: 0.20,
+   * m = 3: 0.62. m = 0 is the Möbius grid \f$t = y/(y + \mathrm{center})\f$.
+   *
+   * @tparam NT the coordinate type.
+   */
+  template <typename NT = double>
+    requires std::is_floating_point_v<NT>
+  class FocusedRootCoordinates1D
+  {
+  public:
+    /// Scalar type.
+    using ctype = NT;
+    /// One axis.
+    static constexpr size_t dim = 1;
+
+    /// Largest root_depth accepted.
+    static constexpr int max_root_depth = 8;
+
+    /**
+     * @brief The grid; throws if a parameter is out of range.
+     *
+     * @param grid_extent number of grid points, must be at least 2
+     * @param start first grid point, must be positive
+     * @param stop last grid point, must be larger than start
+     * @param center the scale to cluster around, in the same units as start and stop
+     * @param root_depth m, the exponent is \f$\beta = 2^{-m}\f$; 0 to max_root_depth
+     *
+     * The map constants are computed in double whatever NT is, and only then rounded to NT.
+     */
+    FocusedRootCoordinates1D(size_t grid_extent, double start, double stop, double center, int root_depth)
+        : start(start), stop(stop), center(center), root_depth(root_depth), grid_extent(grid_extent),
+          parent_extent(grid_extent)
+    {
+      if (grid_extent < 2) throw std::runtime_error("FocusedRootCoordinates1D: grid_extent must be > 1");
+      if (!(start > 0.)) throw std::runtime_error("FocusedRootCoordinates1D: start must be > 0");
+      if (!(stop > start)) throw std::runtime_error("FocusedRootCoordinates1D: stop must be > start");
+      if (!(center > 0.)) throw std::runtime_error("FocusedRootCoordinates1D: center must be > 0");
+      if (root_depth < 0 || root_depth > max_root_depth)
+        throw std::runtime_error("FocusedRootCoordinates1D: root_depth must be in [0, " +
+                                 std::to_string(max_root_depth) + "]");
+
+      center_inv = NT(1. / center);
+      const double t_start = t_of_y<double>(start, 1. / center, root_depth);
+      const double t_stop = t_of_y<double>(stop, 1. / center, root_depth);
+      t_min = t_start;
+      a = (t_stop - t_start) / double(grid_extent - 1);
+      a_inv = NT(double(grid_extent - 1) / (t_stop - t_start));
+      r_min = t_min / (NT(1) - t_min);
+    }
+
+    /// Convert from another precision.
+    template <typename NT2>
+    FocusedRootCoordinates1D(const FocusedRootCoordinates1D<NT2> &other)
+        : FocusedRootCoordinates1D(
+              FocusedRootCoordinates1D(other.parent_size(), other.start, other.stop, other.center, other.root_depth),
+              other.size())
+    {
+    }
+
+    /**
+     * @brief The first @p n points of this grid, as a grid of the same type.
+     *
+     * forward(i) is bit-identical to that of the full grid for i < n, and backward() is unchanged. The prefix keeps the
+     * parameters and point count of the full grid (parent_size()); to_string() appends ".prefix(n)".
+     *
+     * @param n Number of points kept, 1 ≤ n ≤ size().
+     */
+    FocusedRootCoordinates1D prefix(size_t n) const
+    {
+      if (n < 1 || n > grid_extent) throw std::runtime_error("FocusedRootCoordinates1D::prefix: need 1 <= n <= size()");
+      return FocusedRootCoordinates1D(*this, n);
+    }
+
+    /// Number of points of the grid this one is a prefix() of; size() unless it is a prefix.
+    size_t KOKKOS_FORCEINLINE_FUNCTION parent_size() const { return parent_extent; }
+
+    /// The multi-index {i} of point i.
+    device::array<size_t, 1> KOKKOS_FORCEINLINE_FUNCTION from_linear_index(size_t i) const
+    {
+      return device::array<size_t, 1>{i};
+    }
+
+    /// The coordinate \f$y(i)\f$ at grid index @p x (real values allowed).
+    template <typename IT> NT KOKKOS_FORCEINLINE_FUNCTION forward(const IT &x) const
+    {
+      // Explicit, because -ffast-math may reassociate the ratio below away from exactly 1 at x == 0.
+      if (x == IT(0)) return start;
+      const NT t = t_min + a * x;
+      // y = center * r^(1/beta) = start * (r / r_min)^(2^m)
+      NT q = (t / (NT(1) - t)) / r_min;
+      for (int j = 0; j < root_depth; ++j)
+        q *= q;
+      return start * q;
+    }
+
+    /// As forward(x[0]).
+    template <typename IT> device::array<NT, 1> KOKKOS_FORCEINLINE_FUNCTION forward(const device::array<IT, 1> &x) const
+    {
+      return {forward(x[0])};
+    }
+
+    /// The inverse map: the (fractional) grid index of the coordinate @p y.
+    NT KOKKOS_FORCEINLINE_FUNCTION backward(const NT &y) const
+    {
+      return (t_of_y<NT>(y, center_inv, root_depth) - t_min) * a_inv;
+    }
+
+    /// \f$di/dy\f$ at the coordinate @p y.
+    NT KOKKOS_FORCEINLINE_FUNCTION backward_derivative(const NT &y) const
+    {
+      using Kokkos::sqrt;
+      NT r = y * center_inv;
+      for (int j = 0; j < root_depth; ++j)
+        r = sqrt(r);
+      // dt/dy = beta r / ((1 + r)^2 y), beta = 2^-m
+      const NT beta = NT(1) / NT(1 << root_depth);
+      return a_inv * beta * r / ((NT(1) + r) * (NT(1) + r) * y);
+    }
+
+    /// Number of points N.
+    size_t KOKKOS_FORCEINLINE_FUNCTION size() const { return grid_extent; }
+
+    /// {N}.
+    device::array<size_t, 1> KOKKOS_FORCEINLINE_FUNCTION sizes() const { return {grid_extent}; }
+
+    /// The parameters.
+    const NT start, stop, center;
+    const int root_depth;
+
+    /// Same precision, parameters and number of points (and the same parent, for a prefix).
+    template <typename NT2>
+    friend bool operator==(const FocusedRootCoordinates1D<NT> &lhs, const FocusedRootCoordinates1D<NT2> &rhs)
+    {
+      if constexpr (!std::is_same_v<NT, NT2>) return false; // Different types, cannot be equal
+      return lhs.start == rhs.start && lhs.stop == rhs.stop && lhs.center == rhs.center &&
+             lhs.root_depth == rhs.root_depth && lhs.size() == rhs.size() && lhs.parent_size() == rhs.parent_size();
+    }
+
+    /// "FocusedRootCoordinates1D(N, start, stop, center, root_depth)"; identifies the grid.
+    std::string to_string() const
+    {
+      return "FocusedRootCoordinates1D(" + std::to_string(parent_extent) + ", " + internal::round_trip(start) + ", " +
+             internal::round_trip(stop) + ", " + internal::round_trip(center) + ", " + std::to_string(root_depth) +
+             ")" + (grid_extent == parent_extent ? std::string() : ".prefix(" + std::to_string(grid_extent) + ")");
+    }
+
+  private:
+    /// t = r / (1 + r), r = (y / center)^(2^-m).
+    template <typename T> static KOKKOS_FORCEINLINE_FUNCTION T t_of_y(const T y, const T center_inv, const int m)
+    {
+      using Kokkos::sqrt;
+      T r = y * center_inv;
+      for (int j = 0; j < m; ++j)
+        r = sqrt(r);
+      return r / (T(1) + r);
+    }
+
+    // prefix(): the parent's parameters and spacing, fewer points
+    FocusedRootCoordinates1D(const FocusedRootCoordinates1D &parent, size_t n)
+        : start(parent.start), stop(parent.stop), center(parent.center), root_depth(parent.root_depth), grid_extent(n),
+          parent_extent(parent.parent_extent), center_inv(parent.center_inv), t_min(parent.t_min), a(parent.a),
+          a_inv(parent.a_inv), r_min(parent.r_min)
+    {
+    }
+
+    const size_t grid_extent;
+    size_t parent_extent;
+    NT center_inv, t_min, a, a_inv, r_min;
+  };
+
   /// All grid points, in linear index order, as arrays of dim coordinates.
   template <typename Coordinates> auto make_grid(const Coordinates &coordinates)
   {
@@ -867,6 +1052,9 @@ namespace DiFfRG
   template <typename NT0, typename NT> struct rebind_ctype<FocusedLogCoordinates1D<NT0>, NT> {
     using type = FocusedLogCoordinates1D<NT>;
   };
+  template <typename NT0, typename NT> struct rebind_ctype<FocusedRootCoordinates1D<NT0>, NT> {
+    using type = FocusedRootCoordinates1D<NT>;
+  };
   template <typename... Cs, typename NT>
     requires(requires { typename rebind_ctype<Cs, NT>::type; } && ...)
   struct rebind_ctype<CoordinatePackND<Cs...>, NT> {
@@ -894,6 +1082,12 @@ namespace DiFfRG
   using FocusedLogLinLinCoordinates = CoordinatePackND<FocusedLogCoordinates1D<double>, LinearCoordinates1D<double>,
                                                        LinearCoordinates1D<double>>;
 
+  // Focused coordinates with a cheap inverse map, see FocusedRootCoordinates1D
+  using FocusedRootCoordinates = FocusedRootCoordinates1D<double>;
+  using FocusedRootLinCoordinates = CoordinatePackND<FocusedRootCoordinates1D<double>, LinearCoordinates1D<double>>;
+  using FocusedRootLinLinCoordinates =
+      CoordinatePackND<FocusedRootCoordinates1D<double>, LinearCoordinates1D<double>, LinearCoordinates1D<double>>;
+
   // Periodic (angular) coordinates
   using LinPeriodicCoordinates = LinearPeriodicCoordinates1D<double>;
   using LogLinPeriodicCoordinates =
@@ -904,5 +1098,10 @@ namespace DiFfRG
       CoordinatePackND<FocusedLogCoordinates1D<double>, LinearPeriodicCoordinates1D<double>>;
   using FocusedLogLinLinPeriodicCoordinates =
       CoordinatePackND<FocusedLogCoordinates1D<double>, LinearCoordinates1D<double>,
+                       LinearPeriodicCoordinates1D<double>>;
+  using FocusedRootLinPeriodicCoordinates =
+      CoordinatePackND<FocusedRootCoordinates1D<double>, LinearPeriodicCoordinates1D<double>>;
+  using FocusedRootLinLinPeriodicCoordinates =
+      CoordinatePackND<FocusedRootCoordinates1D<double>, LinearCoordinates1D<double>,
                        LinearPeriodicCoordinates1D<double>>;
 } // namespace DiFfRG

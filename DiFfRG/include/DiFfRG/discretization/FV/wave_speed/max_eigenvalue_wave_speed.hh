@@ -21,9 +21,9 @@ namespace DiFfRG
        * \f$a_d = \max\big(\rho(J^+_d), \rho(J^-_d)\big)\f$, with \f$\rho\f$ the spectral radius (largest eigenvalue modulus) of the flux jacobian
        * \f$J^\pm_d = \partial F_d/\partial u\f$ on either trace.
        *
-       * For one component \f$\rho = |J|\f$; for several, the eigenvalues are computed numerically (Eigen). The
-       * derivative for the jacobian is that of the selected trace (half of each at a tie), by first-order eigenvalue
-       * perturbation theory. For a dominant complex eigenvalue the derivative uses only the real parts of the
+       * For one component \f$\rho = |J|\f$, for two in closed form; for more, the eigenvalues are computed numerically
+       * (Eigen). The derivative for the jacobian is that of the selected trace (half of each at a tie), by first-order
+       * eigenvalue perturbation theory. For a dominant complex eigenvalue the derivative uses only the real parts of the
        * eigenvectors, i.e. it is approximate.
        */
       struct MaxEigenvalueWaveSpeed {
@@ -64,6 +64,23 @@ namespace DiFfRG
         }
 
       private:
+        /// For J = [[a, b], [c, d]]: the eigenvalues are tr/2 +- sqrt(q) with q = ((a - d)/2)^2 + bc.
+        template <typename Matrix> static auto half_trace_and_discriminant(const Matrix &J)
+        {
+          const auto half_trace = 0.5 * (J[0][0] + J[1][1]);
+          const auto half_difference = 0.5 * (J[0][0] - J[1][1]);
+          return std::pair{half_trace, half_difference * half_difference + J[0][1] * J[1][0]};
+        }
+
+        /// Spectral radius of a 2x2 matrix: |tr|/2 + sqrt(q) for real eigenvalues, sqrt(det) for a complex pair.
+        template <typename Matrix> static auto spectral_radius_2x2(const Matrix &J)
+        {
+          using std::abs, std::sqrt;
+          const auto [half_trace, q] = half_trace_and_discriminant(J);
+          if (q >= 0) return abs(half_trace) + sqrt(q);
+          return sqrt(J[0][0] * J[1][1] - J[0][1] * J[1][0]);
+        }
+
         template <typename NumberType, int dim, size_t n_components>
         static std::pair<std::array<NumberType, dim>, std::array<NumberType, dim>>
         compute_spectral_radii(const std::array<internal::JacobianMatrix<NumberType, n_components>, dim> &J_plus,
@@ -77,6 +94,9 @@ namespace DiFfRG
             if constexpr (n_components == 1) {
               max_eig_plus = std::abs(J_plus[d][0][0]);
               max_eig_minus = std::abs(J_minus[d][0][0]);
+            } else if constexpr (n_components == 2) {
+              max_eig_plus = spectral_radius_2x2(J_plus[d]);
+              max_eig_minus = spectral_radius_2x2(J_minus[d]);
             } else {
               Eigen::Matrix<NumberType, n_components, n_components> J_plus_eigen, J_minus_eigen;
               for (size_t i = 0; i < n_components; ++i)
@@ -133,6 +153,38 @@ namespace DiFfRG
                   Jm(i, j) = J_minus[d][i][j];
                 }
 
+              // Two components with distinct real eigenvalues: the dominant eigenvalue lambda and its eigenvectors in
+              // closed form. With J = [[a, b], [c, d]], (J - lambda) v = 0 is solved by v = (b, lambda - a) and by
+              // (lambda - d, c), and w^T (J - lambda) = 0 by w = (c, lambda - a) and by (lambda - d, b); of each pair
+              // the longer one is used. The result does not depend on their normalisation. Otherwise (a complex pair
+              // or a repeated eigenvalue) the Eigen path below.
+              auto fill_da_2x2 = [&](const auto &J, const auto &H_side,
+                                     std::array<std::array<NumberType, n_components>, dim> &da) {
+                if constexpr (n_components == 2) {
+                  const auto [half_trace, q] = half_trace_and_discriminant(J);
+                  if (!(q > NumberType(0))) return false;
+                  const NumberType root = std::sqrt(q);
+                  const NumberType lambda = half_trace >= NumberType(0) ? half_trace + root : half_trace - root;
+                  const auto longer = [](const std::array<NumberType, 2> &x, const std::array<NumberType, 2> &y) {
+                    return x[0] * x[0] + x[1] * x[1] >= y[0] * y[0] + y[1] * y[1] ? x : y;
+                  };
+                  const auto a = J[0][0], b = J[0][1], c = J[1][0], dd = J[1][1];
+                  const auto v = longer({b, lambda - a}, {lambda - dd, c});
+                  const auto w = longer({c, lambda - a}, {lambda - dd, b});
+                  const NumberType sign_lam = lambda >= NumberType(0) ? NumberType(1) : NumberType(-1);
+                  const NumberType wdotv = w[0] * v[0] + w[1] * v[1];
+                  for (size_t comp = 0; comp < n_components; ++comp) {
+                    NumberType contraction = NumberType(0);
+                    for (size_t i = 0; i < 2; ++i)
+                      for (size_t j = 0; j < 2; ++j)
+                        contraction += w[i] * v[j] * H_side[d][i][j][comp];
+                    da[d][comp] = sign_lam * contraction / wdotv;
+                  }
+                  return true;
+                } else
+                  return false;
+              };
+
               // Helper lambda: fill da[d] from Jacobian eigen-decomposition and Hessian
               auto fill_da = [&](const Eigen::Matrix<NumberType, n_components, n_components> &J, const auto &H_side,
                                  std::array<std::array<NumberType, n_components>, dim> &da) {
@@ -164,8 +216,8 @@ namespace DiFfRG
                 }
               };
 
-              fill_da(Jp, H_plus, da_plus);
-              fill_da(Jm, H_minus, da_minus);
+              if (!fill_da_2x2(J_plus[d], H_plus, da_plus)) fill_da(Jp, H_plus, da_plus);
+              if (!fill_da_2x2(J_minus[d], H_minus, da_minus)) fill_da(Jm, H_minus, da_minus);
             }
           }
           return {da_plus, da_minus};

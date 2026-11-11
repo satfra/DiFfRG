@@ -4,6 +4,10 @@
 
 ### Changed
 
+- The pre-built CUDA dependency bundle is built for sm_70 (Volta) instead of sm_75, so it also runs on V100s.
+  This only affects the bundle's own Kokkos and deal.II kernels; DiFfRG and applications are still compiled for
+  the GPU in use via `DiFfRG_CUDA_ARCH`. The installer offers Volta, which needs a CUDA 12 toolkit (CUDA 13
+  dropped it).
 - **Breaking:** every assembler (CG, DG, LDG, KT-FV) evaluates the model in batches: it gathers the
   solution at all quadrature points (or face traces), calls the model's `evaluate_batch(out, batch)` once for
   all of them, and scatters the results; no `MeshWorker::mesh_loop` remains. The default `evaluate_batch` calls
@@ -13,10 +17,10 @@
   `evaluate_batch`, with all seed directions stacked into one batch.
   **Migration:** none for most models. Changes a model can notice:
   - The dDG assembler is removed: DG now hands the model the same inputs as CG. CG and DG drop `"fe_hessians"`
-    (and `"fe_derivatives"`) when the model declares `batch_reads_hessians = false`
-    (`batch_reads_derivatives = false`); reading an absent entry does not compile (`tuple_has<name, Solution>`
+    (and `"fe_derivatives"`) when the model declares `use_hessians = false`
+    (`use_derivatives = false`); reading an absent entry does not compile (`tuple_has<name, Solution>`
     tests for one). **Migration:** replace `dDG::Assembler` by `DG::Assembler`; a DG model that reads only the
-    values should declare `static constexpr bool batch_reads_derivatives = false`, otherwise its jacobian
+    values should declare `static constexpr bool use_derivatives = false`, otherwise its jacobian
     carries unused derivative seeds.
   - `def::AD_dual` is removed, and with it the per-point AD jacobian classes (`def::ADjacobian_flux`,
     `_source`, `_flux_source`, `_numflux`, `_boundary_numflux`). `def::AD` and `def::FE_AD` keep working; a
@@ -39,6 +43,17 @@
   integration variable, in `get()`, `map()` and `map_points()` on Kokkos execution spaces; `set_hoist(false)`
   turns it off. `kernel_has_pre` and the pre() table now live in `physics/integration/hoist.hh`, shared with
   `QuadratureIntegrator_fT`.
+- **Added:** `FocusedRootCoordinates1D(N, start, stop, center, root_depth)`, a grid clustered around `center` like
+  `FocusedLogCoordinates1D`, uniform in \(t = r/(1+r)\), \(r = (y/\text{center})^{2^{-m}}\). Its inverse map takes
+  m square roots and one division instead of two logarithms and a square root, so a lookup on it is cheaper on
+  GPUs (FP64, RTX 4070: radial transform 4.6-7x, spline-stack lookup 2.3-2.7x; the finite-T QuarkMeson map
+  kernels 16-29% faster). Aliases `FocusedRootCoordinates`, `FocusedRootLin[Lin][Periodic]Coordinates`,
+  `FocusedRoot{Bosonic,Fermionic}Coordinates1DFiniteT`.
+- **Added:** a model's `EoM` may take the variables as a third argument, `EoM(x, u, variables)`, e.g. for an
+  explicit-breaking term rescaled by a flowing \(Z\). The assemblers then hand it the variables of the state they
+  assemble or write out; before, such a model had to cache them in mutable state from `extract()`, which runs
+  after the EoM search, so its EoM lagged one call behind. The EoM functions given to `readouts_multiple` may
+  take them as well. `AbstractAssembler::needs_restart` takes the variables as a third argument.
 - **Added:** interpolator `update()` with unchanged spline data returns without rebuilding or copying, and every
   data change advances a process-wide epoch (`physics/interpolation/data_epoch.hh`).
 - **Added:** compile definition `DIFFRG_MATSUBARA_SIGN_LOOP` evaluates the +-frequency pair as a loop, halving the
@@ -132,6 +147,12 @@
 
 ### Added
 
+- Model traits `use_derivatives`, `use_hessians`, `use_diffusion_flux`, `use_potential`: `static constexpr bool`
+  members of `AbstractModel`, all true; a model declares one again with false to skip work it does not need.
+  `use_diffusion_flux = false` makes KT skip the diffusion reconstruction, evaluation and jacobian.
+  **Breaking:** they replace `extract_uses_potential` and `readouts_use_potential` (now the single
+  `use_potential`) and KT's opt-in `source_uses_hessians`: a KT source now gets `"fe_hessians"` unless the model
+  sets `use_hessians = false`.
 - Flow snapshots and restarts. `/timestepping/snapshots/k` (or `/t`) makes a run write its complete
   state, including the full parameter tree, at those RG scales to `<run>_snapshot_<nnn>.h5`, and
   `--restart <file>` makes a later run continue from such a snapshot instead of starting at Λ. A
@@ -264,12 +285,31 @@
   already records the configuration. **Migration:** read it from the `.h5` file, or set
   `/output/json` to `true` to get the file back. `SimulationData1D.params`
   (`DiFfRG/python/DiFfRG/file_io/vtk.py`) is `None` when the file is absent rather than raising.
+- **Breaking:** `def::RhoSymmetricLinearExtrapolationBoundaries` is removed. **Migration:** use
+  `def::FVDefaultBoundaries`, which it already was an alias of.
 
 
 ### Fixed
 
+- The implicit residual and jacobian timings of the IDA hybrids (`TimeStepperSUNDIALS_IDA_BoostABM`,
+  `_BoostRK`) no longer include the explicit steps. Those run lazily inside the IDA callbacks, when the variables
+  are served, and were counted both as explicit and as implicit time.
+- The IDA statistics line counts over the whole run. A restart (mesh adaptation, tolerance refresh, retry after a
+  failure) recreates IDA, which zeroed its residual, setup and failure counters while the step count carried on.
 - The EoM potential reconstruction keeps its cells, faces and per-thread FE scratch with the cached system instead
   of rebuilding them for every solve: 4 ms per solve on 32 threads for a 61-cell mesh before, 0.1 ms now.
+- Faster potential reconstruction on large meshes. Results change only at roundoff level, by as much as the
+  previous solver changed between BLAS thread counts:
+  - The EoM and the raw potential share one cached system (DoFs, matrix, factorization) when their orders agree,
+    the default; it was built and factorized twice. An unchanged right-hand side reuses the previous solve.
+  - The factorization uses a nested-dissection ordering (half the flops of UMFPACK's AMD here) and no iterative
+    refinement, which made a solve 3x as expensive.
+  - Per call, the face terms of the right-hand side (zero for a continuous potential) are skipped, and the DG0
+    gradient recovery keeps its patches and fits with the system; building them was quadratic in the cell count.
+  - The minimum search samples the potential in parallel.
+
+  2D KT app, 256² cells (263k potential DoFs), one thread for BLAS: raw potential alone 8.5 s -> 5.0 s on a new
+  mesh and 0.73 s -> 0.16 s per output frame; EoM and raw potential together 16.8 s -> 5.1 s and 1.41 s -> 0.30 s.
 - The timesteppers report the duration of every linear solve, also of a direct solver, which reports no iteration
   count; before, UMFPACK solves were not reported at all. Progress durations are fractional milliseconds (they were
   truncated to whole ones, so every sub-millisecond callback read 0).

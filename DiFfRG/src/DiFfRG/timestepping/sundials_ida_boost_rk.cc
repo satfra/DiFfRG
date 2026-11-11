@@ -469,6 +469,8 @@ namespace DiFfRG
             request_diagnostics.append_to(variables_event);
             this->log.progress(variables_event);
             request_variables(variable_y, y, t);
+            // Serving the variables can advance the explicit stepper, which reports its own time.
+            calc_timer.lap();
             y_state.refresh(y);
             y_dot_state.refresh(y_dot);
             assembler.residual(res, y_state.get(), 1., y_dot_state.get(), 1., variable_y);
@@ -525,6 +527,8 @@ namespace DiFfRG
             request_diagnostics.append_to(variables_event);
             this->log.progress(variables_event);
             request_variables(variable_y, y, t);
+            // Serving the variables can advance the explicit stepper, which reports its own time.
+            calc_timer.lap();
             y_state.refresh(y);
             y_dot_state.refresh(y_dot);
             assembler.jacobian(spatial_jacobian, y_state.get(), 1., y_dot_state.get(), alpha, 1., variable_y);

@@ -32,8 +32,8 @@ namespace DiFfRG
           /// diffusion_flux_tie: flux_tie plus "fe_third_derivatives" after the derivatives
           diffusion,
           /// the same names as flux_tie; "fe_derivatives" is the reconstructor's limited slope at the cell point.
-          /// There is no "fe_hessians" slot, so a model that reads it without opting in via source_uses_hessians
-          /// fails to compile rather than silently receiving zeros.
+          /// There is no "fe_hessians" slot, so a model with use_hessians = false that reads it fails
+          /// to compile rather than silently receiving zeros.
           source,
           /// source plus "fe_hessians" (the unlimited diagonal curvature) after the derivatives
           source_hessians
@@ -42,7 +42,7 @@ namespace DiFfRG
         /**
          * @brief The states the KT assembler evaluates the model at, as a batch: the face traces (u^-, u^+ with
          * their reconstructed gradients, and for the diffusion flux the corrected gradients and third derivatives)
-         * or the cell quadrature points (limited gradient, and for source_uses_hessians the diagonal curvature).
+         * or the cell quadrature points (limited gradient, and unless use_hessians = false the diagonal curvature).
          *
          * A PointBatch with optional third-derivative columns, `third_derivatives(c, d0, d1, d2)`. Its per-point
          * tuple (tie()) has the names and positions of flux_tie / diffusion_flux_tie (see TraceKind).

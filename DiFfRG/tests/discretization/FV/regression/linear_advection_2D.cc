@@ -61,8 +61,6 @@ namespace
   using VectorType = typename Discretization::VectorType;
   using SparseMatrixType = typename Discretization::SparseMatrixType;
   using Reconstructor = def::TVDReconstructor<dim, def::MinModLimiter, double>;
-  using Assembler = FV::KurganovTadmor::Assembler<Discretization, class LinearAdvection2DModel, Reconstructor>;
-  using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
 
   class LinearAdvection2DModel : public def::AbstractModel<LinearAdvection2DModel, Components>,
                                  public def::Time,
@@ -112,6 +110,9 @@ namespace
       return std::exp(1.0 - 1.0 / (1.0 - normalized_r2));
     }
   };
+
+  using Assembler = FV::KurganovTadmor::Assembler<Discretization, LinearAdvection2DModel, Reconstructor>;
+  using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
 
   ConfigTree make_run_json()
   {

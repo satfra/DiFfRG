@@ -6,10 +6,13 @@
 #include <deal.II/base/tensor.h>
 
 // standard library
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 // DiFfRG
@@ -59,7 +62,7 @@
  * | diffusion_flux | parabolic part of \f$F_i\f$, added to flux at faces | KT |
  * | source | \f$s_i\f$ | all PDE assemblers |
  * | evaluate_batch | flux, source, diffusion_flux at many points at once | all PDE assemblers |
- * | differential_components | which \f$m_i\f$ depend on \f$\partial_t u\f$ | IDA timesteppers |
+ * | differential_components | which \f$\partial_t u_j\f$ enter \f$m\f$ | IDA timesteppers |
  * | wave_speed_blocks | which components share a dissipation speed | KT |
  * | initial_condition_variables | \f$v_a\f$ at \f$t = 0\f$ | all |
  * | dt_variables | \f$D_a = -\partial_t v_a\f$ | all |
@@ -74,14 +77,14 @@
  * | `abs_tolerances` (optional) | per-dof absolute tolerance, see abs_tolerances.hh | LDG, KT |
  *
  * ### Traits
- * Optional `static constexpr bool` members of the model:
- * | Trait | Default | Effect |
- * |-------|---------|--------|
- * | `batch_reads_derivatives` | true | CG, DG: false = no term reads \f$\partial u\f$, so it is not gathered |
- * | `batch_reads_hessians` | true | CG, DG: false = no term reads \f$\partial^2 u\f$, so it is not gathered |
- * | `source_uses_hessians` | false | KT: true = source() gets `"fe_hessians"` (diagonal curvature) |
- * | `extract_uses_potential` | true | false = extract() ignores the potential; saves a global solve per evaluation |
- * | `readouts_use_potential` | true | false = potential reconstructed for readouts only if the output writes it |
+ * `static constexpr bool` members of AbstractModel, all true by default; a model switches one off by declaring it
+ * again with false. Each false skips work the model does not need:
+ * | Trait | Effect of false |
+ * |-------|-----------------|
+ * | `use_derivatives` | no term reads \f$\partial u\f$ (nor \f$\partial^2 u\f$). CG, DG: neither gathered nor differentiated. KT gathers the gradient regardless. |
+ * | `use_hessians` | no term reads \f$\partial^2 u\f$. CG, DG: not gathered nor differentiated. KT: source() gets no `"fe_hessians"` (otherwise the diagonal stencil curvature). |
+ * | `use_diffusion_flux` | KT: diffusion_flux() is zero; its reconstruction, evaluation and jacobian are skipped. |
+ * | `use_potential` | extract() and readouts() do not read the reconstructed potential: no global solve per residual and jacobian, and per frame only if the output writes the potential. |
  *
  * ### Building blocks in def::
  * A model inherits, besides AbstractModel, one class of each row it needs (pass the model as template argument
@@ -172,6 +175,23 @@ namespace DiFfRG
       using Components = Components_;
 
       /**
+       * @name Traits
+       * What the model's hooks read; see the table in model.hh. Declare one again with false in the model to skip
+       * the work for it. Reading a skipped input is a compile error.
+       */
+      //@{
+      /// Some term reads \f$\partial u\f$.
+      static constexpr bool use_derivatives = true;
+      /// Some term reads \f$\partial^2 u\f$ (only together with use_derivatives).
+      static constexpr bool use_hessians = true;
+      /// KT: diffusion_flux() is not identically zero.
+      static constexpr bool use_diffusion_flux = true;
+      /// extract() or readouts() read the reconstructed potential (`"potential"`, `"potential_gradient"`,
+      /// `"potential_hessian"`).
+      static constexpr bool use_potential = true;
+      //@}
+
+      /**
        * @name Equation
        * The field-space PDE \f$m + \nabla\cdot F + s = 0\f$, see model.hh.
        */
@@ -256,12 +276,12 @@ namespace DiFfRG
        * @param x the point in field space.
        * @param sol named tuple; its entries depend on the assembler:
        * - CG, DG: `"fe_functions"` \f$u_i\f$, `"fe_derivatives"` \f$\partial u_i\f$ (unless
-       *   `batch_reads_derivatives = false`), `"fe_hessians"` \f$\partial^2 u_i\f$ (unless `batch_reads_hessians =
-       *   false`), `"extractors"` \f$e_b\f$, `"variables"` \f$v_a\f$, `"cell_width"`.
+       *   `use_derivatives = false`), `"fe_hessians"` \f$\partial^2 u_i\f$ (unless `use_hessians = false`),
+       *   `"extractors"` \f$e_b\f$, `"variables"` \f$v_a\f$, `"cell_width"`.
        * - LDG main level: `"fe_functions"`, `"LDG1"`, ... (the LDG levels), `"extractors"`, `"variables"`,
        *   `"cell_width"`.
-       * - KT: `"fe_functions"`, `"fe_derivatives"` (the limited reconstructed gradient), `"fe_hessians"` only with
-       *   `source_uses_hessians = true`, `"extractors"`, `"variables"`, `"cell_width"`.
+       * - KT: `"fe_functions"`, `"fe_derivatives"` (the limited reconstructed gradient), `"fe_hessians"` (the diagonal
+       *   stencil curvature; unless `use_hessians = false`), `"extractors"`, `"variables"`, `"cell_width"`.
        *
        * The same tuple is passed to flux() (on KT faces without hessians).
        */
@@ -301,40 +321,53 @@ namespace DiFfRG
       /**
        * @brief Which FE components are differential (true) or algebraic (false), for the IDA timesteppers.
        *
-       * The default perturbs each \f$\partial_t u_j\f$ in mass() at \f$u = \partial_t u = 1\f$, \f$x = (1, \dots,
-       * 1)\f$ and marks every \f$m_i\f$ that changes. Override if that test point is not representative.
+       * Component \f$j\f$ is differential if \f$\partial_t u_j\f$ enters any \f$m_i\f$. The default changes
+       * each \f$\partial_t u_j\f$ in mass() at a few generic sample points of \f$(x, u, \partial_t u)\f$ and marks
+       * \f$j\f$ if any \f$m_i\f$ responds at any of them; samples where mass() is not finite are skipped. Several
+       * points guard against a coefficient of \f$\partial_t u_j\f$ that happens to vanish at one of them. Override
+       * if mass() is only defined in a region these points miss.
        */
       template <uint dim> std::vector<bool> differential_components() const
       {
-        std::vector<bool> differential_components(Model::Components::count_fe_functions(), false);
+        constexpr uint n = Model::Components::count_fe_functions();
+        // Positive, pairwise distinct and far from 0, 1 and simple fractions, so that no factor like (u - 1) or
+        // (x - u) of a coefficient vanishes by accident.
+        constexpr std::array<double, 7> generic{
+            {0.6180339887, 1.4142135624, 0.3183098862, 2.7182818285, 0.5772156649, 1.7320508076, 0.8862269255}};
+        constexpr uint n_samples = 3;
 
-        // First we need two reference solutions u_i and dt_u_i, which we then both fill with 1.s
-        std::array<double, Model::Components::count_fe_functions()> u_i{{}};
-        std::array<double, Model::Components::count_fe_functions()> dt_u_i{{}};
-        for (uint i = 0; i < Model::Components::count_fe_functions(); ++i) {
-          u_i[i] = 1.;
-          dt_u_i[i] = 1.;
+        std::vector<bool> differential(n, false);
+        bool any_finite_sample = false;
+        for (uint s = 0; s < n_samples; ++s) {
+          Point<dim> x;
+          for (uint d = 0; d < dim; ++d)
+            x[d] = generic[(s + 3 * d) % generic.size()];
+          std::array<double, n> u{{}}, dt_u{{}};
+          for (uint j = 0; j < n; ++j) {
+            u[j] = generic[(2 * s + j + 1) % generic.size()];
+            dt_u[j] = generic[(3 * s + 2 * j + 2) % generic.size()];
+          }
+
+          std::array<double, n> m{{}};
+          asImp().mass(m, x, u, dt_u);
+          if (!std::ranges::all_of(m, [](double v) { return std::isfinite(v); })) continue;
+          any_finite_sample = true;
+
+          for (uint j = 0; j < n; ++j) {
+            if (differential[j]) continue;
+            const double dt_u_j = dt_u[j];
+            dt_u[j] = 2. * dt_u_j + 0.5;
+            std::array<double, n> m_changed{{}};
+            asImp().mass(m_changed, x, u, dt_u);
+            dt_u[j] = dt_u_j;
+            for (uint i = 0; i < n; ++i)
+              if (std::isfinite(m_changed[i]) && !is_close(m[i], m_changed[i])) differential[j] = true;
+          }
         }
-        // Set the point to be at 1. in all directions
-        Point<dim> x;
-        for (uint i = 0; i < dim; ++i)
-          x[i] = 1.;
-        // Get the mass function m_i
-        std::array<double, Model::Components::count_fe_functions()> m_i{{}};
-        asImp().mass(m_i, x, u_i, dt_u_i);
-
-        // Now we check which components are differential by changing dt_u_i slightly and checking whether the mass
-        // function changes.
-        for (uint i = 0; i < Model::Components::count_fe_functions(); ++i) {
-          dt_u_i[i] = 1. + 1e-1;
-          std::array<double, Model::Components::count_fe_functions()> m_i_new{{}};
-          asImp().mass(m_i_new, x, u_i, dt_u_i);
-          dt_u_i[i] = 1.;
-          for (uint j = 0; j < Model::Components::count_fe_functions(); ++j)
-            if (!is_close(m_i[j], m_i_new[j])) differential_components[j] = true;
-        }
-
-        return differential_components;
+        if (!any_finite_sample)
+          throw std::runtime_error("differential_components: mass() is not finite at any sample point; override "
+                                   "differential_components() in the model.");
+        return differential;
       }
 
       /**
@@ -411,6 +444,11 @@ namespace DiFfRG
        * @brief The function whose root is the EoM point: \f$x_0\f$ with \f$\mathrm{EoM}(x_0, u(x_0)) = 0\f$.
        * Default: the first FE function, \f$u_0\f$, in the first direction.
        *
+       * An EoM that depends on the variables (e.g. an explicit-breaking term rescaled by a flowing wave-function
+       * renormalisation) is defined with them as a third argument instead,
+       * `std::array<double, dim> EoM(const Point<dim> &x, const Vector &u, const Variables &variables) const`, and is
+       * then always handed the variables of the state being assembled or written out.
+       *
        * @param x the point in field space.
        * @param u the values \f$u_i(x)\f$.
        */
@@ -442,7 +480,7 @@ namespace DiFfRG
        * @param x the extractor point: the EoM point, or extractor_point() if the model defines it.
        * @param sol named tuple: `"fe_functions"`, `"fe_derivatives"`, `"fe_hessians"`, `"extractors"` (a placeholder,
        * do not read), `"variables"`, and the reconstructed scalar potential `"potential"`, `"potential_gradient"`,
-       * `"potential_hessian"` (see raw_potential_gradient(); unusable if `extract_uses_potential = false`). LDG
+       * `"potential_hessian"` (see raw_potential_gradient(); unusable if `use_potential = false`). LDG
        * adds `"LDG1"`, ... after `"fe_functions"`. Under def::AD the extractor jacobian is the AD of this function.
        */
       template <int dim, typename Vector, typename Solutions>
@@ -450,21 +488,6 @@ namespace DiFfRG
                    [[maybe_unused]] const Solutions &sol) const
       {
       }
-
-      /**
-       * @brief Whether extract() reads the potential slots of its tuple.
-       *
-       * Reconstructing the potential is a direct solve over the whole mesh on every residual and jacobian
-       * evaluation. With false it is skipped and the slots hold a type without operations, so reading them is a
-       * compile error.
-       */
-      static constexpr bool extract_uses_potential = true;
-
-      /**
-       * @brief Whether readouts() reads the potential slots of its tuple. With false, the potential is reconstructed
-       * for readouts only if the VTK/HDF5 output writes it.
-       */
-      static constexpr bool readouts_use_potential = true;
 
       /**
        * @brief The gradient \f$\nabla_x U\f$ of the scalar potential \f$U(x)\f$ that is reconstructed for extract()
@@ -487,12 +510,20 @@ namespace DiFfRG
        * written by readouts().
        *
        * Override to output at several points: call `helper(id, eom_fun, out_fun)` once per readout, with
-       * `eom_fun(x, u) -> std::array<double, dim>` (like EoM()) and `out_fun(output, x, sol)` (like readouts()).
+       * `eom_fun(x, u) -> std::array<double, dim>` or `eom_fun(x, u, variables)` (like EoM()) and
+       * `out_fun(output, x, sol)` (like readouts()).
        */
       template <typename FUN, typename DataOut> void readouts_multiple(FUN &helper, DataOut &) const
       {
         helper(
-            "primary", [&](const auto &x, const auto &u_i) { return asImp().EoM(x, u_i); }, // chiral EoM
+            "primary",
+            [&](const auto &x, const auto &u_i, const auto &variables) {
+              if constexpr (EoMReadsVariables<Model, std::decay_t<decltype(x)>, std::decay_t<decltype(u_i)>,
+                                              std::decay_t<decltype(variables)>>)
+                return asImp().EoM(x, u_i, variables);
+              else
+                return asImp().EoM(x, u_i);
+            },
             [&](auto &output, const auto &x, const auto &sol) { asImp().readouts(output, x, sol); });
       }
 

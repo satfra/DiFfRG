@@ -57,9 +57,9 @@ constexpr auto idxe = ExtractorDesc{};
  * far side of the kink. `extractor_point` below is how the model says so.
  */
 class Tut5 : public def::AbstractModel<Tut5, Components>,
-             public def::fRG,                                       // this handles the fRG time
-             public def::RhoSymmetricLinearExtrapolationBoundaries<Tut5>, // even at rho = 0
-             public def::AD<Tut5>                                    // define all jacobians per AD
+             public def::fRG, // this handles the fRG time
+             public def::FVDefaultBoundaries<Tut5>,
+             public def::AD<Tut5> // define all jacobians per AD
 {
 private:
   const Parameters prm;

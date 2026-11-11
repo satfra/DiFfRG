@@ -82,7 +82,7 @@ namespace DiFfRG
           // d(cell-centre gradient)/d(u_j) for the nonlocal part of the source jacobian. Separate from
           // reconstructed_derivatives, which face_jacobian() resizes for each face's dependency set.
           std::vector<GradientType<dim, NumberType, n_components>> source_gradient_derivatives;
-          // d(cell-centre hessian)/d(u_j), only filled for models with source_uses_hessians.
+          // d(cell-centre hessian)/d(u_j), only filled if use_hessians.
           std::vector<std::array<dealii::Tensor<2, dim, NumberType>, n_components>> source_hessian_derivatives;
           CellStencilData<dim, NumberType, n_components> cell_stencil;
         };
@@ -327,20 +327,6 @@ namespace DiFfRG
         }
 
         /**
-         * @brief Whether the model reads "fe_hessians" in model.source().
-         *
-         * Opt in with `static constexpr bool source_uses_hessians = true;` in the model. Off by default, so a
-         * model that does not need curvature in its source pays nothing for it.
-         */
-        template <typename Model> consteval bool source_uses_hessians()
-        {
-          if constexpr (requires { Model::source_uses_hessians; })
-            return Model::source_uses_hessians;
-          else
-            return false;
-        }
-
-        /**
          * @brief Diagonal second derivatives of the cell averages from the cell and its 2*dim face neighbours.
          *
          * Second derivative of the quadratic through the same three cell averages the gradient uses: with s
@@ -417,7 +403,7 @@ namespace DiFfRG
        * the unlimited one-sided slope towards the face, in the other directions the limited slope. The source sees
        * \f$\bar u_K\f$ and, per direction, the limited slope at the cell centre (up to rounding) and the unlimited
        * one-sided slope towards a quadrature point off the centre. A model with
-       * `static constexpr bool source_uses_hessians = true` also gets "fe_hessians" in the source: the diagonal second
+       * The source also gets "fe_hessians" (unless the model sets `use_hessians = false`): the diagonal second
        * derivatives from three cell averages per direction, unlimited, no mixed derivatives.
        *
        * **Boundary conditions** are imposed only through ghost cells: the model's apply_boundary_stencil (e.g.
@@ -432,7 +418,8 @@ namespace DiFfRG
        *
        * ### Model hooks
        * mass, flux, diffusion_flux and source (or evaluate_batch), apply_boundary_stencil, wave_speed_blocks, the
-       * extractor and readout hooks; optionally `source_uses_hessians` and fv_kt_pre_assembly(stage, context), called
+       * extractor and readout hooks; the traits `use_hessians`, `use_diffusion_flux` (false skips all diffusion
+       * work for a model without diffusion flux); optionally fv_kt_pre_assembly(stage, context), called
        * before every residual and jacobian assembly with a view of the reconstruction (see AssemblyStage,
        * AssemblyContextView). Mesh adaptation (HAdaptivity) works in 1D, see refinement_indicator; in 2D use
        * NoAdaptivity.
@@ -473,7 +460,6 @@ namespace DiFfRG
       public:
         using Discretization = Discretization_;
         using Model = Model_;
-        static constexpr bool source_uses_hessians = internal::source_uses_hessians<Model>();
         using Reconstructor = Reconstructor_;
         using WaveSpeedStrategy = WaveSpeedStrategy_;
         using JacobianReconstructor = JacobianReconstructor_;
@@ -582,6 +568,25 @@ namespace DiFfRG
           }
         }
 
+        /// The diagonal of the bounding box of the whole (possibly partitioned) mesh. Collective.
+        double bounding_box_diagonal() const
+        {
+          std::array<double, 2 * dim> extent; // -min, max per direction
+          extent.fill(-std::numeric_limits<double>::max());
+          for (const auto &cell : triangulation.active_cell_iterators())
+            if (cell->is_locally_owned())
+              for (const unsigned int v : cell->vertex_indices())
+                for (int d = 0; d < dim; ++d) {
+                  extent[d] = std::max(extent[d], -cell->vertex(v)[d]);
+                  extent[dim + d] = std::max(extent[dim + d], cell->vertex(v)[d]);
+                }
+          DiFfRG::MPI::max_reduce(discretization.get_communicator(), extent.data(), 2 * dim);
+          double diagonal2 = 0.;
+          for (int d = 0; d < dim; ++d)
+            diagonal2 += powr<2>(extent[dim + d] + extent[d]);
+          return std::sqrt(diagonal2);
+        }
+
         /// Rebuild constraints, mass matrix, stencils and sparsity for the current mesh.
         virtual void reinit() override
         {
@@ -589,12 +594,10 @@ namespace DiFfRG
           this->reinit_common();
           this->build_mass_matrix(quadrature);
 
-          // Hoisted out of probe_diffusion_flux_conditioning(): GridTools::diameter is COLLECTIVE
-          // on a partitioned triangulation, and that function is entered conditionally
-          // (diagnose_flux_conditioning, and only on the first residual assembly). A collective
-          // behind a condition is a hang waiting for the condition to stop agreeing across ranks.
-          // Here every rank arrives unconditionally; reinit() recomputes it if the mesh changes.
-          domain_diameter = GridTools::diameter(triangulation);
+          // Computed here, not in probe_diffusion_flux_conditioning(): the reduction is collective, and that function
+          // is entered conditionally. The bounding-box diagonal instead of GridTools::diameter, which compares all
+          // vertex pairs (seconds at 1e5 cells); the probe only needs the scale.
+          domain_diameter = bounding_box_diagonal();
 
           rebuild_cell_topology_cache();
           rebuild_face_reconstruction_descriptors();
@@ -802,7 +805,8 @@ namespace DiFfRG
                         internal::fill_boundary_reconstruction_stencil_from_topology<NumberType, dim, n_components>(
                             topology, solution_global);
                     cache.face_reconstructions[cell_index][face_index] =
-                        internal::compute_boundary_face_reconstruction_state<ActiveReconstructor>(
+                        internal::compute_boundary_face_reconstruction_state<ActiveReconstructor,
+                                                                             Model::use_diffusion_flux>(
                             boundary_stencil, cache.cell_stencils[cell_index], x_q, model);
                     cache.face_reconstruction_valid[cell_index][face_index] = true;
                     continue;
@@ -815,7 +819,8 @@ namespace DiFfRG
                   AssertIndexRange(neighbor_index, cache.cell_stencils.size());
                   AssertIndexRange(neighbor_face_index, n_faces);
 
-                  const auto state = internal::compute_interior_face_reconstruction_state<ActiveReconstructor>(
+                  const auto state = internal::compute_interior_face_reconstruction_state<ActiveReconstructor,
+                                                                                          Model::use_diffusion_flux>(
                       cache.cell_stencils[cell_index], cache.cell_stencils[neighbor_index], x_q);
                   cache.face_reconstructions[cell_index][face_index] = state;
                   cache.face_reconstruction_valid[cell_index][face_index] = true;
@@ -1155,7 +1160,7 @@ namespace DiFfRG
         using DiffusionTraces = internal::TraceBatch<dim, NumberType, n_components, Extractors, VariablesVector,
                                                      internal::TraceKind::diffusion>;
         using SourcePoints = internal::TraceBatch<dim, NumberType, n_components, Extractors, VariablesVector,
-                                                  source_uses_hessians ? internal::TraceKind::source_hessians
+                                                  Model::use_hessians ? internal::TraceKind::source_hessians
                                                                        : internal::TraceKind::source>;
         using TraceFlux = std::array<Tensor<1, dim, NumberType>, n_components>;
         using TraceJacobian = std::array<internal::JacobianMatrix<NumberType, n_components>, dim>;
@@ -1209,7 +1214,7 @@ namespace DiFfRG
         {
           const size_t n_traces = 2 * trace_faces.size();
           flux_traces.reinit(n_traces);
-          diffusion_traces.reinit(n_traces);
+          diffusion_traces.reinit(Model::use_diffusion_flux ? n_traces : 0);
           tbb::parallel_for(
               tbb::blocked_range<size_t>(0, trace_faces.size()), [&](const tbb::blocked_range<size_t> &r) {
                 for (size_t p = r.begin(); p != r.end(); ++p) {
@@ -1238,11 +1243,13 @@ namespace DiFfRG
                   };
                   store(flux_traces, 2 * p, state.u_minus, state.face_grad_minus, width_minus);
                   store(flux_traces, 2 * p + 1, state.u_plus, state.face_grad_plus, width_plus);
-                  store(diffusion_traces, 2 * p, state.diffusion_u_minus, state.diffusion_grad_minus, width_minus);
-                  store(diffusion_traces, 2 * p + 1, state.diffusion_u_plus, state.diffusion_grad_plus, width_plus);
-                  if constexpr (dim == 1) {
-                    store_third(2 * p, state.third_derivatives_minus);
-                    store_third(2 * p + 1, state.third_derivatives_plus);
+                  if constexpr (Model::use_diffusion_flux) {
+                    store(diffusion_traces, 2 * p, state.diffusion_u_minus, state.diffusion_grad_minus, width_minus);
+                    store(diffusion_traces, 2 * p + 1, state.diffusion_u_plus, state.diffusion_grad_plus, width_plus);
+                    if constexpr (dim == 1) {
+                      store_third(2 * p, state.third_derivatives_minus);
+                      store_third(2 * p + 1, state.third_derivatives_plus);
+                    }
                   }
                 }
               });
@@ -1271,7 +1278,7 @@ namespace DiFfRG
                   for (uint d = 0; d < dim; ++d)
                     source_points.derivative(c, d, i) = gradients[c][d];
                 }
-                if constexpr (source_uses_hessians) {
+                if constexpr (Model::use_hessians) {
                   const auto hessians = internal::stencil_hessians(stencil);
                   for (uint c = 0; c < n_components; ++c)
                     for (uint d1 = 0; d1 < dim; ++d1)
@@ -1299,16 +1306,18 @@ namespace DiFfRG
           internal::flux_value_jacobians<n_components>(value_seed_workspace, flux_traces, 0, n_traces,
                                                        max_stacked_points, evaluate, trace_F, trace_J);
 
-          BatchOutput<dim, NumberType, n_components> diffusion;
-          diffusion.reinit(n_traces, Term::diffusion_flux);
-          model.evaluate_batch(diffusion, diffusion_traces);
-          trace_D.resize(n_traces);
-          tbb::parallel_for(tbb::blocked_range<size_t>(0, n_traces), [&](const tbb::blocked_range<size_t> &r) {
-            for (size_t i = r.begin(); i != r.end(); ++i)
-              for (uint c = 0; c < n_components; ++c)
-                for (uint d = 0; d < dim; ++d)
-                  trace_D[i][c][d] = diffusion.diffusion_flux(c, d)[i];
-          });
+          if constexpr (Model::use_diffusion_flux) {
+            BatchOutput<dim, NumberType, n_components> diffusion;
+            diffusion.reinit(n_traces, Term::diffusion_flux);
+            model.evaluate_batch(diffusion, diffusion_traces);
+            trace_D.resize(n_traces);
+            tbb::parallel_for(tbb::blocked_range<size_t>(0, n_traces), [&](const tbb::blocked_range<size_t> &r) {
+              for (size_t i = r.begin(); i != r.end(); ++i)
+                for (uint c = 0; c < n_components; ++c)
+                  for (uint d = 0; d < dim; ++d)
+                    trace_D[i][c][d] = diffusion.diffusion_flux(c, d)[i];
+            });
+          }
 
           source_values.reinit(source_points.size(), Term::source);
           model.evaluate_batch(source_values, source_points);
@@ -1330,8 +1339,10 @@ namespace DiFfRG
           const auto evaluate = [&](auto &out, const auto &batch) { model.evaluate_batch(out, batch); };
           internal::flux_derivatives<n_components>(flux_derivative_workspace, flux_traces, begin, end,
                                                    max_stacked_points, evaluate, trace_derivatives);
-          internal::diffusion_flux_jacobians<n_components>(diffusion_derivative_workspace, diffusion_traces, begin, end,
-                                                           max_stacked_points, evaluate, trace_diffusion_jacobians);
+          if constexpr (Model::use_diffusion_flux)
+            internal::diffusion_flux_jacobians<n_components>(diffusion_derivative_workspace, diffusion_traces, begin,
+                                                             end, max_stacked_points, evaluate,
+                                                             trace_diffusion_jacobians);
         }
 
         /// Phase 2 of the jacobian at the cell points: the source jacobian.
@@ -1351,7 +1362,7 @@ namespace DiFfRG
               auto &J = source_jacobians[i];
               model.template jacobian_source<0, 0>(J.j_source, x, sol);
               model.template jacobian_source_grad<1>(J.j_grad_source, x, sol);
-              if constexpr (source_uses_hessians) model.template jacobian_source_hess<2>(J.j_hess_source, x, sol);
+              if constexpr (Model::use_hessians) model.template jacobian_source_hess<2>(J.j_hess_source, x, sol);
             });
         }
 
@@ -1475,7 +1486,8 @@ namespace DiFfRG
                   const auto n = face_normal_from_cell(cell, d.face_index);
                   const auto JxW = face_jxw(cell, d.face_index);
                   const auto H = numerical_flux(p, cache.face_reconstructions[d.cell_index][d.face_index], n);
-                  const auto D = diffusion_flux(p);
+                  TraceFlux D{};
+                  if constexpr (Model::use_diffusion_flux) D = diffusion_flux(p);
                   for (uint c = 0; c < n_components; ++c)
                     face_values[p][c] = weight * JxW * (scalar_product(H[c], n) + scalar_product(D[c], n));
                 }
@@ -1493,8 +1505,10 @@ namespace DiFfRG
                             const NumberType weight, DiFfRG::internal::PhaseTimer &phase)
         {
           const size_t n_faces = trace_faces.size();
-          const size_t faces_per_chunk = std::max<size_t>(
-              1, max_stacked_points / (2 * std::max(n_flux_diffusion_directions[0], n_flux_diffusion_directions[1])));
+          const size_t n_directions = Model::use_diffusion_flux
+                                          ? std::max(n_flux_diffusion_directions[0], n_flux_diffusion_directions[1])
+                                          : n_flux_diffusion_directions[0];
+          const size_t faces_per_chunk = std::max<size_t>(1, max_stacked_points / (2 * n_directions));
           face_blocks.resize(n_faces);
           // map() is collective, the faces are rank-local; apply_boundary_stencil may be a model callback, too.
           const NoMapsHere no_maps_during_assembly;
@@ -1529,8 +1543,9 @@ namespace DiFfRG
           auto &diffusion_deriv = scratch_data.diffusion_derivatives;
           for (auto &derivatives : reconstructed_deriv)
             derivatives.resize(n_from);
-          for (auto &derivatives : diffusion_deriv)
-            derivatives.resize(n_from);
+          if constexpr (Model::use_diffusion_flux)
+            for (auto &derivatives : diffusion_deriv)
+              derivatives.resize(n_from);
 
           const auto &cell_stencil = cache.cell_stencils[d.cell_index];
           if (!d.boundary) {
@@ -1562,7 +1577,7 @@ namespace DiFfRG
                       ncell_data.x, x_q, ncell_stencil_tagged.cell.u, ncell_stencil.neighbors.x,
                       ncell_stencil_tagged.neighbors.u);
 
-              if constexpr (dim == 1) {
+              if constexpr (Model::use_diffusion_flux && dim == 1) {
                 const auto third_derivative_stencil_ad =
                     internal::make_interior_third_derivative_stencil(cell_stencil_tagged, ncell_stencil_tagged, x_q);
                 const auto third_derivatives =
@@ -1572,11 +1587,13 @@ namespace DiFfRG
                 reconstructed_deriv[1][j].third_derivatives = third_derivatives;
               }
 
-              const auto diffusion_face_derivatives =
-                  internal::extract_diffusion_face_derivatives<dim, NumberType, n_components>(
-                      internal::compute_diffusion_face_state(cell_stencil_tagged, ncell_stencil_tagged));
-              diffusion_deriv[0][j] = diffusion_face_derivatives[0];
-              diffusion_deriv[1][j] = diffusion_face_derivatives[1];
+              if constexpr (Model::use_diffusion_flux) {
+                const auto diffusion_face_derivatives =
+                    internal::extract_diffusion_face_derivatives<dim, NumberType, n_components>(
+                        internal::compute_diffusion_face_state(cell_stencil_tagged, ncell_stencil_tagged));
+                diffusion_deriv[0][j] = diffusion_face_derivatives[0];
+                diffusion_deriv[1][j] = diffusion_face_derivatives[1];
+              }
             }
           } else {
             const auto boundary_stencil =
@@ -1607,7 +1624,7 @@ namespace DiFfRG
                       ghost_stencil_ad.cell.x, x_q, ghost_stencil_ad.cell.u, ghost_stencil_ad.neighbors.x,
                       ghost_stencil_ad.neighbors.u);
 
-              if constexpr (dim == 1) {
+              if constexpr (Model::use_diffusion_flux && dim == 1) {
                 auto third_derivative_boundary_stencil_ad = boundary_stencil_ad.primary;
                 internal::apply_boundary_reconstruction_stencil(third_derivative_boundary_stencil_ad, cell_stencil_ad,
                                                                 model);
@@ -1622,11 +1639,13 @@ namespace DiFfRG
 
               // The boundary diffusion flux is differentiated as one pair of corrected face-gradient operators,
               // with the same physical/ghost side labels as the advective boundary reconstruction.
-              const auto diffusion_face_derivatives =
-                  internal::extract_diffusion_face_derivatives<dim, NumberType, n_components>(
-                      internal::compute_diffusion_face_state(physical_stencil_ad, ghost_stencil_ad));
-              diffusion_deriv[0][j] = diffusion_face_derivatives[0];
-              diffusion_deriv[1][j] = diffusion_face_derivatives[1];
+              if constexpr (Model::use_diffusion_flux) {
+                const auto diffusion_face_derivatives =
+                    internal::extract_diffusion_face_derivatives<dim, NumberType, n_components>(
+                        internal::compute_diffusion_face_state(physical_stencil_ad, ghost_stencil_ad));
+                diffusion_deriv[0][j] = diffusion_face_derivatives[0];
+                diffusion_deriv[1][j] = diffusion_face_derivatives[1];
+              }
             }
           }
 
@@ -1635,8 +1654,10 @@ namespace DiFfRG
               internal::kt_numflux_jacobian_from_derivatives<WaveSpeedStrategy, Model, NumberType, dim, n_components>(
                   trace_derivatives[2 * p + 1 - first_trace], trace_derivatives[2 * p - first_trace], state.u_plus,
                   state.u_minus, n_face, model);
-          const std::array<const DiffusionSideJacobian *, 2> j_diffusion{
-              &trace_diffusion_jacobians[2 * p - first_trace], &trace_diffusion_jacobians[2 * p + 1 - first_trace]};
+          std::array<const DiffusionSideJacobian *, 2> j_diffusion{};
+          if constexpr (Model::use_diffusion_flux)
+            j_diffusion = {&trace_diffusion_jacobians[2 * p - first_trace],
+                           &trace_diffusion_jacobians[2 * p + 1 - first_trace]};
 
           // Chain rule: (dH/d trace) * (d trace/du_j) + (dD/d trace) * (d trace/du_j), both sides, dotted with n.
           block.reinit(n_components, n_from);
@@ -1646,14 +1667,20 @@ namespace DiFfRG
               for (size_t side = 0; side < 2; ++side)
                 for (size_t c = 0; c < n_components; ++c) {
                   contribution += scalar_product(j_numflux.u[side](i, c), n_face) * reconstructed_deriv[side][j].u[c];
-                  contribution += scalar_product(j_diffusion[side]->u(i, c), n_face) * diffusion_deriv[side][j].u[c];
+                  if constexpr (Model::use_diffusion_flux)
+                    contribution += scalar_product(j_diffusion[side]->u(i, c), n_face) * diffusion_deriv[side][j].u[c];
                   for (size_t d_in = 0; d_in < dim; ++d_in)
-                    for (size_t d_out = 0; d_out < dim; ++d_out)
-                      contribution +=
-                          n_face[d_out] *
-                          (j_numflux.grad[side](i, c)[d_out][d_in] * reconstructed_deriv[side][j].grad[c][d_in] +
-                           j_diffusion[side]->grad(i, c)[d_out][d_in] * diffusion_deriv[side][j].grad[c][d_in]);
-                  if constexpr (dim == 1) // the only dimension with reconstructed third derivatives
+                    for (size_t d_out = 0; d_out < dim; ++d_out) {
+                      if constexpr (Model::use_diffusion_flux)
+                        contribution +=
+                            n_face[d_out] *
+                            (j_numflux.grad[side](i, c)[d_out][d_in] * reconstructed_deriv[side][j].grad[c][d_in] +
+                             j_diffusion[side]->grad(i, c)[d_out][d_in] * diffusion_deriv[side][j].grad[c][d_in]);
+                      else
+                        contribution += n_face[d_out] * j_numflux.grad[side](i, c)[d_out][d_in] *
+                                        reconstructed_deriv[side][j].grad[c][d_in];
+                    }
+                  if constexpr (Model::use_diffusion_flux && dim == 1) // the only dimension with third derivatives
                     contribution += j_diffusion[side]->third_derivatives(i, c)[0][0][0][0] * n_face[0] *
                                     reconstructed_deriv[side][j].third_derivatives[c][0][0][0];
                 }
@@ -1709,7 +1736,7 @@ namespace DiFfRG
           auto &source_grad_deriv = scratch.source_gradient_derivatives;
           source_grad_deriv.resize(source_from.size());
           auto &source_hess_deriv = scratch.source_hessian_derivatives;
-          if constexpr (source_uses_hessians) source_hess_deriv.resize(source_from.size());
+          if constexpr (Model::use_hessians) source_hess_deriv.resize(source_from.size());
 
           SimpleMatrix<NumberType, n_components> j_mass;
           SimpleMatrix<NumberType, n_components> j_mass_dot;
@@ -1737,7 +1764,7 @@ namespace DiFfRG
                   tag_cell_stencil_dofs_from_cache(cell, stencil, solution_global, source_from[j]);
               source_grad_deriv[j] = JacobianReconstructor::template compute_gradient_at_point_derivative<n_components>(
                   stencil.cell.x, x_q, stencil_tagged.cell.u, stencil.neighbors.x, stencil_tagged.neighbors.u);
-              if constexpr (source_uses_hessians) {
+              if constexpr (Model::use_hessians) {
                 // The hessian is linear in the stencil values, so forward AD through it is exact.
                 const auto hessians_tagged = internal::stencil_hessians(stencil_tagged);
                 for (uint c = 0; c < n_components; ++c)
@@ -1752,7 +1779,7 @@ namespace DiFfRG
                 for (uint c = 0; c < n_components; ++c)
                   for (uint d = 0; d < dim; ++d) {
                     contribution += Js.j_grad_source(ci, c)[d] * source_grad_deriv[j][c][d];
-                    if constexpr (source_uses_hessians)
+                    if constexpr (Model::use_hessians)
                       contribution += Js.j_hess_source(ci, c)[d][d] * source_hess_deriv[j][c][d][d];
                   }
                 source_block(i, j) += weight * geometry.jxw[q] * contribution;
@@ -1797,7 +1824,7 @@ namespace DiFfRG
           phase.lap(&PhaseTimes::gather);
 
           // Only on the first residual assembly, where (at k = Lambda) a flux baseline is largest.
-          if (diagnose_flux_conditioning && !flux_conditioning_probed) {
+          if (Model::use_diffusion_flux && diagnose_flux_conditioning && !flux_conditioning_probed) {
             flux_conditioning_probed = true;
             const NoMapsHere no_maps_during_assembly; // the probe calls the model's per-point diffusion flux
             probe_diffusion_flux_conditioning(reconstruction_cache, extracted, local_variables.get());

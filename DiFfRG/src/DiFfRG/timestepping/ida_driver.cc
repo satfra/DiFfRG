@@ -52,6 +52,19 @@ namespace DiFfRG
       if (status < 0)
         throw std::runtime_error(std::string("IDA: ") + call + " failed with " + IDAGetReturnFlagName(status));
     }
+
+    /// Add the counters of @p b to @p a; the step sizes and times are left alone.
+    template <typename Statistics> void add_counters(Statistics &a, const Statistics &b)
+    {
+      a.num_steps += b.num_steps;
+      a.num_residual_evaluations += b.num_residual_evaluations;
+      a.num_linear_solver_setups += b.num_linear_solver_setups;
+      a.num_jacobian_alpha_updates += b.num_jacobian_alpha_updates;
+      a.num_error_test_failures += b.num_error_test_failures;
+      a.num_nonlinear_iterations += b.num_nonlinear_iterations;
+      a.num_nonlinear_convergence_failures += b.num_nonlinear_convergence_failures;
+      a.num_step_solve_failures += b.num_step_solve_failures;
+    }
   } // namespace
 
   template <typename VectorType> IDADriver<VectorType>::IDADriver(const Parameters &parameters) : prm(parameters)
@@ -112,10 +125,12 @@ namespace DiFfRG
   void IDADriver<VectorType>::reset(const double t, const double h, VectorType &solution, VectorType &solution_dot,
                                     const bool restart)
   {
+    if (ida_mem != nullptr) add_counters(finished_counters, instance_counters());
     free_ida();
     ida_mem = IDACreate(ctx);
     assembled = false;
     alpha_updates = 0;
+    initial_steps = 0;
 
     auto yy = make_nvector_view(solution, ctx);
     auto yp = make_nvector_view(solution_dot, ctx);
@@ -194,6 +209,7 @@ namespace DiFfRG
 
     if (restart && warm) {
       restore_history(t);
+      check(IDAGetNumSteps(ida_mem, &initial_steps), "IDAGetNumSteps");
       return;
     }
     // Consistent initial conditions: algebraic components of y and the derivative of the differential ones.
@@ -382,7 +398,7 @@ namespace DiFfRG
   }
 
   template <typename VectorType>
-  typename IDADriver<VectorType>::Statistics IDADriver<VectorType>::get_statistics() const
+  typename IDADriver<VectorType>::Statistics IDADriver<VectorType>::instance_counters() const
   {
     Statistics s;
     if (ida_mem == nullptr) return s;
@@ -392,10 +408,20 @@ namespace DiFfRG
               IDAGetNumErrTestFails(ida_mem, &s.num_error_test_failures) >= 0 &&
               IDAGetNumNonlinSolvIters(ida_mem, &s.num_nonlinear_iterations) >= 0 &&
               IDAGetNumNonlinSolvConvFails(ida_mem, &s.num_nonlinear_convergence_failures) >= 0 &&
-              IDAGetNumStepSolveFails(ida_mem, &s.num_step_solve_failures) >= 0 &&
-              IDAGetLastStep(ida_mem, &s.last_step_size) >= 0 &&
-              IDAGetCurrentStep(ida_mem, &s.current_step_size) >= 0 && IDAGetCurrentTime(ida_mem, &s.current_time) >= 0;
+              IDAGetNumStepSolveFails(ida_mem, &s.num_step_solve_failures) >= 0;
+    s.num_steps -= initial_steps;
     s.num_jacobian_alpha_updates = alpha_updates;
+    return s;
+  }
+
+  template <typename VectorType>
+  typename IDADriver<VectorType>::Statistics IDADriver<VectorType>::get_statistics() const
+  {
+    Statistics s = instance_counters();
+    if (!s.valid) return s;
+    add_counters(s, finished_counters);
+    s.valid = IDAGetLastStep(ida_mem, &s.last_step_size) >= 0 && IDAGetCurrentStep(ida_mem, &s.current_step_size) >= 0 &&
+              IDAGetCurrentTime(ida_mem, &s.current_time) >= 0;
     return s;
   }
 

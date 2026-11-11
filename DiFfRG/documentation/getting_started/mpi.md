@@ -3,14 +3,21 @@
 ## What is distributed
 
 Running an application with `mpirun -n N` spreads the momentum integrals evaluated through `map()` over the `N`
-ranks, and with one GPU per rank over `N` GPUs. No change to the model, the generated flows or `main` is needed.
+ranks, and with one GPU per rank over `N` GPUs. The field-space assembly is distributed as well. No change to the
+model, the generated flows or `main` is needed.
 
-- **Only the external grid of a `map()` is split.** Each rank evaluates a slice of the grid points; every single
+- **`map()`: only the external grid is split.** Each rank evaluates a slice of the grid points; every single
   integral is still summed on one rank, in the original order. The result is therefore bitwise identical to a
   serial run at any rank count. Grids of any dimension are split.
-- **FE assembly is not distributed.** Every rank assembles the whole field-space mesh, redundantly. For a model
-  with FE functions this part of the work does not get faster with more ranks. With several ranks on one node it
-  even gets slower, since the ranks share the node's CPU threads. For such models, use one rank per node.
+- **FE/FV assembly is split by cells** (CG, DG, KT). The default `RectangularMesh` is a
+  `parallel::shared::Triangulation`: every rank holds the whole mesh but assembles only the cells it owns. Vectors
+  and matrices are distributed PETSc objects, and the implicit timesteppers solve with MUMPS (direct) if PETSc
+  has it, otherwise with an iterative PETSc Krylov solver. Results agree with a serial run to rounding, not
+  bitwise. The speedup is well below `N`, since not all of the work is split (e.g. the variables block lives on
+  rank 0). Models dominated by `map()` scale best.
+- **LDG is not distributed.** It needs `RectangularMeshSerial`, so every rank assembles the whole mesh
+  redundantly. With several ranks on one node this part even gets slower, since the ranks share the node's CPU
+  threads; use one rank per node for LDG models.
 - Pure-variable systems built on `map()` (e.g. [Tutorial 4](../tutorials/tut4.md)) benefit most.
 
 ## Building
@@ -42,6 +49,9 @@ end up on the same physical GPU, every affected rank prints a warning to stderr;
 not scale. Give each rank its own GPU, e.g. with `--gpus-per-task=1` or a per-rank `CUDA_VISIBLE_DEVICES`.
 
 Only rank 0 writes output files.
+
+To measure the speedup, compare the stepping time (the `[res ]` summary in the log) of a short run at 1 and at `N`
+ranks, not the total runtime, which includes MPI and GPU start-up.
 
 ### Tuning knobs
 
@@ -79,9 +89,3 @@ If several sources disagree, the run prints a warning naming each one and the va
   next collective call hangs.
 - **An exception inside a deferred batch of maps is not recoverable under MPI**; the run aborts with a diagnosis
   instead of hanging.
-
-## Checking a distributed run
-
-Run the same short configuration with 1 and with several ranks and compare the HDF5 output exactly, e.g. with
-`h5diff -d 0`. The results must agree bit for bit. To measure scaling, time the stepping itself (e.g. the
-`[res ]` summary in the log) rather than the whole process, which includes MPI and GPU start-up.

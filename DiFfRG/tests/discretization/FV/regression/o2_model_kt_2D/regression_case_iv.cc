@@ -62,7 +62,7 @@ namespace
                                 public def::AD<O2_Model_VI_B_IV_Base<BoundaryPolicy>>
   {
   public:
-    static constexpr bool readouts_use_potential = false; // no readouts
+    static constexpr bool use_potential = false; // no readouts
 
     O2_Model_VI_B_IV_Base() : def::fRG(1.0) {}
     explicit O2_Model_VI_B_IV_Base(const ConfigTree &json) : def::fRG(json) {}

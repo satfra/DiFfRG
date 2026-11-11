@@ -44,8 +44,8 @@ namespace dg_test
     using LLF = def::LLFFlux<Model>;
 
   public:
-    static constexpr bool batch_reads_derivatives = derivatives;
-    static constexpr bool batch_reads_hessians = hessians;
+    static constexpr bool use_derivatives = derivatives;
+    static constexpr bool use_hessians = hessians;
 
     template <typename Vector> void initial_condition(const Point<dim> &x, Vector &values) const
     {

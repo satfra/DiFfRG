@@ -9,6 +9,8 @@
 #include <string_view>
 #include <vector>
 
+#include <deal.II/fe/fe_system.h>
+#include <deal.II/fe/mapping_q1.h>
 #include <deal.II/grid/grid_generator.h>
 
 #include <boilerplate/models.hh>
@@ -1654,4 +1656,101 @@ TEST_CASE("The 1D EoM polish does not move to a higher, metastable minimum", "[d
   CAPTURE(fv[0], cg[0]);
   CHECK(fv[0] < 0.03);
   CHECK(cg[0] < 0.03);
+}
+
+TEST_CASE("EoM and raw potentials of one order share a cached system and match uncached solves",
+          "[discretization][EoM][raw-potential][cache]")
+{
+  DiFfRG::Init();
+  constexpr int dim = 2;
+  // A DG0 source on a mesh with hanging nodes: covers the DG0 gradient recovery and the cached right-hand side,
+  // which skips the face terms of a continuous potential.
+  Triangulation<dim> triangulation;
+  GridGenerator::subdivided_hyper_rectangle(triangulation, {12u, 12u}, Point<dim>(0., 0.), Point<dim>(1., 1.));
+  triangulation.begin_active()->set_refine_flag();
+  std::next(triangulation.begin_active(), 70)->set_refine_flag();
+  triangulation.execute_coarsening_and_refinement();
+  FESystem<dim> fe(FE_DGQ<dim>(0), dim);
+  DoFHandler<dim> dof_handler(triangulation);
+  dof_handler.distribute_dofs(fe);
+  const MappingQ1<dim> mapping;
+
+  // The gradient of V = (x - 0.4)^2 (x - 0.9)^2 + 2 (y - 0.3)^2 + x y.
+  const auto gradient = [](const Point<dim> &p) {
+    const double x = p[0], y = p[1];
+    return std::array<double, dim>{{2. * (x - 0.4) * (x - 0.9) * (2. * x - 1.3) + y, 4. * (y - 0.3) + x}};
+  };
+  Vector<double> solution(dof_handler.n_dofs());
+  std::vector<dealii::types::global_dof_index> dofs(fe.n_dofs_per_cell());
+  for (const auto &cell : dof_handler.active_cell_iterators()) {
+    cell->get_dof_indices(dofs);
+    const auto value = gradient(cell->center());
+    for (uint i = 0; i < dofs.size(); ++i)
+      solution[dofs[i]] = value[fe.system_to_component_index(i).first];
+  }
+  const auto field = [](const Point<dim> &, const auto &values) {
+    return std::array<double, dim>{{values[0], values[1]}};
+  };
+  const auto identity = [](const auto &p, const auto &) { return p; };
+  const auto max_difference = [](const Vector<double> &a, const Vector<double> &b) {
+    Vector<double> difference = a;
+    difference -= b;
+    return difference.linfty_norm() / a.linfty_norm();
+  };
+
+  Config::EoMConfig config;
+  DiFfRG::internal::PotentialSystemCache<dim, double> cache;
+  const auto raw_uncached = reconstruct_raw_potential(solution, dof_handler, mapping, field, config);
+  const auto raw_first = reconstruct_raw_potential(solution, dof_handler, mapping, field, config, &cache);
+  const auto raw_again = reconstruct_raw_potential(solution, dof_handler, mapping, field, config, &cache);
+  CHECK(max_difference(raw_uncached.values, raw_first.values) == 0.);
+  CHECK(max_difference(raw_first.values, raw_again.values) < 1e-10);
+
+  auto EoM_cell = dof_handler.begin_active();
+  const auto eom_uncached =
+      get_EoM_point_with_potential(EoM_cell, solution, dof_handler, mapping, field, identity, config);
+  const auto eom_cached = get_EoM_point_with_potential(EoM_cell, solution, dof_handler, mapping, field, identity,
+                                                       config, std::optional<Point<dim>>{}, &cache);
+  // Same element, smoothing and mesh: one system for both kinds.
+  CHECK(eom_cached.potential->dof_handler == raw_first.dof_handler);
+  CHECK(max_difference(eom_uncached.potential->values, eom_cached.potential->values) < 1e-10);
+  CHECK(eom_uncached.point.distance(eom_cached.point) < 1e-10);
+
+  // A different raw order gets a system of its own; the EoM potential keeps its quadratic one.
+  auto cubic_config = config;
+  cubic_config.raw_potential_order = 3;
+  const auto cubic_uncached = reconstruct_raw_potential(solution, dof_handler, mapping, field, cubic_config);
+  const auto cubic_cached = reconstruct_raw_potential(solution, dof_handler, mapping, field, cubic_config, &cache);
+  CHECK(cubic_cached.finite_element->degree == 3);
+  CHECK(cubic_cached.dof_handler != raw_first.dof_handler);
+  CHECK(max_difference(cubic_uncached.values, cubic_cached.values) == 0.);
+  const auto eom_after = get_EoM_point_with_potential(EoM_cell, solution, dof_handler, mapping, field, identity,
+                                                      config, std::optional<Point<dim>>{}, &cache);
+  CHECK(eom_after.potential->dof_handler == raw_first.dof_handler);
+  CHECK(max_difference(eom_cached.potential->values, eom_after.potential->values) == 0.);
+}
+
+TEST_CASE("Nested dissection orders every potential DoF exactly once", "[discretization][EoM][potential]")
+{
+  constexpr int dim = 2;
+  Triangulation<dim> triangulation;
+  GridGenerator::subdivided_hyper_rectangle(triangulation, {9u, 7u}, Point<dim>(0., 0.), Point<dim>(1., 2.));
+  triangulation.begin_active()->set_refine_flag();
+  triangulation.execute_coarsening_and_refinement();
+  FE_Q<dim> fe(2);
+  DoFHandler<dim> dof_handler(triangulation);
+  dof_handler.distribute_dofs(fe);
+  DynamicSparsityPattern dsp(dof_handler.n_dofs());
+  DoFTools::make_flux_sparsity_pattern(dof_handler, dsp);
+  SparsityPattern pattern;
+  pattern.copy_from(dsp);
+  std::vector<Point<dim>> points(dof_handler.n_dofs());
+  for (const auto &[dof, point] : DoFTools::map_dofs_to_support_points(MappingQ1<dim>(), dof_handler))
+    points[dof] = point;
+
+  auto order = DiFfRG::internal::nested_dissection_order(pattern, points);
+  REQUIRE(order.size() == dof_handler.n_dofs());
+  std::sort(order.begin(), order.end());
+  for (std::size_t k = 0; k < order.size(); ++k)
+    CHECK(order[k] == static_cast<dealii::types::suitesparse_index>(k));
 }

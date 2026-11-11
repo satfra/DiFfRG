@@ -136,10 +136,10 @@ assembler:
 | KT finite volume | `"fe_functions"`, `"fe_derivatives"`, `"extractors"`, `"variables"`, `"cell_width"` |
 
 - Under KT, `"fe_derivatives"` is the scheme's reconstructed (limited) cell gradient; `diffusion_flux`
-  additionally gets `"fe_third_derivatives"`, and `source` gets `"fe_hessians"` if the model declares
-  `static constexpr bool source_uses_hessians = true`.
-- Under CG and DG, a model declaring `static constexpr bool batch_reads_hessians = false` (or
-  `batch_reads_derivatives = false`) gets no `"fe_hessians"` (or neither), and the assembler skips computing them.
+  additionally gets `"fe_third_derivatives"`, and `source` gets `"fe_hessians"` (the diagonal stencil
+  curvature) unless the model declares `static constexpr bool use_hessians = false`.
+- Under CG and DG, a model declaring `static constexpr bool use_hessians = false` (or `use_derivatives = false`)
+  gets no `"fe_hessians"` (or neither), and the assembler skips computing them.
 - Reading an entry the assembler does not provide is a compile error. A model shared between assemblers can test
   `if constexpr (tuple_has<"fe_derivatives", Solution>)`.
 
@@ -195,8 +195,8 @@ std::array<double, dim> raw_potential_gradient(const Point<dim> &, const Vector 
 }
 ```
 
-The reconstruction is a solve over the whole mesh. A model whose extractors do not read the potential should
-declare `static constexpr bool extract_uses_potential = false;` to skip it on every residual evaluation.
+The reconstruction is a solve over the whole mesh. A model whose extractors and readouts do not read the
+potential should declare `static constexpr bool use_potential = false;` to skip it on every residual evaluation.
 
 ## Affine constraints
 

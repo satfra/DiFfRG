@@ -6,6 +6,7 @@
 #include <Eigen/Eigenvalues>
 #include <Eigen/QR>
 
+#include <deal.II/base/parallel.h>
 #include <deal.II/base/point.h>
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/distributed/tria_base.h>
@@ -25,6 +26,7 @@
 #include <deal.II/lac/sparsity_pattern.h>
 #include <deal.II/lac/vector.h>
 #include <deal.II/numerics/fe_field_function.h>
+#include <umfpack.h>
 
 #include <DiFfRG/discretization/common/batched_scatter.hh>
 #include <DiFfRG/discretization/common/cell_geometry.hh>
@@ -41,8 +43,11 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <stdexcept>
+#include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -137,7 +142,7 @@ namespace DiFfRG
   };
 
   /**
-   * @brief Placeholder passed in the potential slots of extract() when the model sets `extract_uses_potential = false`.
+   * @brief Placeholder passed in the potential slots of extract() when the model sets `use_potential = false`.
    *
    * It has no operations, so reading a potential slot in such a model fails to compile.
    */
@@ -295,13 +300,190 @@ namespace DiFfRG
       return kind == PotentialKind::eom ? make_eom_potential_fe<dim>() : make_raw_potential_fe<dim>(raw_order);
     }
 
+    /**
+     * @brief A fill-reducing elimination order by geometric nested dissection: split the DoFs at the median of
+     * their support points along the longest extent, take the DoFs of one half that couple to the other as
+     * separator, order both halves recursively, then the separator.
+     *
+     * On the face-coupled potential patterns this halves the fill-in and factorization flops of UMFPACK's own AMD
+     * ordering. Returns the DoF eliminated k-th at position k.
+     */
+    template <int dim>
+    std::vector<dealii::types::suitesparse_index>
+    nested_dissection_order(const dealii::SparsityPattern &pattern, const std::vector<dealii::Point<dim>> &points)
+    {
+      using Index = dealii::types::suitesparse_index;
+      constexpr std::size_t leaf_size = 16;
+      std::vector<Index> order;
+      order.reserve(points.size());
+      std::vector<char> in_left(points.size(), 0);
+
+      const auto dissect = [&](const auto &self, std::vector<Index> &dofs) -> void {
+        if (dofs.size() <= leaf_size) {
+          order.insert(order.end(), dofs.begin(), dofs.end());
+          return;
+        }
+        dealii::Point<dim> lower = points[dofs[0]], upper = points[dofs[0]];
+        for (const Index dof : dofs)
+          for (uint d = 0; d < dim; ++d) {
+            lower[d] = std::min(lower[d], points[dof][d]);
+            upper[d] = std::max(upper[d], points[dof][d]);
+          }
+        uint axis = 0;
+        for (uint d = 1; d < dim; ++d)
+          if (upper[d] - lower[d] > upper[axis] - lower[axis]) axis = d;
+
+        std::vector<double> coordinates(dofs.size());
+        for (std::size_t k = 0; k < dofs.size(); ++k)
+          coordinates[k] = points[dofs[k]][axis];
+        const auto median = coordinates.begin() + coordinates.size() / 2;
+        std::nth_element(coordinates.begin(), median, coordinates.end());
+        const double split = *median;
+
+        for (const Index dof : dofs)
+          in_left[dof] = points[dof][axis] < split;
+        std::vector<Index> left, right, separator;
+        for (const Index dof : dofs) {
+          if (in_left[dof]) {
+            left.push_back(dof);
+            continue;
+          }
+          bool couples_left = false;
+          for (auto entry = pattern.begin(dof); entry != pattern.end(dof) && !couples_left; ++entry)
+            couples_left = in_left[entry->column()];
+          (couples_left ? separator : right).push_back(dof);
+        }
+        for (const Index dof : left)
+          in_left[dof] = 0;
+        // Points that cannot be split (all on the median) stay together.
+        if (left.empty()) {
+          order.insert(order.end(), dofs.begin(), dofs.end());
+          return;
+        }
+        dofs = {};
+        self(self, left);
+        self(self, right);
+        order.insert(order.end(), separator.begin(), separator.end());
+      };
+
+      std::vector<Index> all(points.size());
+      std::iota(all.begin(), all.end(), Index(0));
+      dissect(dissect, all);
+      return order;
+    }
+
+    /**
+     * @brief The sparse LU factorization (UMFPACK) of the symmetric positive definite potential matrix.
+     *
+     * Differs from dealii::SparseDirectUMFPACK in two choices: the elimination order is nested_dissection_order
+     * with UMFPACK's symmetric strategy, and the solve does no iterative refinement -- an SPD matrix factorized with
+     * diagonal pivots needs none, and the refinement would cost two more back-substitutions and a matrix product.
+     */
+    class PotentialFactorization
+    {
+    public:
+      PotentialFactorization() { umfpack_dl_defaults(control.data()); }
+      PotentialFactorization(const PotentialFactorization &) = delete;
+      PotentialFactorization &operator=(const PotentialFactorization &) = delete;
+      ~PotentialFactorization() { clear(); }
+
+      void clear()
+      {
+        if (numeric != nullptr) umfpack_dl_free_numeric(&numeric);
+        numeric = nullptr;
+      }
+
+      /// Factorize @p matrix, ordering its unknowns by nested dissection of @p support_points.
+      template <int dim, typename NumberType>
+      void initialize(const dealii::SparseMatrix<NumberType> &matrix,
+                      const std::vector<dealii::Point<dim>> &support_points)
+      {
+        clear();
+        // UMFPACK wants compressed columns with sorted indices; the rows of the (symmetric) matrix serve, sorted.
+        const std::size_t n = matrix.m();
+        Ap.assign(n + 1, 0);
+        Ai.resize(matrix.n_nonzero_elements());
+        Ax.resize(matrix.n_nonzero_elements());
+        for (std::size_t row = 0; row < n; ++row)
+          Ap[row + 1] = Ap[row] + matrix.get_row_length(row);
+        dealii::parallel::apply_to_subranges(
+            std::size_t(0), n,
+            [&](const std::size_t begin, const std::size_t end) {
+              for (std::size_t row = begin; row < end; ++row) {
+                auto index = Ap[row];
+                for (auto entry = matrix.begin(row); entry != matrix.end(row); ++entry, ++index) {
+                  Ai[index] = entry->column();
+                  Ax[index] = entry->value();
+                }
+                // deal.II stores the diagonal first; move it into place.
+                for (auto k = Ap[row]; k + 1 < Ap[row + 1] && Ai[k] > Ai[k + 1]; ++k) {
+                  std::swap(Ai[k], Ai[k + 1]);
+                  std::swap(Ax[k], Ax[k + 1]);
+                }
+              }
+            },
+            1024);
+
+        const auto order = nested_dissection_order(matrix.get_sparsity_pattern(), support_points);
+        control[UMFPACK_STRATEGY] = UMFPACK_STRATEGY_SYMMETRIC;
+#ifdef UMFPACK_ORDERING
+        // Older UMFPACK (e.g. deal.II's bundled 5.1) has no ordering control: its qsymbolic always uses the given
+        // column ordering.
+        control[UMFPACK_ORDERING] = UMFPACK_ORDERING_GIVEN;
+#endif
+        control[UMFPACK_IRSTEP] = 0;
+        void *symbolic = nullptr;
+        int status = umfpack_dl_qsymbolic(n, n, Ap.data(), Ai.data(), Ax.data(), order.data(), &symbolic,
+                                          control.data(), nullptr);
+        if (status != UMFPACK_OK)
+          throw std::runtime_error("PotentialFactorization: umfpack_dl_qsymbolic failed with status " +
+                                   std::to_string(status));
+        status = umfpack_dl_numeric(Ap.data(), Ai.data(), Ax.data(), symbolic, &numeric, control.data(), nullptr);
+        umfpack_dl_free_symbolic(&symbolic);
+        if (status != UMFPACK_OK) {
+          clear();
+          throw std::runtime_error("PotentialFactorization: umfpack_dl_numeric failed with status " +
+                                   std::to_string(status));
+        }
+      }
+
+      /// Solve for @p solution with the factorized matrix and @p rhs.
+      template <typename NumberType>
+      void solve(dealii::Vector<NumberType> &solution, const dealii::Vector<NumberType> &rhs) const
+      {
+        const auto solve_double = [&](double *x, const double *b) {
+          // The rows were handed over as columns: solve with the transpose (the same matrix).
+          const int status = umfpack_dl_solve(UMFPACK_At, Ap.data(), Ai.data(), Ax.data(), x, b, numeric,
+                                              control.data(), nullptr);
+          if (status != UMFPACK_OK)
+            throw std::runtime_error("PotentialFactorization: umfpack_dl_solve failed with status " +
+                                     std::to_string(status));
+        };
+        if constexpr (std::is_same_v<NumberType, double>)
+          solve_double(solution.data(), rhs.data());
+        else {
+          dealii::Vector<double> x(solution.size()), b(rhs);
+          solve_double(x.data(), b.data());
+          solution = x;
+        }
+      }
+
+    private:
+      std::vector<dealii::types::suitesparse_index> Ap, Ai;
+      std::vector<double> Ax;
+      void *numeric = nullptr;
+      std::array<double, UMFPACK_CONTROL> control;
+    };
+
     template <int dim, typename NumberType> struct PotentialAssemblyData;
 
     /**
      * @brief The mesh-dependent part of solve_potential (dofs, matrix and its factorization), kept across calls.
      *
      * The matrix depends only on the mesh, the element and the smoothing length, so a reconstruction on an unchanged
-     * mesh costs one right-hand side assembly and a back-substitution. Owned by an assembler; not thread-safe.
+     * mesh costs one right-hand side assembly and a back-substitution. The EoM and the raw potential differ only in
+     * the right-hand side, so they share one entry whenever their elements have the same degree. Owned by an
+     * assembler; not thread-safe.
      */
     template <int dim, typename NumberType> class PotentialSystemCache
     {
@@ -314,13 +496,21 @@ namespace DiFfRG
         dealii::AffineConstraints<NumberType> constraints;
         dealii::SparsityPattern sparsity_pattern;
         dealii::SparseMatrix<NumberType> matrix;
-        dealii::SparseDirectUMFPACK factorization;
+        PotentialFactorization factorization;
         dealii::Quadrature<dim> quadrature;
         dealii::Quadrature<face_dim> face_quadrature;
         /// Where each potential DoF sits; needed by the gauge choice and by every minimum search.
         std::map<dealii::types::global_dof_index, dealii::Point<dim>> support_points;
         /// What the right-hand side assembly reuses: its cells, faces and per-thread FE scratch.
         std::unique_ptr<PotentialAssemblyData<dim, NumberType>> assembly;
+        /// The smoothing length the matrix was assembled with, resolved from the configured one.
+        double smoothing_length = 0.;
+
+        /// The last solve of each kind: a right-hand side equal to one of these reuses its solution.
+        struct Solve {
+          dealii::Vector<NumberType> rhs, solution;
+        };
+        std::array<Solve, n_potential_kinds> last_solves;
 
         /**
          * @brief Whether this entry still describes the system that would be built now.
@@ -331,17 +521,17 @@ namespace DiFfRG
          * disconnects its slots -- so the address may now belong to a different mesh entirely.
          */
         bool describes(const dealii::Triangulation<dim> &tria, const dealii::DoFHandler<dim> &solution_dof_handler,
-                       const double smoothing, const uint potential_fe_degree) const
+                       const double configured_smoothing, const uint potential_fe_degree) const
         {
           return !stale && connection.connected() && triangulation == &tria && solution_dofs == &solution_dof_handler &&
                  n_active_cells == tria.n_active_cells() && n_levels == tria.n_levels() &&
                  n_vertices == tria.n_vertices() && solution_fe_degree == solution_dof_handler.get_fe().degree &&
-                 smoothing_length == smoothing && finite_element != nullptr &&
+                 configured_smoothing_length == configured_smoothing && finite_element != nullptr &&
                  finite_element->degree == potential_fe_degree;
         }
 
         void note_built_for(const dealii::Triangulation<dim> &tria, const dealii::DoFHandler<dim> &solution_dof_handler,
-                            const double smoothing)
+                            const double configured_smoothing)
         {
           triangulation = &tria;
           solution_dofs = &solution_dof_handler;
@@ -349,7 +539,7 @@ namespace DiFfRG
           n_levels = tria.n_levels();
           n_vertices = tria.n_vertices();
           solution_fe_degree = solution_dof_handler.get_fe().degree;
-          smoothing_length = smoothing;
+          configured_smoothing_length = configured_smoothing;
           connection = tria.signals.any_change.connect([this]() { stale = true; });
           stale = false;
         }
@@ -361,26 +551,26 @@ namespace DiFfRG
         uint n_levels = 0;
         std::size_t n_vertices = 0;
         uint solution_fe_degree = 0;
-        double smoothing_length = 0.;
+        double configured_smoothing_length = 0.;
         boost::signals2::scoped_connection connection;
         bool stale = true;
       };
 
       /**
-       * @brief The entry for one kind of potential, created empty on first use.
+       * @brief The entry for potentials of element degree @p degree, created empty on first use.
        *
        * Held indirectly because a SparseMatrix points at its own SparsityPattern: the entries must not move
        * once a matrix has been attached to one.
        */
-      Entry &entry(const PotentialKind kind)
+      Entry &entry(const uint degree)
       {
-        auto &slot = entries[static_cast<uint>(kind)];
+        auto &slot = entries[degree];
         if (!slot) slot = std::make_unique<Entry>();
         return *slot;
       }
 
     private:
-      std::array<std::unique_ptr<Entry>, n_potential_kinds> entries;
+      std::map<uint, std::unique_ptr<Entry>> entries;
     };
 
     template <int dim, typename EoMValue> dealii::Tensor<1, dim> eom_to_tensor(const EoMValue &eom)
@@ -397,39 +587,56 @@ namespace DiFfRG
       dealii::Tensor<2, dim, NumberType> jacobian;
     };
 
-    template <int dim, typename VectorType, typename GradientFUN>
-    std::vector<DG0GradientModel<dim, typename VectorType::value_type>>
-    recover_dg0_gradient_models(const VectorType &sol, const dealii::DoFHandler<dim> &solution_dof_handler,
-                                const dealii::Mapping<dim> &mapping, const GradientFUN &get_gradient)
-    {
-      using NumberType = typename VectorType::value_type;
-      using Iterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
+    /**
+     * @brief The mesh-dependent part of recover_dg0_gradient_models: every cell's centre, its patch (the cell and its
+     * active neighbours, layer by layer until there are 2 (dim + 1) of them), and the least-squares map from the
+     * patch samples to the slope of their linear fit; empty where the fit is underdetermined.
+     */
+    template <int dim> struct DG0GradientPatches {
+      DG0GradientPatches(const dealii::DoFHandler<dim> &solution_dof_handler, const dealii::Mapping<dim> &mapping)
+      {
+        const uint n_cells = solution_dof_handler.get_triangulation().n_active_cells();
+        cells.resize(n_cells);
+        centers.resize(n_cells);
+        patches.resize(n_cells);
+        slope_maps.resize(n_cells);
 
-      const uint n_cells = solution_dof_handler.get_triangulation().n_active_cells();
-      std::vector<Iterator> cells(n_cells);
-      std::vector<DG0GradientModel<dim, NumberType>> models(n_cells);
+        for (const auto &cell : solution_dof_handler.active_cell_iterators())
+          cells[cell->active_cell_index()] = cell;
+        const dealii::QMidpoint<dim> midpoint;
+        tbb::enumerable_thread_specific<std::unique_ptr<dealii::FEValues<dim>>> values_per_thread([&]() {
+          return std::make_unique<dealii::FEValues<dim>>(mapping, solution_dof_handler.get_fe(), midpoint,
+                                                         dealii::update_quadrature_points);
+        });
+        tbb::parallel_for(tbb::blocked_range<uint>(0, n_cells), [&](const auto &range) {
+          auto &values = *values_per_thread.local();
+          for (uint index = range.begin(); index != range.end(); ++index) {
+            values.reinit(cells[index]);
+            centers[index] = values.quadrature_point(0);
+          }
+        });
 
-      dealii::QMidpoint<dim> midpoint;
-      dealii::FEValues<dim> values(mapping, solution_dof_handler.get_fe(), midpoint,
-                                   dealii::update_values | dealii::update_quadrature_points);
-      std::vector<dealii::Vector<NumberType>> solution_values(
-          1, dealii::Vector<NumberType>(solution_dof_handler.get_fe().n_components()));
-      for (const auto &cell : solution_dof_handler.active_cell_iterators()) {
-        const uint index = cell->active_cell_index();
-        cells[index] = cell;
-        values.reinit(cell);
-        values.get_function_values(sol, solution_values);
-        models[index].center = values.quadrature_point(0);
-        models[index].value = eom_to_tensor<dim>(get_gradient(models[index].center, solution_values[0]));
+        const uint target_patch_size = std::min<uint>(n_cells, 2 * (dim + 1));
+        tbb::parallel_for(tbb::blocked_range<uint>(0, n_cells), [&](const auto &range) {
+          for (uint cell_index = range.begin(); cell_index != range.end(); ++cell_index)
+            build_patch(cell_index, target_patch_size);
+        });
       }
 
-      const uint target_patch_size = std::min<uint>(n_cells, 2 * (dim + 1));
-      for (uint cell_index = 0; cell_index < n_cells; ++cell_index) {
-        std::vector<uint> patch{cell_index};
-        std::vector<uint> frontier{cell_index};
-        std::vector<bool> seen(n_cells, false);
-        seen[cell_index] = true;
+      std::vector<typename dealii::DoFHandler<dim>::active_cell_iterator> cells;
+      std::vector<dealii::Point<dim>> centers;
+      std::vector<std::vector<uint>> patches;
+      /// Per cell, the dim x patch-size matrix taking the patch samples to the slope of their fit.
+      std::vector<Eigen::MatrixXd> slope_maps;
 
+    private:
+      /// The patch of one cell and its slope map.
+      void build_patch(const uint cell_index, const uint target_patch_size)
+      {
+        using Iterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
+        auto &patch = patches[cell_index];
+        patch = {cell_index};
+        std::vector<uint> frontier{cell_index};
         while (patch.size() < target_patch_size && !frontier.empty()) {
           std::vector<uint> next_frontier;
           for (const uint index : frontier) {
@@ -437,8 +644,7 @@ namespace DiFfRG
             dealii::GridTools::get_active_neighbors<dealii::DoFHandler<dim>>(cells[index], neighbors);
             for (const auto &neighbor : neighbors) {
               const uint neighbor_index = neighbor->active_cell_index();
-              if (seen[neighbor_index]) continue;
-              seen[neighbor_index] = true;
+              if (std::find(patch.begin(), patch.end(), neighbor_index) != patch.end()) continue;
               patch.push_back(neighbor_index);
               next_frontier.push_back(neighbor_index);
             }
@@ -446,28 +652,78 @@ namespace DiFfRG
           frontier = std::move(next_frontier);
         }
 
-        if (patch.size() < dim + 1) continue;
+        if (patch.size() < dim + 1) return;
         const double scale = std::max(cells[cell_index]->diameter(), std::numeric_limits<double>::epsilon());
         Eigen::MatrixXd design(patch.size(), dim + 1);
         for (uint row = 0; row < patch.size(); ++row) {
           design(row, 0) = 1.;
           for (uint d = 0; d < dim; ++d)
-            design(row, d + 1) = (models[patch[row]].center[d] - models[cell_index].center[d]) / scale;
+            design(row, d + 1) = (centers[patch[row]][d] - centers[cell_index][d]) / scale;
         }
-
         Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr(design);
-        if (qr.rank() < dim + 1) continue;
-        for (uint component = 0; component < dim; ++component) {
-          Eigen::VectorXd samples(patch.size());
-          for (uint row = 0; row < patch.size(); ++row)
-            samples[row] = models[patch[row]].value[component];
-          const Eigen::VectorXd coefficients = qr.solve(samples);
-          for (uint d = 0; d < dim; ++d)
-            models[cell_index].jacobian[component][d] = coefficients[d + 1] / scale;
+        if (qr.rank() < dim + 1) return;
+        // Column by column: Eigen's solve with a matrix right-hand side calls host-only code from functions nvcc
+        // sees as __host__ __device__, which it warns about in every CUDA translation unit.
+        auto &slope_map = slope_maps[cell_index];
+        slope_map.resize(dim, patch.size());
+        for (uint column = 0; column < patch.size(); ++column) {
+          const Eigen::VectorXd fit = qr.solve(Eigen::VectorXd::Unit(patch.size(), column));
+          slope_map.col(column) = fit.tail(dim) / scale;
         }
       }
+    };
 
+    template <int dim, typename VectorType, typename GradientFUN>
+    std::vector<DG0GradientModel<dim, typename VectorType::value_type>>
+    recover_dg0_gradient_models(const VectorType &sol, const dealii::DoFHandler<dim> &solution_dof_handler,
+                                const dealii::Mapping<dim> &mapping, const GradientFUN &get_gradient,
+                                const DG0GradientPatches<dim> &patches)
+    {
+      using NumberType = typename VectorType::value_type;
+      const uint n_cells = patches.cells.size();
+      std::vector<DG0GradientModel<dim, NumberType>> models(n_cells);
+
+      const dealii::QMidpoint<dim> midpoint;
+      tbb::enumerable_thread_specific<std::unique_ptr<dealii::FEValues<dim>>> values_per_thread([&]() {
+        return std::make_unique<dealii::FEValues<dim>>(mapping, solution_dof_handler.get_fe(), midpoint,
+                                                       dealii::update_values);
+      });
+      tbb::parallel_for(tbb::blocked_range<uint>(0, n_cells), [&](const auto &range) {
+        auto &values = *values_per_thread.local();
+        std::vector<dealii::Vector<NumberType>> solution_values(
+            1, dealii::Vector<NumberType>(solution_dof_handler.get_fe().n_components()));
+        for (uint index = range.begin(); index != range.end(); ++index) {
+          values.reinit(patches.cells[index]);
+          values.get_function_values(sol, solution_values);
+          models[index].center = patches.centers[index];
+          models[index].value = eom_to_tensor<dim>(get_gradient(models[index].center, solution_values[0]));
+        }
+      });
+
+      tbb::parallel_for(tbb::blocked_range<uint>(0, n_cells), [&](const auto &range) {
+        for (uint cell_index = range.begin(); cell_index != range.end(); ++cell_index) {
+          const auto &slope_map = patches.slope_maps[cell_index];
+          if (slope_map.size() == 0) continue;
+          const auto &patch = patches.patches[cell_index];
+          for (uint component = 0; component < dim; ++component)
+            for (uint d = 0; d < dim; ++d) {
+              NumberType slope = 0.;
+              for (uint row = 0; row < patch.size(); ++row)
+                slope += slope_map(d, row) * models[patch[row]].value[component];
+              models[cell_index].jacobian[component][d] = slope;
+            }
+        }
+      });
       return models;
+    }
+
+    template <int dim, typename VectorType, typename GradientFUN>
+    std::vector<DG0GradientModel<dim, typename VectorType::value_type>>
+    recover_dg0_gradient_models(const VectorType &sol, const dealii::DoFHandler<dim> &solution_dof_handler,
+                                const dealii::Mapping<dim> &mapping, const GradientFUN &get_gradient)
+    {
+      return recover_dg0_gradient_models(sol, solution_dof_handler, mapping, get_gradient,
+                                         DG0GradientPatches<dim>(solution_dof_handler, mapping));
     }
 
     template <int dim, typename NumberType>
@@ -849,6 +1105,8 @@ namespace DiFfRG
       FaceTopology<dim> topology;
       tbb::enumerable_thread_specific<PotentialAssemblyScratch<dim, NumberType>> scratches;
       std::vector<PotentialLocalSystem<NumberType>> cell_systems, face_systems;
+      /// For a DG0 source: the patches of its gradient recovery, built on first use.
+      std::unique_ptr<DG0GradientPatches<dim>> dg0_patches;
     };
 
     template <int dim, typename VectorType, typename EoMFUN>
@@ -867,9 +1125,12 @@ namespace DiFfRG
       using LocalSystem = PotentialLocalSystem<NumberType>;
 
       const bool recover_dg0_gradient = solution_dof_handler.get_fe().degree == 0;
-      const auto dg0_gradient_models = recover_dg0_gradient
-                                           ? recover_dg0_gradient_models(sol, solution_dof_handler, mapping, get_EoM)
-                                           : std::vector<DG0GradientModel<dim, NumberType>>{};
+      if (recover_dg0_gradient && !data.dg0_patches)
+        data.dg0_patches = std::make_unique<DG0GradientPatches<dim>>(solution_dof_handler, mapping);
+      const auto dg0_gradient_models =
+          recover_dg0_gradient
+              ? recover_dg0_gradient_models(sol, solution_dof_handler, mapping, get_EoM, *data.dg0_patches)
+              : std::vector<DG0GradientModel<dim, NumberType>>{};
 
       const auto evaluate_gradient = [&](const Iterator &cell, const dealii::Point<dim> &point,
                                          const dealii::Vector<NumberType> &values) {
@@ -992,17 +1253,22 @@ namespace DiFfRG
         for (size_t k = r.begin(); k != r.end(); ++k)
           assemble_cell(cells[k], scratches.local(), cell_systems[k]);
       });
-      tbb::parallel_for(tbb::blocked_range<size_t>(0, topology.faces.size()), [&](const auto &r) {
-        for (size_t f = r.begin(); f != r.end(); ++f) {
-          const auto &face = topology.faces[f];
-          assemble_face(Iterator(face.cell[0]), face.face_no[0], face.subface_no[0], Iterator(face.cell[1]),
-                        face.face_no[1], face.subface_no[1], scratches.local(), face_systems[f]);
-        }
-      });
+      // The faces add to the right-hand side only through jumps of the test functions, which vanish (up to
+      // roundoff) for a continuous potential; without the matrix they are skipped then.
+      const bool assemble_faces = assemble_matrix || !potential_fe.conforms(FiniteElementData<dim>::H1);
+      if (assemble_faces)
+        tbb::parallel_for(tbb::blocked_range<size_t>(0, topology.faces.size()), [&](const auto &r) {
+          for (size_t f = r.begin(); f != r.end(); ++f) {
+            const auto &face = topology.faces[f];
+            assemble_face(Iterator(face.cell[0]), face.face_no[0], face.subface_no[0], Iterator(face.cell[1]),
+                          face.face_no[1], face.subface_no[1], scratches.local(), face_systems[f]);
+          }
+        });
       for (const auto &local : cell_systems)
         insert(local.matrix, local.rhs, local.dof_indices);
-      for (const auto &local : face_systems)
-        insert(local.matrix, local.rhs, local.dof_indices);
+      if (assemble_faces)
+        for (const auto &local : face_systems)
+          insert(local.matrix, local.rhs, local.dof_indices);
     }
 
     template <int dim, typename NumberType> struct PotentialMinimum {
@@ -1217,23 +1483,36 @@ namespace DiFfRG
         }
       }
 
-      FEValues<dim> potential_fe_values(mapping, potential_fe, quadrature, update_values | update_quadrature_points);
-      std::vector<NumberType> potential_values(quadrature.size());
-      for (const auto &cell : potential_dof_handler.active_cell_iterators()) {
-        potential_fe_values.reinit(cell);
-        potential_fe_values.get_function_values(potential, potential_values);
-
-        for (const auto q : potential_fe_values.quadrature_point_indices()) {
-          if ((double)potential_values[q] < minimum.value) {
-            minimum.value = (double)potential_values[q];
-            minimum.point = potential_fe_values.quadrature_point(q);
-          }
+      // Each cell's first lowest quadrature sample in parallel, then the first lowest cell in cell order: the
+      // same sample a serial scan would keep.
+      using CellIterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
+      std::vector<CellIterator> cells;
+      cells.reserve(potential_dof_handler.get_triangulation().n_active_cells());
+      for (const auto &cell : potential_dof_handler.active_cell_iterators())
+        cells.push_back(cell);
+      std::vector<PotentialMinimum<dim, NumberType>> cell_minima(cells.size());
+      tbb::enumerable_thread_specific<std::unique_ptr<FEValues<dim>>> fe_values_per_thread([&]() {
+        return std::make_unique<FEValues<dim>>(mapping, potential_fe, quadrature,
+                                               update_values | update_quadrature_points);
+      });
+      tbb::parallel_for(tbb::blocked_range<size_t>(0, cells.size()), [&](const auto &range) {
+        auto &fe_values = *fe_values_per_thread.local();
+        std::vector<NumberType> values(quadrature.size());
+        for (size_t k = range.begin(); k != range.end(); ++k) {
+          fe_values.reinit(cells[k]);
+          fe_values.get_function_values(potential, values);
+          for (const auto q : fe_values.quadrature_point_indices())
+            if ((double)values[q] < cell_minima[k].value) {
+              cell_minima[k].value = (double)values[q];
+              cell_minima[k].point = fe_values.quadrature_point(q);
+            }
         }
-      }
+      });
+      for (const auto &cell_minimum : cell_minima)
+        if (cell_minimum.value < minimum.value) minimum = cell_minimum;
 
       const auto minimum_cell =
           GridTools::find_active_cell_around_point(mapping, potential_dof_handler, minimum.point).first;
-      using CellIterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
       struct CandidateCell {
         CellIterator cell;
         std::optional<dealii::Point<dim>> initial_unit_point;
@@ -1298,10 +1577,6 @@ namespace DiFfRG
       ++solve_stats.solves;
       ScopedTimer solve_timer(solve_stats.seconds);
 
-      auto origin_cell = solution_dof_handler.begin_active();
-      const auto origin = get_origin(solution_dof_handler, origin_cell);
-      const double smoothing_length = resolve_potential_smoothing_length(solution_dof_handler, config.smoothing_length);
-
       // The potential gets its own SERIAL mesh whenever the solution lives on a partitioned one.
       //
       // Two things force this, and either alone is fatal:
@@ -1321,16 +1596,21 @@ namespace DiFfRG
       // Callers that pass no cache get one that lives for this call only, which is the behaviour this
       // function had throughout: build everything, factorize, solve, throw it all away.
       PotentialSystemCache<dim, NumberType> uncached;
-      auto &system = (cache != nullptr ? *cache : uncached).entry(kind);
 
-      // The eom potential is always quadratic; the raw potential's order is a config choice, so a
-      // change of /discretization/raw_potential_order must invalidate the cached system.
+      // The eom potential is always quadratic; the raw potential's order is a config choice. The system
+      // depends on the kind only through this order, so both kinds of the same order share one entry.
       const uint potential_order = kind == PotentialKind::eom ? 2 : config.raw_potential_order;
+      auto &system = (cache != nullptr ? *cache : uncached).entry(potential_order);
       const bool rebuild =
-          !system.describes(potential_triangulation, solution_dof_handler, smoothing_length, potential_order);
+          !system.describes(potential_triangulation, solution_dof_handler, config.smoothing_length, potential_order);
       if (rebuild) {
+        auto origin_cell = solution_dof_handler.begin_active();
+        const auto origin = get_origin(solution_dof_handler, origin_cell);
+        system.smoothing_length = resolve_potential_smoothing_length(solution_dof_handler, config.smoothing_length);
+
         // The old assembly data refers to the FE and DoF handler replaced below.
         system.assembly.reset();
+        system.last_solves = {};
         system.finite_element = make_potential_fe<dim>(kind, potential_order);
         system.dof_handler = std::make_shared<DoFHandler<dim>>(potential_triangulation);
         system.dof_handler->distribute_dofs(*system.finite_element);
@@ -1362,17 +1642,33 @@ namespace DiFfRG
 
       Vector<NumberType> rhs(system.dof_handler->n_dofs());
       assemble_potential_system(sol, solution_dof_handler, *system.finite_element, mapping, get_gradient,
-                                system.constraints, *system.assembly, system.matrix, rhs, smoothing_length,
+                                system.constraints, *system.assembly, system.matrix, rhs, system.smoothing_length,
                                 /*assemble_matrix = */ rebuild);
 
       if (rebuild) {
-        system.factorization.initialize(system.matrix);
-        system.note_built_for(potential_triangulation, solution_dof_handler, smoothing_length);
+        std::vector<Point<dim>> support_points(system.dof_handler->n_dofs());
+        for (const auto &[dof, point] : system.support_points)
+          support_points[dof] = point;
+        system.factorization.initialize(system.matrix, support_points);
+        system.note_built_for(potential_triangulation, solution_dof_handler, config.smoothing_length);
       }
 
-      Vector<NumberType> potential(system.dof_handler->n_dofs());
-      system.factorization.vmult(potential, rhs);
-      system.constraints.distribute(potential);
+      // The same right-hand side again -- the same solution seen by a residual and its jacobian, or EoM and
+      // raw gradient coinciding -- needs no back-substitution.
+      const auto previous =
+          std::find_if(system.last_solves.begin(), system.last_solves.end(),
+                       [&](const auto &solve) { return solve.rhs.size() == rhs.size() && solve.rhs == rhs; });
+      Vector<NumberType> potential;
+      if (previous != system.last_solves.end())
+        potential = previous->solution;
+      else {
+        potential.reinit(system.dof_handler->n_dofs());
+        system.factorization.solve(potential, rhs);
+        system.constraints.distribute(potential);
+      }
+      auto &last_solve = system.last_solves[static_cast<uint>(kind)];
+      last_solve.rhs = std::move(rhs);
+      last_solve.solution = potential;
 
       return {
           .finite_element = system.finite_element, .dof_handler = system.dof_handler, .values = std::move(potential)};
@@ -1395,7 +1691,7 @@ namespace DiFfRG
           std::max<uint>(std::max<uint>(solution_dof_handler.get_fe().degree, potential.finite_element->degree) + 2, 2);
       const std::optional<QGauss<dim>> own_quadrature =
           cache != nullptr ? std::nullopt : std::optional<QGauss<dim>>(quadrature_order);
-      const auto *system = cache != nullptr ? &cache->entry(PotentialKind::eom) : nullptr;
+      const auto *system = cache != nullptr ? &cache->entry(potential.finite_element->degree) : nullptr;
 
       const auto minimum =
           find_potential_minimum(*potential.dof_handler, *potential.finite_element, mapping, potential.values,

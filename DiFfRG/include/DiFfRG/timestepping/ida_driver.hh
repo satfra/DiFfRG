@@ -72,7 +72,7 @@ namespace DiFfRG
   public:
     using Parameters = IDAParameters;
 
-    /// IDA's counters since the last (re)initialization, and its current step sizes.
+    /// IDA's counters over the whole solve, summed across its restarts, and its current step sizes.
     struct Statistics {
       bool valid = false;
       long int num_steps = 0;
@@ -170,6 +170,12 @@ namespace DiFfRG
   private:
     void reset(const double t, const double h, VectorType &solution, VectorType &solution_dot, const bool restart);
     void free_ida();
+    /// The counters of the current IDA instance alone; steps counted from where the instance started.
+    Statistics instance_counters() const;
+    /// The counters of the IDA instances before the current one; reset() adds to them before it frees IDA.
+    Statistics finished_counters;
+    /// IDA's step count when the current instance started: 0 after a cold start, the restored count after a warm one.
+    long int initial_steps = 0;
     /// Rethrow an exception a callback left behind, unless it is a recoverable one: IDA has either recovered from
     /// that, or reports its failure through its return status.
     void handle_pending_exception();

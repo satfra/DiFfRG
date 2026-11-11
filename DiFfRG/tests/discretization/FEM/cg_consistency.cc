@@ -37,7 +37,7 @@ namespace
         public def::AD<ModelRich<dim, batched, hessians, extractors>>
   {
   public:
-    static constexpr bool batch_reads_hessians = hessians;
+    static constexpr bool use_hessians = hessians;
 
     template <typename Vector> void initial_condition(const Point<dim> &x, Vector &values) const
     {
@@ -79,7 +79,7 @@ namespace
       S[1] = exp(0.1 * u[0]) * u[1] + du[0][0] * du[1][0];
     }
 
-    // With batch_reads_hessians = false the per-point tuple has no hessians: the physics then sees zeros.
+    // With use_hessians = false the per-point tuple has no hessians: the physics then sees zeros.
     template <typename NT, typename Solution> static auto hessians_of(const Solution &sol)
     {
       if constexpr (tuple_has<"fe_hessians", Solution>)

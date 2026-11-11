@@ -167,16 +167,6 @@ namespace DiFfRG
     };
 
     /**
-     * @brief Deprecated: FVDefaultBoundaries. This used to reflect the lower ghosts evenly about the face at
-     * \f$\rho = 0\f$, which imposes \f$u'(0) = 0\f$; a function of \f$\rho\f$ has no such symmetry (e.g.
-     * \f$u = V'(\rho)\f$ has \f$u'(0) = V''(0)\f$), so the ghosts continue the derivative instead.
-     */
-    template <typename Model>
-    using RhoSymmetricLinearExtrapolationBoundaries [[deprecated(
-        "RhoSymmetricLinearExtrapolationBoundaries is FVDefaultBoundaries now: rho = 0 is no symmetry plane in rho, "
-        "the ghosts continue the derivative. Use FVDefaultBoundaries.")]] = FVDefaultBoundaries<Model>;
-
-    /**
      * @brief Lower boundary: odd reflection about the centre of the boundary cell, which is meant to sit at the
      * origin \f$\sigma = 0\f$; that cell's value is set to 0 in the stencil. Upper boundary: affine extrapolation.
      *

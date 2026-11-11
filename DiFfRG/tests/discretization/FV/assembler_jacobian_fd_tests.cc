@@ -1044,7 +1044,7 @@ public:
 };
 
 /**
- * A source that reads "fe_hessians" (opted in via source_uses_hessians), nonlinear in the curvature so the
+ * A source that reads "fe_hessians", nonlinear in the curvature so the
  * chain-rule term dS/du'' * du''/du_j is not a constant. As for the gradient source, flux and diffusion flux
  * vanish, so the source is the only contribution to the Jacobian.
  */
@@ -1057,8 +1057,6 @@ class HessianSourceKTModel
       public def::AD<HessianSourceKTModel>
 {
 public:
-  static constexpr bool source_uses_hessians = true;
-
   template <typename Vector> void initial_condition(const Point<1> &pos, Vector &values) const
   {
     values[0] = 1.0 + 0.2 * pos[0] + 0.4 * pos[0] * pos[0];
@@ -1095,8 +1093,6 @@ class HessianSource2DModel
       public def::AD<HessianSource2DModel>
 {
 public:
-  static constexpr bool source_uses_hessians = true;
-
   template <typename Vector> void initial_condition(const Point<2> &pos, Vector &values) const
   {
     values[0] = 1.0 + 0.2 * pos[0] + 0.35 * pos[1] + 0.3 * pos[0] * pos[0] + 0.15 * pos[1] * pos[1];

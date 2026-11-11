@@ -176,6 +176,93 @@ TEST_CASE("Focused logarithmic coordinates: invalid arguments throw", "[1D][coor
   CHECK_NOTHROW(C(32, 1e-3, 10., 1e6, 2.)); // center outside [start, stop] is legal
 }
 
+TEST_CASE("Test 1D focused root coordinates", "[1D][coordinates]")
+{
+  const double p_start = GENERATE(take(2, random(1e-4, 1e-2)));
+  const double p_stop = GENERATE(take(2, random(10., 300.)));
+  const int p_size = GENERATE(take(2, random(16, 128)));
+  // center both inside and outside [p_start, p_stop]
+  const double p_center = GENERATE(take(2, random(0.05, 5.)), take(1, random(400., 1000.)));
+  const int p_depth = GENERATE(0, 1, 2, 3, 5);
+
+  FocusedRootCoordinates1D<double> coords(p_size, p_start, p_stop, p_center, p_depth);
+
+  const auto grid = make_grid(coords);
+  REQUIRE(grid.size() == size_t(p_size));
+  CHECK(grid[0][0] == p_start); // bit for bit, as for FocusedLogCoordinates1D
+  CHECK(is_close(grid[p_size - 1][0], p_stop, 1e-11));
+  for (int i = 1; i < p_size; ++i)
+    CHECK(grid[i][0] > grid[i - 1][0]);
+
+  // backward inverts forward, on grid points and between them
+  for (int i = 0; i < p_size; ++i)
+    CHECK(std::abs(coords.backward(coords.forward(i)) - double(i)) < 1e-9);
+  for (const double x : {0.3, 1.5, 0.5 * (p_size - 1), p_size - 1.7})
+    CHECK(std::abs(coords.backward(coords.forward(x)) - x) < 1e-9);
+
+  // backward is the closed form, and backward_derivative its derivative
+  const double beta = std::ldexp(1., -p_depth);
+  const auto t = [&](double y) {
+    const double r = std::pow(y / p_center, beta);
+    return r / (1. + r);
+  };
+  for (const double y : {p_start * 2., p_center, p_stop / 2.}) {
+    CHECK(is_close(coords.backward(y), (t(y) - t(p_start)) / (t(p_stop) - t(p_start)) * (p_size - 1), 1e-12));
+    const double h = 1e-6 * y;
+    const double fd = (coords.backward(y + h) - coords.backward(y - h)) / (2. * h);
+    CHECK(is_close(coords.backward_derivative(y), fd, 1e-5));
+  }
+}
+
+TEST_CASE("Focused root coordinates: clustering behaviour", "[1D][coordinates]")
+{
+  const double p_start = 5e-3, p_stop = 250., p_center = 1.0;
+  const int p_size = 64;
+
+  // width in decades of the cell straddling the center
+  const auto cell_at_center = [&](const int depth) {
+    FocusedRootCoordinates1D<double> coords(p_size, p_start, p_stop, p_center, depth);
+    const auto grid = make_grid(coords);
+    for (int i = 1; i < p_size; ++i)
+      if (grid[i][0] >= p_center) return std::log10(grid[i][0] / grid[i - 1][0]);
+    return 0.;
+  };
+  // deeper roots spread the points: coarser at the center
+  CHECK(cell_at_center(1) < cell_at_center(2));
+  CHECK(cell_at_center(2) < cell_at_center(3));
+
+  // the map is symmetric in log(p) about the center
+  FocusedRootCoordinates1D<double> coords(64, 1e-4, 1e4, p_center, 2);
+  const auto grid = make_grid(coords);
+  int below = 0;
+  for (int i = 0; i < 64; ++i)
+    if (grid[i][0] < p_center) ++below;
+  CHECK(below == 32);
+}
+
+TEST_CASE("Focused root coordinates: keys, equality and invalid arguments", "[1D][coordinates]")
+{
+  using C = FocusedRootCoordinates1D<double>;
+  std::set<std::string> keys;
+  for (const int depth : {0, 1, 2, 3})
+    keys.insert(C(64, 5e-3, 250., 1.0, depth).to_string());
+  for (const double center : {0.5, 0.7})
+    keys.insert(C(64, 5e-3, 250., center, 2).to_string());
+  keys.insert(C(64, 1e-8, 250., 1.0, 2).to_string());
+  CHECK(keys.size() == 7);
+  CHECK(C(64, 5e-3, 250., 1.0, 2) == C(64, 5e-3, 250., 1.0, 2));
+  CHECK(!(C(64, 5e-3, 250., 1.0, 2) == C(64, 5e-3, 250., 1.0, 3)));
+  CHECK(C(64, 5e-3, 250., 1.0, 2).to_string() != FocusedLogCoordinates1D<double>(64, 5e-3, 250., 1.0, 2).to_string());
+
+  CHECK_THROWS(C(1, 1e-3, 10., 1., 2));   // grid_extent must be > 1
+  CHECK_THROWS(C(32, 0., 10., 1., 2));    // start must be > 0
+  CHECK_THROWS(C(32, 10., 10., 1., 2));   // stop must be > start
+  CHECK_THROWS(C(32, 1e-3, 10., 0., 2));  // center must be > 0
+  CHECK_THROWS(C(32, 1e-3, 10., 1., -1)); // root_depth must be >= 0
+  CHECK_THROWS(C(32, 1e-3, 10., 1., C::max_root_depth + 1));
+  CHECK_NOTHROW(C(32, 1e-3, 10., 1e6, 2)); // center outside [start, stop] is legal
+}
+
 // prefix(n): the first n points, bit for bit, as the same type -- shared checks for the 1D types.
 template <typename C> void check_prefix(const C &coords)
 {
@@ -224,6 +311,8 @@ TEST_CASE("Coordinates prefix(): first n points bit for bit", "[1D][coordinates]
   check_prefix(LinearCoordinates1D<float>(20, 0.f, 1.f));
   check_prefix(LogarithmicCoordinates1D<float>(25, 1e-3f, 10.f, 3.f));
   check_prefix(FocusedLogCoordinates1D<float>(30, 1e-3f, 10.f, 1.f, 1.f));
+  check_prefix(FocusedRootCoordinates1D<double>(64, 5e-3, 250., 1., 2));
+  check_prefix(FocusedRootCoordinates1D<float>(30, 1e-3f, 10.f, 1.f, 1));
 }
 
 TEST_CASE("Coordinates prefix(): identity keys", "[1D][coordinates][prefix]")

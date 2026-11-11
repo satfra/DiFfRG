@@ -166,6 +166,12 @@ if [[ -z $tarball ]]; then
     version="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=100" 2>/dev/null |
       grep -oE '"tag_name": *"deps-v[0-9]+\.[0-9]+\.[0-9]+"' |
       grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1 || true)"
+    # The API's anonymous limit (60 requests/h per IP) runs out behind shared
+    # addresses; the release tags are the same list without that limit.
+    if [[ -z $version ]] && command -v git >/dev/null; then
+      version="$(git ls-remote --tags --refs "https://github.com/${REPO}.git" 'deps-v*' 2>/dev/null |
+        grep -oE 'refs/tags/deps-v[0-9]+\.[0-9]+\.[0-9]+$' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -1 || true)"
+    fi
     [[ -n $version ]] || err "No deps-v* release found on github.com/${REPO}."
   fi
   name="diffrg-deps-${version}-${variant}"

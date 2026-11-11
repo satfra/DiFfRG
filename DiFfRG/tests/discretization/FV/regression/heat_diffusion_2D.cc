@@ -65,9 +65,6 @@ namespace
   using VectorType = typename Discretization::VectorType;
   using SparseMatrixType = typename Discretization::SparseMatrixType;
   using Reconstructor = def::TVDReconstructor<dim, def::MinModLimiter, double>;
-  using Assembler = FV::KurganovTadmor::Assembler<Discretization, class HeatDiffusion2DModel, Reconstructor,
-                                                  FV::KurganovTadmor::MaxEigenvalueWaveSpeed>;
-  using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
 
   class GaussianHeatKernel2D
   {
@@ -140,6 +137,10 @@ namespace
   private:
     GaussianHeatKernel2D exact;
   };
+
+  using Assembler = FV::KurganovTadmor::Assembler<Discretization, HeatDiffusion2DModel, Reconstructor,
+                                                  FV::KurganovTadmor::MaxEigenvalueWaveSpeed>;
+  using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
 
   double dx_for_grid(const unsigned int n_cells) { return domain_length / static_cast<double>(n_cells); }
 

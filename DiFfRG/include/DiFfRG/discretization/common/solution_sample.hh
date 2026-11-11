@@ -126,6 +126,14 @@ namespace DiFfRG
   };
 
   /**
+   * @brief Whether @p Model's EoM takes the variables as a third argument, `EoM(x, u, variables)`; see
+   * def::AbstractModel::EoM.
+   */
+  template <typename Model, typename Point, typename Values, typename Variables>
+  concept EoMReadsVariables = requires(const Model &model, const Point &x, const Values &u,
+                                       const Variables &variables) { model.EoM(x, u, variables); };
+
+  /**
    * @brief Whether @p Model can ask the timestepper for a restart.
    *
    * A model whose flow has a discontinuity in time (e.g. its extractors switching between two minima at a

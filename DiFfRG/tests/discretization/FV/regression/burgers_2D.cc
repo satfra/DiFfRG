@@ -79,8 +79,6 @@ namespace
   using VectorType = typename Discretization::VectorType;
   using SparseMatrixType = typename Discretization::SparseMatrixType;
   using Reconstructor = def::TVDReconstructor<dim, def::MinModLimiter, double>;
-  using Assembler = FV::KurganovTadmor::Assembler<Discretization, class Burgers2DExample11Model, Reconstructor>;
-  using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
 
   bool inside_disk(const Point<dim> &pos, const double center_x, const double center_y)
   {
@@ -126,6 +124,9 @@ namespace
       s_i[0] = NT(0.0);
     }
   };
+
+  using Assembler = FV::KurganovTadmor::Assembler<Discretization, Burgers2DExample11Model, Reconstructor>;
+  using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
 
   std::string grid_axis_string(const unsigned int n_cells)
   {

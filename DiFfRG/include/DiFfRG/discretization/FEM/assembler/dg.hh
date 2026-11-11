@@ -51,7 +51,7 @@ namespace DiFfRG
      * ### Model hooks
      * Those of CG::Assembler (mass, flux, source or evaluate_batch, boundary_numflux, the extractor and readout hooks),
      * plus numflux (or numflux_batch). For mesh adaptation, refinement_indicator combines cell_indicator and
-     * face_indicator. The batch traits batch_reads_derivatives / batch_reads_hessians apply as under CG.
+     * face_indicator. The model traits use_derivatives / use_hessians apply as under CG.
      *
      * ### Parameters
      * | Key                                          | Type | Default              | Meaning |
@@ -94,10 +94,9 @@ namespace DiFfRG
       static constexpr size_t n_fe = Components::count_fe_functions();
       static constexpr size_t n_extr = Components::count_extractors();
       using Extractors = std::array<NumberType, n_extr>;
-      /// Which inputs the model reads (batch_reads_derivatives / batch_reads_hessians), and hence which the batches
-      /// hold.
-      static constexpr bool reads_derivatives = batch_reads_derivatives<Model>();
-      static constexpr bool reads_hessians = reads_derivatives && batch_reads_hessians<Model>();
+      /// Which inputs the model reads (use_derivatives / use_hessians), and hence which the batches hold.
+      static constexpr bool reads_derivatives = Model::use_derivatives;
+      static constexpr bool reads_hessians = reads_derivatives && Model::use_hessians;
       using Batch = PointBatch<dim, NumberType, n_fe, Extractors, VariablesVector, reads_derivatives, reads_hessians>;
 
       using PhaseTimes = AssemblyPhaseTimes;

@@ -96,7 +96,7 @@ public:
  */
 class ON_KT : public def::AbstractModel<ON_KT, Components>,
               public ONCommon,
-              public def::RhoSymmetricLinearExtrapolationBoundaries<ON_KT>,
+              public def::FVDefaultBoundaries<ON_KT>,
               public def::AD<ON_KT>
 {
 public:

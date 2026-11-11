@@ -370,7 +370,7 @@ TEST_CASE("DG residual is unchanged by distribution", "[discretization][dg][mpi]
 /// Burgers with derivatives and hessians in its batches, so the DG gather and scatter of those run distributed.
 template <uint dim> struct BurgersWithDerivatives : Testing::ModelBurgers<dim> {
   using Testing::ModelBurgers<dim>::ModelBurgers;
-  static constexpr bool batch_reads_derivatives = true;
+  static constexpr bool use_derivatives = true;
 };
 
 TEST_CASE("DG residual with derivatives is unchanged by distribution", "[discretization][dg][mpi]")

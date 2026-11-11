@@ -51,8 +51,8 @@ namespace DiFfRG
   /**
    * @brief The named tuple the per-point callbacks (flux, source, numflux, boundary_numflux and their jacobians)
    * receive from CG and DG. It holds only the inputs the assembler gathered:
-   * - `batch_reads_derivatives = false`: "fe_functions", "extractors", "variables", "cell_width"
-   * - `batch_reads_hessians = false`: "fe_functions", "fe_derivatives", "extractors", "variables", "cell_width"
+   * - `use_derivatives = false`: "fe_functions", "extractors", "variables", "cell_width"
+   * - `use_hessians = false`: "fe_functions", "fe_derivatives", "extractors", "variables", "cell_width"
    * - otherwise: "fe_functions", "fe_derivatives", "fe_hessians", "extractors", "variables", "cell_width"
    *
    * "cell_width" is the width of the cell the point belongs to. Reading an entry that is not there does not compile.
@@ -119,8 +119,8 @@ namespace DiFfRG
    * Columns are contiguous over the points (see batch.hh); the order of the points carries no meaning.
    *
    * @tparam with_derivatives, with_hessians which inputs the assembler gathers. CG and DG gather what the model's
-   * `batch_reads_derivatives` / `batch_reads_hessians` ask for, KT always derivatives and hessians only with
-   * `source_uses_hessians`. Reading one that is not gathered does not compile; a model used with several
+   * `use_derivatives` / `use_hessians` ask for, KT always derivatives and, unless `use_hessians = false`, hessians
+   * for the source. Reading one that is not gathered does not compile; a model used with several
    * assemblers tests `if constexpr (Batch::has_derivatives)`.
    */
   template <int dim_, typename NT, size_t n_fe, typename Extractors, typename Variables, bool with_derivatives,
@@ -467,27 +467,6 @@ namespace DiFfRG
     size_t flux_offset = no_column, source_offset = no_column, diffusion_offset = no_column;
     std::vector<NT> data;
   };
-
-  /**
-   * @brief The model's `batch_reads_derivatives` (default true). Declare `static constexpr bool
-   * batch_reads_derivatives = false` in the model when no term reads \f$\partial u\f$: CG and DG then neither
-   * gather it nor seed it in the AD jacobians.
-   */
-  template <typename Model> constexpr bool batch_reads_derivatives()
-  {
-    if constexpr (requires { Model::batch_reads_derivatives; })
-      return Model::batch_reads_derivatives;
-    else
-      return true;
-  }
-  /// The model's `batch_reads_hessians` (default true), as batch_reads_derivatives for \f$\partial^2 u\f$.
-  template <typename Model> constexpr bool batch_reads_hessians()
-  {
-    if constexpr (requires { Model::batch_reads_hessians; })
-      return Model::batch_reads_hessians;
-    else
-      return true;
-  }
 
   namespace internal
   {

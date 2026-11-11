@@ -51,7 +51,7 @@ namespace DiFfRG
     {
     public:
       // The flux and source read only the values: the batches skip derivatives and hessians.
-      static constexpr bool batch_reads_derivatives = false;
+      static constexpr bool use_derivatives = false;
       const PhysicalParameters prm;
 
       ModelConstant(PhysicalParameters prm) : prm(prm) {}
@@ -124,7 +124,7 @@ namespace DiFfRG
 
     public:
       // The flux and source read only the values: the batches skip derivatives and hessians.
-      static constexpr bool batch_reads_derivatives = false;
+      static constexpr bool use_derivatives = false;
       ModelExp(PhysicalParameters prm) : prm(prm) {}
 
       template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
@@ -159,7 +159,7 @@ namespace DiFfRG
 
     public:
       // The flux and source read only the values: the batches skip derivatives and hessians.
-      static constexpr bool batch_reads_derivatives = false;
+      static constexpr bool use_derivatives = false;
       ModelBurgers(PhysicalParameters prm) : prm(prm) {}
 
       template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
@@ -213,7 +213,7 @@ namespace DiFfRG
     {
     public:
       // The flux and source read only the values: the batches skip derivatives and hessians.
-      static constexpr bool batch_reads_derivatives = false;
+      static constexpr bool use_derivatives = false;
       static constexpr double K = 30.;     // sharpness of the FEM transition
       static constexpr double t_mid = 0.5; // location of the FEM transition
       static constexpr double v0 = 1.;     // initial value of the explicit variable
@@ -295,7 +295,7 @@ namespace DiFfRG
     {
     public:
       // The flux and source read only the values: the batches skip derivatives and hessians.
-      static constexpr bool batch_reads_derivatives = false;
+      static constexpr bool use_derivatives = false;
       static constexpr double K = 2.;
       static constexpr double u0 = 1.;
       static constexpr double v0 = 0.;
@@ -368,7 +368,7 @@ namespace DiFfRG
     {
     public:
       // The flux and source read only the values: the batches skip derivatives and hessians.
-      static constexpr bool batch_reads_derivatives = false;
+      static constexpr bool use_derivatives = false;
       static constexpr double K = 5.;
       static constexpr double u0 = 1.;
       static constexpr double v0 = 0.;
@@ -446,7 +446,7 @@ namespace DiFfRG
     {
     public:
       // The flux and source read only the values: the batches skip derivatives and hessians.
-      static constexpr bool batch_reads_derivatives = false;
+      static constexpr bool use_derivatives = false;
       static constexpr double K = 5.;
       static constexpr double eps = 0.1; // weak dependence of the explicit variable on u
       static constexpr double u0 = 1.;

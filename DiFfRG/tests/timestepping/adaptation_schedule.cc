@@ -29,7 +29,7 @@ class ModelLinear
 {
 public:
   static constexpr uint dim = 1;
-  static constexpr bool batch_reads_derivatives = false;
+  static constexpr bool use_derivatives = false;
 
   ModelLinear(Testing::PhysicalParameters) {}
 

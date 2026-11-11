@@ -71,9 +71,6 @@ namespace
   using VectorType = typename Discretization::VectorType;
   using SparseMatrixType = typename Discretization::SparseMatrixType;
   using Reconstructor = def::TVDReconstructor<dim, def::MinModLimiter, double>;
-  using Assembler = FV::KurganovTadmor::Assembler<Discretization, class RotatingGaussian2DModel, Reconstructor,
-                                                  FV::KurganovTadmor::MaxEigenvalueWaveSpeed>;
-  using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
 
   template <typename NT> Tensor<1, dim, NT> solid_body_velocity(const Point<dim> &point)
   {
@@ -154,6 +151,10 @@ namespace
   private:
     RotatingGaussianExactSolution exact;
   };
+
+  using Assembler = FV::KurganovTadmor::Assembler<Discretization, RotatingGaussian2DModel, Reconstructor,
+                                                  FV::KurganovTadmor::MaxEigenvalueWaveSpeed>;
+  using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
 
   double dx_for_grid(const unsigned int n_cells) { return domain_length / static_cast<double>(n_cells); }
 

@@ -786,7 +786,7 @@ namespace DiFfRG
         // its flow in needs_restart, and they belong to the flow up to t.
         serve_variables(variable_y, t);
         restart_view.refresh(sol);
-        if (!assembler.needs_restart(t, restart_view.get())) return false;
+        if (!assembler.needs_restart(t, restart_view.get(), variable_y)) return false;
         // The slope after the discontinuity: the model has switched in needs_restart, so this reads the new flow.
         restart_explicit_side(t, sol);
         this->log.info("Restarting the time integration at t = {:.6f} on the model's request", t);
@@ -851,6 +851,8 @@ namespace DiFfRG
             request_diagnostics.append_to(variables_event);
             this->log.progress(variables_event);
             request_variables(variable_y, y, t);
+            // Serving the variables can advance the explicit stepper, which reports its own time.
+            calc_timer.lap();
             y_state.refresh(y);
             y_dot_state.refresh(y_dot);
             assembler.residual(res, y_state.get(), 1., y_dot_state.get(), 1., variable_y);
@@ -907,6 +909,8 @@ namespace DiFfRG
             request_diagnostics.append_to(variables_event);
             this->log.progress(variables_event);
             request_variables(variable_y, y, t);
+            // Serving the variables can advance the explicit stepper, which reports its own time.
+            calc_timer.lap();
             y_state.refresh(y);
             y_dot_state.refresh(y_dot);
             assembler.jacobian(spatial_jacobian, y_state.get(), 1., y_dot_state.get(), alpha, 1., variable_y);

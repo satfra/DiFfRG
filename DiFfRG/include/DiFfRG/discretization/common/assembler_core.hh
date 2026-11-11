@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -196,16 +197,15 @@ namespace DiFfRG
       }
 
       /// The model's needs_restart at the EoM of @p solution, if it defines one; see DiFfRG::HasNeedsRestart.
-      virtual bool needs_restart([[maybe_unused]] const double t,
-                                 [[maybe_unused]] const VectorType &solution) const override
+      virtual bool needs_restart([[maybe_unused]] const double t, [[maybe_unused]] const VectorType &solution,
+                                 [[maybe_unused]] const VectorType &variables) const override
       {
         if constexpr (HasNeedsRestart<Model, dim, NumberType>) {
+          const LocalVariables<VectorType> v(variables);
           auto cell = EoM_cell;
-          const auto EoM =
-              locate_EoM(
-                  cell, solution, [&](const auto &p, const auto &values) { return model.EoM(p, values); },
-                  [&](const auto &p, const auto &values) { return model.EoM_postprocess(p, values); })
-                  .point;
+          const auto EoM = locate_EoM(cell, solution, model_EoM(v.get()), [&](const auto &p, const auto &values) {
+                             return model.EoM_postprocess(p, values);
+                           }).point;
           derived().prepare_point_evaluation(solution);
           return model.template needs_restart<dim, NumberType>(t, EoM, derived().extractor_sample(solution));
         } else
@@ -305,11 +305,9 @@ namespace DiFfRG
         auto EoM = this->EoM;
         auto cell = EoM_cell;
         if (search_EoM || cell == no_cell())
-          EoM =
-              locate_EoM(
-                  cell, solution, [&](const auto &p, const auto &values) { return model.EoM(p, values); },
-                  [&](const auto &p, const auto &values) { return postprocess ? model.EoM_postprocess(p, values) : p; })
-                  .point;
+          EoM = locate_EoM(cell, solution, model_EoM(variables), [&](const auto &p, const auto &values) {
+                  return postprocess ? model.EoM_postprocess(p, values) : p;
+                }).point;
         if (set_EoM) {
           this->EoM = EoM;
           EoM_cell = cell;
@@ -393,6 +391,18 @@ namespace DiFfRG
                                std::max<size_t>(1, budget / bytes_per_point));
       }
 
+      /// Model::EoM as a function of (point, values), passing @p variables if the model's EoM reads them.
+      auto model_EoM(const VariablesVector &variables) const
+      {
+        return [this, &variables](const auto &p, const auto &values) {
+          if constexpr (EoMReadsVariables<Model, std::decay_t<decltype(p)>, std::decay_t<decltype(values)>,
+                                          VariablesVector>)
+            return model.EoM(p, values, variables);
+          else
+            return model.EoM(p, values);
+        };
+      }
+
       /**
        * @brief Locate the EoM, starting from @p cell, and move @p cell to the cell holding it.
        *
@@ -416,7 +426,7 @@ namespace DiFfRG
        */
       auto extractor_raw_potential(const VectorType &solution) const
       {
-        if constexpr (Model::extract_uses_potential)
+        if constexpr (Model::use_potential)
           return reconstruct_potential(solution);
         else
           return UnusedPotential{};
@@ -456,8 +466,7 @@ namespace DiFfRG
       {
         derived().prepare_point_evaluation(solution);
         // The raw potential is a solve over the whole mesh; skip it if neither the model nor the output reads it.
-        constexpr bool model_reads_potential =
-            Model::readouts_use_potential || (Components::count_extractors() > 0 && Model::extract_uses_potential);
+        constexpr bool model_reads_potential = Model::use_potential;
         if (model_reads_potential || data_out.writes_raw_potential()) {
           auto potential = reconstruct_potential(solution);
           readouts_with(data_out, solution, variables, potential);
@@ -477,7 +486,14 @@ namespace DiFfRG
             auto &&[id, EoMfun, outputter] = std::forward_as_tuple(std::forward<decltype(args)>(args)...);
             data_out.register_readout(id);
             auto cell = this->EoM_cell;
-            auto EoM_result = this->locate_EoM(cell, solution, EoMfun, [this](const auto &p, const auto &values) {
+            // A readout's EoM function may read the variables, like Model::EoM.
+            const auto EoM_fun = [&](const auto &p, const auto &values) {
+              if constexpr (std::is_invocable_v<decltype(EoMfun), decltype(p), decltype(values), decltype(variables)>)
+                return EoMfun(p, values, variables);
+              else
+                return EoMfun(p, values);
+            };
+            auto EoM_result = this->locate_EoM(cell, solution, EoM_fun, [this](const auto &p, const auto &values) {
               return this->model.EoM_postprocess(p, values);
             });
             const auto EoM = EoM_result.point;
@@ -513,10 +529,9 @@ namespace DiFfRG
       {
         constexpr uint n_extr = Components::count_extractors();
         constexpr uint n_fe = Components::count_fe_functions();
-        EoM = locate_EoM(
-                  EoM_cell, solution, [&](const auto &p, const auto &values) { return model.EoM(p, values); },
-                  [&](const auto &p, const auto &values) { return model.EoM_postprocess(p, values); })
-                  .point;
+        EoM = locate_EoM(EoM_cell, solution, model_EoM(variables), [&](const auto &p, const auto &values) {
+                return model.EoM_postprocess(p, values);
+              }).point;
         derived().prepare_point_evaluation(solution);
 
         // The extractor jacobian couples to the dofs of the cell the extractors are actually evaluated in, which is

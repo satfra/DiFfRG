@@ -62,8 +62,6 @@ namespace
   using VectorType = typename Discretization::VectorType;
   using SparseMatrixType = typename Discretization::SparseMatrixType;
   using Reconstructor = def::TVDReconstructor<dim, def::MinModLimiter, double>;
-  using Assembler = FV::KurganovTadmor::Assembler<Discretization, class BuckleyLeverett2DExample12Model, Reconstructor>;
-  using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
 
   double initial_value(const Point<dim> &pos) { return pos.square() < disk_radius_squared ? 1.0 : 0.0; }
 
@@ -110,6 +108,9 @@ namespace
       s_i[0] = NT(0.0);
     }
   };
+
+  using Assembler = FV::KurganovTadmor::Assembler<Discretization, BuckleyLeverett2DExample12Model, Reconstructor>;
+  using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
 
   std::string grid_axis_string(const unsigned int n_cells)
   {

@@ -154,11 +154,11 @@ is a few hundred MB of AD data for CG, DG and LDG and 16 MB for KT.
 A model also declares which inputs its flux and source read:
 
 ```cpp
-static constexpr bool batch_reads_hessians = false;
+static constexpr bool use_hessians = false;
 ```
 
-The CG and DG assemblers then neither compute the hessians nor seed them in the jacobian.
-(`batch_reads_derivatives = false` does the same for the first derivatives.) Which inputs a batch holds is
+The CG and DG assemblers then neither compute the hessians nor seed them in the jacobian, and KT does not hand
+them to the source. (`use_derivatives = false` does the same for the first derivatives.) Which inputs a batch holds is
 fixed at compile time: `batch.hessians()` of a batch without them does not compile, nor does
 `get<"fe_hessians">(sol)` in a per-point callback. A model used with several assemblers can ask
 `if constexpr (Batch::has_hessians)` (or, per point, `if constexpr (tuple_has<"fe_hessians", Solution>)`).
@@ -209,16 +209,17 @@ template <typename Out, typename Batch> void evaluate_batch(Out &out, const Batc
   diffusion traces carry third derivatives (`batch.third_derivatives(c, d0, d1, d2)`, 1D only), so code that reads
   them must be guarded by `if constexpr (Batch::with_third)`, not by `out.requested(...)`.
 - The extractors stay plain numbers under AD: KT keeps them frozen within a Newton step.
-- The source sees the hessians only if the model declares `static constexpr bool source_uses_hessians = true`.
+- The source sees the hessians (the diagonal stencil curvature) unless the model declares
+  `static constexpr bool use_hessians = false`.
 
 ## Per assembler
 
 | assembler | inputs at a point | terms per call | number types |
 | --- | --- | --- | --- |
-| CG | values, derivatives, hessians (unless `batch_reads_*` is false) | flux and source (cells), flux (boundary) | `double`, `autodiff::real` |
+| CG | values, derivatives, hessians (unless `use_derivatives` / `use_hessians` is false) | flux and source (cells), flux (boundary) | `double`, `autodiff::real` |
 | DG | as CG | flux and source (cells), flux (faces) | `double`, `autodiff::real` |
 | LDG | values of the FE functions and of every level (`batch.ldg_values(k, c)`) | as DG | `double`, `autodiff::real` |
-| KT | values, reconstructed derivatives; third derivatives (diffusion, 1D); hessians (source, if requested) | one term per call | `Real<1>` (flux, residual), `Real<2>` (flux, jacobian), `double` and `autodiff::real` (= `Real<1>`; diffusion flux and source) |
+| KT | values, reconstructed derivatives; third derivatives (diffusion, 1D); hessians (source, unless `use_hessians` is false) | one term per call | `Real<1>` (flux, residual), `Real<2>` (flux, jacobian), `double` and `autodiff::real` (= `Real<1>`; diffusion flux and source) |
 
 The LDG levels themselves are built by `ldg_evaluate_batch<k>(out, batch)`, whose default calls the per-point
 `ldg_flux<k>` / `ldg_source<k>`.
