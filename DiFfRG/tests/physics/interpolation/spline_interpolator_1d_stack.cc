@@ -4,6 +4,7 @@
 #include <DiFfRG/common/init.hh>
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/common/types.hh>
+#include <DiFfRG/common/quadrature/matsubara.hh>
 #include <DiFfRG/physics/interpolation.hh>
 
 using namespace DiFfRG;
@@ -146,14 +147,65 @@ TEST_CASE("Test 1D spline interpolation stack between Matsubara rows", "[interpo
 
   const double w = 2. * M_PI * T;
   const double p = 0.1;
-  // exact on the rows, linear in between
+  // exact on the rows
   for (int i = 0; i < m_size; ++i)
     CHECK(is_close(interpolator(i * w, p), rows[i], 1e-12));
-  CHECK(is_close(interpolator(0.25 * w, p), 1.5, 1e-12));
-  CHECK(is_close(interpolator(1.5 * w, p), 3.5, 1e-12));
-  // a stack starting at n = 0 is even in the frequency
+  // cubic in between, not linear: the linear join would give 1.5 and 3.5
+  CHECK(!is_close(interpolator(0.25 * w, p), 1.5, 1e-3));
+  CHECK(!is_close(interpolator(1.5 * w, p), 3.5, 1e-3));
+  // rows constant in p stay constant in p between the rows
+  CHECK(is_close(interpolator(1.5 * w, 0.02), interpolator(1.5 * w, 3.), 1e-12));
+  // a stack starting at n = 0 is even in the frequency, and smooth through zero: zero slope there
   CHECK(is_close(interpolator(-1.5 * w, p), interpolator(1.5 * w, p), 1e-12));
   CHECK(is_close(interpolator(-2. * w, p), rows[2], 1e-12));
+  const double eps = 1e-4;
+  CHECK(std::abs(interpolator(eps * w, p) - rows[0]) < 10. * eps * eps * (rows[1] - rows[0]));
+}
+
+/**
+ * @brief A frequency sum evaluated BETWEEN the Matsubara rows must reproduce the sum over the rows.
+ *
+ * This is what a finite-temperature flow does: its loops read dressings stored on the Matsubara rows at the nodes
+ * of a Gauss rule for sums (Monien), which lie between the rows. The rows here sample an O(4)-symmetric dressing,
+ * g = 1 / (p0^2 + p^2 + E^2)^2, so beyond the top row the stack's folding of the frequency into the momentum is
+ * exact, and the reference is the sum of g over the Matsubara frequencies itself. With the rows joined linearly the
+ * summand had a kink at every row, and the Gauss rule, built for smooth summands, missed the sum by an amount that
+ * more nodes did not reduce; the cubic join makes the summand smooth.
+ */
+TEST_CASE("Gauss sum over an interpolated stack reproduces the Matsubara sum", "[interpolator]")
+{
+  DiFfRG::Init();
+
+  const double T = 0.01, E = GENERATE(0.05, 0.3), p = GENERATE(0.02, 0.4);
+  // The momentum grid reaches far enough (60 GeV) that the clamped value beyond it, ~1e-7, does not matter, and is
+  // dense where g varies (bias 10 clusters it at small p).
+  const int m_size = 24, p_size = 128;
+  BosonicCoordinates1DFiniteT<int, double> coords(0, m_size, T, p_size, 1e-3, 60., 10.);
+  const auto g = [&](const double p0, const double q) { return 1. / powr<2>(powr<2>(p0) + powr<2>(q) + powr<2>(E)); };
+
+  std::vector<double> in_data(m_size * p_size);
+  for (int i = 0; i < m_size; ++i)
+    for (int j = 0; j < p_size; ++j) {
+      const auto pt = coords.forward(size_t(i), size_t(j));
+      in_data[i * p_size + j] = g(pt[0], pt[1]);
+    }
+  SplineInterpolator1DStack<double, BosonicCoordinates1DFiniteT<int, double>> interpolator(coords);
+  interpolator.update(in_data.data());
+
+  // The reference: the sum of g itself over the Matsubara frequencies.
+  double ref = T * g(0., p);
+  for (int n = 1; n < 200000; ++n)
+    ref += 2. * T * g(2. * M_PI * T * n, p);
+
+  // The Gauss rule for sums as the integrators size it: reaching 200 times the summand's scale.
+  MatsubaraQuadrature<double> rule(T, std::sqrt(powr<2>(p) + powr<2>(E)), 2, 8, 1024, 64, 1.);
+  const double got = rule.sum([&](const double p0) { return interpolator(p0, p); });
+
+  const double rel_err = std::abs(got / ref - 1.);
+  INFO("E = " << E << ", p = " << p << ": relative error " << rel_err << " with " << rule.size() << " nodes");
+  std::cout << "E = " << E << ", p = " << p << ": relative error " << rel_err << " with " << rule.size() << " nodes"
+            << std::endl;
+  CHECK(rel_err < 1e-5);
 }
 
 TEST_CASE("Test stack row-major element access", "[interpolator]")

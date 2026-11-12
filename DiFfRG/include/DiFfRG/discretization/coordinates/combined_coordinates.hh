@@ -85,6 +85,10 @@ namespace DiFfRG
      * @param p spatial momentum
      * @return The fractional Matsubara index and radial grid index.
      */
+    /// backward() replaces m by |m| for a stack starting at a non-negative index: the data are even in the frequency,
+    /// and a stack starting at 0 has its mirror axis on the first row (see SplineInterpolator1DStack).
+    static constexpr bool folds_frequency = true;
+
     std::tuple<NT, NT> KOKKOS_FUNCTION backward(NT m, const NT p) const
     {
       if (m_start >= 0) m = Kokkos::abs(m);

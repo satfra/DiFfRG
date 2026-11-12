@@ -30,10 +30,18 @@ namespace DiFfRG
       return {{static_cast<ctype>(sidx), static_cast<ctype>(xidx)}};
     }
 
-    /// The evaluation at grid indices, shared by SplineInterpolator1DStack and its handle.
+    /**
+     * @brief The evaluation at grid indices, shared by SplineInterpolator1DStack and its handle.
+     *
+     * A tensor-product cubic spline. Along x each row is a cubic spline in the grid index (values, coeffs = f''/6).
+     * Along s the same holds with coefficients s2 = (d^2 f / ds^2) / 6 at every grid point, which are themselves
+     * splined in x (s2x); since a spline is linear in its data, the spline of s2 in x IS the s-coefficient of the
+     * rows evaluated at x, so the result is exact on every grid point and twice continuously differentiable in both
+     * directions. Four rows are read instead of two.
+     */
     template <typename NT, typename CT, typename View>
-    KOKKOS_FORCEINLINE_FUNCTION NT spline_stack_at(const View &values, const View &coeffs,
-                                                   const device::array<size_t, 2> &sizes,
+    KOKKOS_FORCEINLINE_FUNCTION NT spline_stack_at(const View &values, const View &coeffs, const View &s2,
+                                                   const View &s2x, const device::array<size_t, 2> &sizes,
                                                    const device::array<CT, 2> &raw)
     {
       auto _sidx = raw[0];
@@ -48,26 +56,29 @@ namespace DiFfRG
       // t is the fractional part of the index
       const CT t = xidx - lidx;
 
-      // the s part is linear between the two neighbouring rows, exact on each row
       const size_t s_lo = Kokkos::min(size_t(Kokkos::floor(_sidx)), sizes[0] - 1);
       const size_t s_hi = Kokkos::min(s_lo + 1, sizes[0] - 1);
       const CT ts = _sidx - CT(s_lo);
 
       const CT tm1 = t - 1;
-      const auto row = [&](const size_t sidx) -> NT {
-        const NT lower = values(sidx, lidx);
-        const NT upper = values(sidx, uidx);
-        const NT cl = coeffs(sidx, lidx);
-        const NT cu = coeffs(sidx, uidx);
+      // One row of a spline in x: the values (y, c) or the s-coefficients (s2, s2x).
+      const auto row = [&](const View &y, const View &c, const size_t sidx) -> NT {
+        const NT lower = y(sidx, lidx);
+        const NT upper = y(sidx, uidx);
+        const NT cl = c(sidx, lidx);
+        const NT cu = c(sidx, uidx);
         const NT cubic = t * tm1 * ((t + 1) * cu - (t - 2) * cl);
         if constexpr (std::is_arithmetic_v<NT>)
           return Kokkos::fma(t, upper, Kokkos::fma(-t, lower, lower)) + cubic; // linear + cubic
         else
           return t * upper + (1 - t) * lower + cubic; // linear + cubic
       };
-      const NT f_lo = row(s_lo);
+      const NT f_lo = row(values, coeffs, s_lo);
       if (s_hi == s_lo || ts == CT(0)) return f_lo;
-      return f_lo + ts * (row(s_hi) - f_lo);
+      const NT f_hi = row(values, coeffs, s_hi);
+      const NT c_lo = row(s2, s2x, s_lo);
+      const NT c_hi = row(s2, s2x, s_hi);
+      return f_lo + ts * (f_hi - f_lo) + ts * (ts - 1) * ((ts + 1) * c_hi - (ts - 2) * c_lo);
     }
   } // namespace internal
 
@@ -84,11 +95,11 @@ namespace DiFfRG
     using value_type = NT;
     static constexpr size_t dim = 2;
 
-    SplineInterpolator1DStackHandle(const NT *device_values, const NT *device_coeffs, const NT *host_values,
-                                    const NT *host_coeffs, const device::array<size_t, 2> &sizes,
+    /// Pointers to {values, coeffs, s2, s2x} on the device and on the host; see internal::spline_stack_at.
+    SplineInterpolator1DStackHandle(const device::array<const NT *, 4> &device_data,
+                                    const device::array<const NT *, 4> &host_data, const device::array<size_t, 2> &sizes,
                                     const Coordinates &coordinates)
-        : device_values(device_values), device_coeffs(device_coeffs), host_values(host_values),
-          host_coeffs(host_coeffs), sizes(sizes), coordinates(coordinates)
+        : device_data(device_data), host_data(host_data), sizes(sizes), coordinates(coordinates)
     {
     }
 
@@ -99,10 +110,12 @@ namespace DiFfRG
 
     NT KOKKOS_FUNCTION at(const device::array<ctype, 2> &raw) const
     {
-      KOKKOS_IF_ON_DEVICE(
-          (return internal::spline_stack_at<NT>(View{device_values, sizes}, View{device_coeffs, sizes}, sizes, raw);))
-      KOKKOS_IF_ON_HOST(
-          (return internal::spline_stack_at<NT>(View{host_values, sizes}, View{host_coeffs, sizes}, sizes, raw);))
+      KOKKOS_IF_ON_DEVICE((return internal::spline_stack_at<NT>(View{device_data[0], sizes}, View{device_data[1], sizes},
+                                                                View{device_data[2], sizes}, View{device_data[3], sizes},
+                                                                sizes, raw);))
+      KOKKOS_IF_ON_HOST((return internal::spline_stack_at<NT>(View{host_data[0], sizes}, View{host_data[1], sizes},
+                                                              View{host_data[2], sizes}, View{host_data[3], sizes},
+                                                              sizes, raw);))
     }
 
     NT KOKKOS_FUNCTION operator()(const ctype s, const ctype x) const { return at(index(s, x)); }
@@ -111,7 +124,7 @@ namespace DiFfRG
 
   private:
     using View = internal::RawView2D<NT, Layout>;
-    const NT *device_values, *device_coeffs, *host_values, *host_coeffs;
+    device::array<const NT *, 4> device_data, host_data;
     device::array<size_t, 2> sizes;
     Coordinates coordinates;
   };
@@ -120,8 +133,13 @@ namespace DiFfRG
    * @brief A stack of 1D cubic splines \f$f(s, x)\f$, usable in host and device code.
    *
    * Axis 0 is the stack variable \f$s\f$ (e.g. a Matsubara frequency), axis 1 the spline variable \f$x\f$ (e.g. a
-   * spatial momentum); calls take them in that order, `f(s, x)`. Each row of fixed \f$s\f$ is a cubic spline in the
-   * grid index of \f$x\f$, as in SplineInterpolator1D; between rows the result is interpolated linearly.
+   * spatial momentum); calls take them in that order, `f(s, x)`. The data are a tensor-product cubic spline in the
+   * grid indices of both: each row of fixed \f$s\f$ as in SplineInterpolator1D, and the rows joined by a cubic
+   * spline in \f$s\f$ (natural ends; for a finite-temperature stack that starts at the zero frequency and folds
+   * \f$s \to |s|\f$, zero slope at that row, so the spline is even and smooth through it). Exact on every grid point,
+   * twice continuously differentiable in both directions. A frequency sum evaluated between the Matsubara rows, as
+   * a Gauss rule for sums or a frequency integral does, thus sees a smooth summand; a linear join put a kink at every
+   * row, and an error into such sums that more nodes do not remove.
    *
    * Outside the grid the boundary values are used; how an \f$s\f$ beyond the stack is handled is up to the
    * coordinate system (the finite-temperature systems, e.g. BosonicCoordinates1DFiniteT, fold \f$s \to |s|\f$ when the
@@ -171,8 +189,11 @@ namespace DiFfRG
         : coordinates(coordinates), sizes(coordinates.sizes()),
           device_values("SplineInterpolator1DStack_values", coordinates.sizes()[0], coordinates.sizes()[1]),
           device_coeffs("SplineInterpolator1DStack_coeffs", coordinates.sizes()[0], coordinates.sizes()[1]),
+          device_s2("SplineInterpolator1DStack_s2", coordinates.sizes()[0], coordinates.sizes()[1]),
+          device_s2x("SplineInterpolator1DStack_s2x", coordinates.sizes()[0], coordinates.sizes()[1]),
           host_values(Kokkos::create_mirror_view(device_values)),
-          host_coeffs(Kokkos::create_mirror_view(device_coeffs))
+          host_coeffs(Kokkos::create_mirror_view(device_coeffs)), host_s2(Kokkos::create_mirror_view(device_s2)),
+          host_s2x(Kokkos::create_mirror_view(device_s2x))
     {
       // the handles index the buffers by hand, which needs them unpadded
       if (device_values.span() != sizes[0] * sizes[1] || host_values.span() != device_values.span())
@@ -186,8 +207,12 @@ namespace DiFfRG
         s.coordinates.emplace(coordinates);
         s.device_values = ValueViewType32("SplineInterpolator1DStack_values32", sizes[0], sizes[1]);
         s.device_coeffs = ValueViewType32("SplineInterpolator1DStack_coeffs32", sizes[0], sizes[1]);
+        s.device_s2 = ValueViewType32("SplineInterpolator1DStack_s2_32", sizes[0], sizes[1]);
+        s.device_s2x = ValueViewType32("SplineInterpolator1DStack_s2x_32", sizes[0], sizes[1]);
         s.host_values = Kokkos::create_mirror_view(s.device_values);
         s.host_coeffs = Kokkos::create_mirror_view(s.device_coeffs);
+        s.host_s2 = Kokkos::create_mirror_view(s.device_s2);
+        s.host_s2x = Kokkos::create_mirror_view(s.device_s2x);
         if (s.device_values.span() != device_values.span() || s.host_values.span() != device_values.span())
           throw std::runtime_error("SplineInterpolator1DStack: padded data buffer");
       }
@@ -201,7 +226,7 @@ namespace DiFfRG
      *
      * The end conditions are first derivatives \f$df/di\f$ with respect to the grid index of \f$x\f$ (not to
      * \f$x\f$), the same for every row. A value left at its default (or not finite) gives a natural boundary
-     * condition, \f$f'' = 0\f$, at that end.
+     * condition, \f$f'' = 0\f$, at that end. Along \f$s\f$ the ends are fixed by the coordinates (see the class).
      *
      * @param in_data values in row-major order `[s][x]`: `in_data[i * n1 + j]` for stack index i and spline grid point
      * j, with `n1 = get_coordinates().sizes()[1]`; converted to NT
@@ -233,9 +258,7 @@ namespace DiFfRG
         for (size_t j = 0; j < sizes[1]; ++j)
           host_values(i, j) = in_data[i * sizes[1] + j];
 
-      // Build the spline coefficients
-      for (size_t i = 0; i < sizes[0]; ++i)
-        build_y2(i, lower_y1, upper_y1);
+      build_splines(lower_y1, upper_y1);
 
       if constexpr (Twin::exists) {
         auto &s = single();
@@ -243,6 +266,8 @@ namespace DiFfRG
           for (size_t j = 0; j < sizes[1]; ++j) {
             s.host_values(i, j) = static_cast<NT32>(host_values(i, j));
             s.host_coeffs(i, j) = static_cast<NT32>(host_coeffs(i, j));
+            s.host_s2(i, j) = static_cast<NT32>(host_s2(i, j));
+            s.host_s2x(i, j) = static_cast<NT32>(host_s2x(i, j));
           }
       }
 
@@ -250,10 +275,14 @@ namespace DiFfRG
         typename ValueViewType::execution_space exec;
         Kokkos::deep_copy(exec, device_values, host_values);
         Kokkos::deep_copy(exec, device_coeffs, host_coeffs);
+        Kokkos::deep_copy(exec, device_s2, host_s2);
+        Kokkos::deep_copy(exec, device_s2x, host_s2x);
         if constexpr (Twin::exists) {
           auto &s = single();
           Kokkos::deep_copy(exec, s.device_values, s.host_values);
           Kokkos::deep_copy(exec, s.device_coeffs, s.host_coeffs);
+          Kokkos::deep_copy(exec, s.device_s2, s.host_s2);
+          Kokkos::deep_copy(exec, s.device_s2x, s.host_s2x);
         }
         exec.fence();
       }
@@ -269,11 +298,13 @@ namespace DiFfRG
       if constexpr (Twin::exists && std::is_same_v<CT, float>) {
         const auto &s = single();
         return SplineInterpolator1DStackHandle<NT32, Coordinates32, typename ValueViewType32::array_layout>(
-            s.device_values.data(), s.device_coeffs.data(), s.host_values.data(), s.host_coeffs.data(), sizes,
+            {{s.device_values.data(), s.device_coeffs.data(), s.device_s2.data(), s.device_s2x.data()}},
+            {{s.host_values.data(), s.host_coeffs.data(), s.host_s2.data(), s.host_s2x.data()}}, sizes,
             *s.coordinates);
       } else
         return SplineInterpolator1DStackHandle<NT, Coordinates, typename ValueViewType::array_layout>(
-            device_values.data(), device_coeffs.data(), host_values.data(), host_coeffs.data(), sizes, coordinates);
+            {{device_values.data(), device_coeffs.data(), device_s2.data(), device_s2x.data()}},
+            {{host_values.data(), host_coeffs.data(), host_s2.data(), host_s2x.data()}}, sizes, coordinates);
     }
 
     /**
@@ -304,8 +335,9 @@ namespace DiFfRG
      */
     NT KOKKOS_FUNCTION at(const device::array<typename Coordinates::ctype, 2> &raw) const
     {
-      KOKKOS_IF_ON_DEVICE((return internal::spline_stack_at<NT>(device_values, device_coeffs, sizes, raw);))
-      KOKKOS_IF_ON_HOST((return internal::spline_stack_at<NT>(host_values, host_coeffs, sizes, raw);))
+      KOKKOS_IF_ON_DEVICE(
+          (return internal::spline_stack_at<NT>(device_values, device_coeffs, device_s2, device_s2x, sizes, raw);))
+      KOKKOS_IF_ON_HOST((return internal::spline_stack_at<NT>(host_values, host_coeffs, host_s2, host_s2x, sizes, raw);))
     }
 
     /**
@@ -338,10 +370,11 @@ namespace DiFfRG
     const Coordinates coordinates;
     const device::array<size_t, 2> sizes;
 
+    // values, x-spline coefficients f''/6, s-spline coefficients (d^2f/ds^2)/6 and their x-spline coefficients
     ValueViewType device_values;
-    CoeffViewType device_coeffs;
+    CoeffViewType device_coeffs, device_s2, device_s2x;
     HostValueViewType host_values;
-    HostCoeffViewType host_coeffs;
+    HostCoeffViewType host_coeffs, host_s2, host_s2x;
 
     // What the last update() was given, so that an identical update can be skipped.
     bool has_data = false;
@@ -351,44 +384,102 @@ namespace DiFfRG
     // adds 24 B to this object, which kernels naming the interpolator type still receive in full.
     struct Single {
       std::optional<Coordinates32> coordinates;
-      ValueViewType32 device_values, device_coeffs;
-      HostValueViewType32 host_values, host_coeffs;
+      ValueViewType32 device_values, device_coeffs, device_s2, device_s2x;
+      HostValueViewType32 host_values, host_coeffs, host_s2, host_s2x;
     };
     Kokkos::View<Single, Kokkos::HostSpace> single;
 
-    void build_y2(const size_t sidx, const ctype lower_y1, const ctype upper_y1)
+    /// True if the end condition is a natural one (f'' = 0): the derivative was left at its default or is not finite.
+    static bool natural(const ctype y1) { return !std::isfinite(y1) || y1 >= std::numeric_limits<ctype>::max() / 2; }
+
+    /**
+     * @brief Second derivatives / 6 of the cubic spline through y on a unit-spaced grid, into y2.
+     *
+     * End conditions: first derivatives lower_y1, upper_y1, or natural (see natural()).
+     */
+    static void spline_y2(const std::vector<NT> &y, std::vector<NT> &y2, const ctype lower_y1, const ctype upper_y1)
     {
-      const auto &size = sizes[1];
+      const size_t size = y.size();
+      y2.assign(size, NT(0));
+      if (size < 2) return;
 
       NT p, qn, sig, un;
       std::vector<NT> u(size - 1);
 
-      if (!std::isfinite(lower_y1) || lower_y1 >= std::numeric_limits<ctype>::max() / 2)
-        host_coeffs(sidx, 0) = u[0] = 0.0;
+      if (natural(lower_y1))
+        y2[0] = u[0] = 0.0;
       else {
-        host_coeffs(sidx, 0) = -0.5;
-        u[0] = 3.0 * ((host_values(sidx, 1) - host_values(sidx, 0)) - lower_y1);
+        y2[0] = -0.5;
+        u[0] = 3.0 * ((y[1] - y[0]) - lower_y1);
       }
       for (size_t i = 1; i < size - 1; i++) {
         sig = 0.5;
-        p = sig * host_coeffs(sidx, i - 1) + 2.0;
-        host_coeffs(sidx, i) = (sig - 1.0) / p;
-        u[i] = (host_values(sidx, i + 1) - host_values(sidx, i)) - (host_values(sidx, i) - host_values(sidx, i - 1));
+        p = sig * y2[i - 1] + 2.0;
+        y2[i] = (sig - 1.0) / p;
+        u[i] = (y[i + 1] - y[i]) - (y[i] - y[i - 1]);
         u[i] = (6.0 * u[i] / 2. - sig * u[i - 1]) / p;
       }
-      if (!std::isfinite(upper_y1) || upper_y1 >= std::numeric_limits<ctype>::max() / 2)
+      if (natural(upper_y1))
         qn = un = 0.0;
       else {
         qn = 0.5;
-        un = 3.0 * (upper_y1 - (host_values(sidx, size - 1) - host_values(sidx, size - 2)));
+        un = 3.0 * (upper_y1 - (y[size - 1] - y[size - 2]));
       }
-      host_coeffs(sidx, size - 1) = (un - qn * u[size - 2]) / (qn * host_coeffs(sidx, size - 2) + 1);
+      y2[size - 1] = (un - qn * u[size - 2]) / (qn * y2[size - 2] + 1);
       for (int k = size - 2; k >= 0; k--)
-        host_coeffs(sidx, k) = host_coeffs(sidx, k) * host_coeffs(sidx, k + 1) + u[k];
+        y2[k] = y2[k] * y2[k + 1] + u[k];
 
-      // Precompute division by 6 so operator() avoids per-call divides
+      // Precompute division by 6 so the evaluation avoids per-call divides
       for (size_t k = 0; k < size; ++k)
-        host_coeffs(sidx, k) /= (ctype)6;
+        y2[k] /= (ctype)6;
+    }
+
+    /**
+     * @brief All coefficients from host_values: x-splines of the rows, s-splines of the columns, and x-splines of
+     * the s-coefficients.
+     *
+     * The s-coefficients are linear in the values, so the x-spline of them equals the s-coefficient of the
+     * x-interpolated rows exactly, provided its end conditions are the image of the rows' ones: natural where the
+     * rows are natural, and zero slope where the rows share a slope (the s-curvature of equal slopes vanishes).
+     */
+    void build_splines(const ctype lower_y1, const ctype upper_y1)
+    {
+      const size_t ns = sizes[0], nx = sizes[1];
+      std::vector<NT> y, y2;
+
+      for (size_t i = 0; i < ns; ++i) {
+        y.resize(nx);
+        for (size_t j = 0; j < nx; ++j)
+          y[j] = host_values(i, j);
+        spline_y2(y, y2, lower_y1, upper_y1);
+        for (size_t j = 0; j < nx; ++j)
+          host_coeffs(i, j) = y2[j];
+      }
+
+      // A finite-temperature stack starting at the zero frequency is folded, s -> |s|: the data are even there, so
+      // the spline has zero slope at the first row. Natural ends otherwise.
+      bool mirrored = false;
+      if constexpr (requires { Coordinates::folds_frequency; }) mirrored = coordinates.m_start == 0;
+      const ctype natural_end = std::numeric_limits<ctype>::max();
+      for (size_t j = 0; j < nx; ++j) {
+        y.resize(ns);
+        for (size_t i = 0; i < ns; ++i)
+          y[i] = host_values(i, j);
+        spline_y2(y, y2, mirrored ? ctype(0) : natural_end, natural_end);
+        for (size_t i = 0; i < ns; ++i)
+          host_s2(i, j) = y2[i];
+      }
+
+      const ctype lower = natural(lower_y1) ? natural_end : ctype(0);
+      const ctype upper = natural(upper_y1) ? natural_end : ctype(0);
+      for (size_t i = 0; i < ns; ++i) {
+        y.resize(nx);
+        for (size_t j = 0; j < nx; ++j)
+          y[j] = host_s2(i, j);
+        spline_y2(y, y2, lower, upper);
+        for (size_t j = 0; j < nx; ++j)
+          host_s2x(i, j) = y2[j];
+      }
     }
   };
 } // namespace DiFfRG
