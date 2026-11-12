@@ -20,6 +20,8 @@
 
 // std
 #include <array>
+#include <bit>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -387,8 +389,10 @@ namespace DiFfRG
    * A kernel in hoisted form (kernel_has_pre) has its pre() evaluated once per node of the first integration variable
    * and reused for all other nodes, external points and map_points() points.
    *
-   * A kernel with a per-run table (kernel_has_tab) has it built on the first map() and read by kernel_tab() /
-   * post_tab() at every quadrature point. Its get() and map_points() evaluate kernel() / post().
+   * A kernel with a per-run table (kernel_has_tab) evaluates kernel_tab() / post_tab() instead of kernel() / post() in
+   * map() and map_points(), and in get() if the table does not depend on the external point (see can_tab_get). Each
+   * keeps its own table, built on first use and rebuilt only when the masked grids or the masked external values
+   * change.
    *
    * Which form a kernel takes is decided when it is generated; there is no runtime switch, and only the code of
    * that form is compiled.
@@ -462,12 +466,26 @@ namespace DiFfRG
     // ---- Tables (kernel_has_tab) -------------------------------------------------------------------
 
     /**
-     * @brief Whether this kernel provides a per-run table that map() can use.
+     * @brief Whether this kernel provides a per-run table that map() and map_points() can use.
      */
     static constexpr bool can_tab = [] {
       if constexpr (kernel_has_tab<KERNEL>)
         return KERNEL::tab_box_mask.size() == dim;
       else
+        return false;
+    }();
+
+    /**
+     * @brief Whether get() uses the table: only if it does not depend on the external point (tab_ext_mask all false),
+     * so that one table serves every call. A table per external point would be rebuilt whenever consecutive calls
+     * differ in it.
+     */
+    static constexpr bool can_tab_get = [] {
+      if constexpr (can_tab) {
+        for (const bool masked : KERNEL::tab_ext_mask)
+          if (masked) return false;
+        return true;
+      } else
         return false;
     }();
 
@@ -570,14 +588,7 @@ namespace DiFfRG
       constexpr size_t E = KERNEL::tab_size;
       using memory_space = typename ExecutionSpace::memory_space;
 
-      std::string key = coordinates.to_string() + "|" + std::to_string(coordinates.size()) + "|" + std::to_string(E);
-      for (int d = 0; d < dim; ++d)
-        if (KERNEL::tab_box_mask[d]) {
-          internal::append_bytes(key, nodes[d].data());
-          internal::append_bytes(key, grid_size[d]);
-          internal::append_bytes(key, grid_start[d]);
-          internal::append_bytes(key, grid_scale[d]);
-        }
+      std::string key = coordinates.to_string() + "|" + std::to_string(coordinates.size()) + "|" + tab_box_key();
       if (key == m_tab.key) return;
 
       // Shapes: the external multi-indices restricted to tab_ext_mask, numbered in order of first appearance.
@@ -595,14 +606,8 @@ namespace DiFfRG
       }
       const size_t NS = rep.size();
 
-      // Box nodes: the grid points of the masked integration variables, the last masked one fastest.
-      device::array<size_t, dim> bstride{};
-      size_t NB = 1;
-      for (int d = dim - 1; d >= 0; --d)
-        if (KERNEL::tab_box_mask[d]) {
-          bstride[d] = NB;
-          NB *= grid_size[d];
-        }
+      size_t NB;
+      const auto bstride = tab_box_strides(NB);
 
       m_tab.shape_of = Kokkos::View<unsigned *, memory_space>(
           Kokkos::view_alloc(Kokkos::WithoutInitializing, "trace_table_shape"), N);
@@ -659,6 +664,80 @@ namespace DiFfRG
       m_tab.n_shape = NS;
       m_tab.n_box = NB;
       m_tab.key = std::move(key);
+    }
+
+    /**
+     * @brief Build a point table of a kernel_has_tab kernel on @p space: the entries at every node of the masked
+     * integration variables, for each shape of a list of points.
+     *
+     * Entry e of (box node b, shape s) sits at `data[(s * tab_size + e) * n_box + b]`, so that the nodes of one point
+     * are contiguous. tab() runs in double, with the arguments of the shape's representative point. Public only
+     * because nvcc rejects extended device lambdas inside non-public member functions.
+     *
+     * @param table the table to fill; its key becomes @p key
+     * @param shape_of the shape of each point
+     * @param rep the representative point of each shape
+     * @param device_args the arguments of all points, as DevicePointArg
+     */
+    template <typename DeviceArgs>
+    void build_point_tab(ExecutionSpace &space, internal::TabTable<ctype, ExecutionSpace> &table, std::string key,
+                         const std::vector<unsigned> &shape_of, const std::vector<unsigned> &rep,
+                         const DeviceArgs &device_args) const
+    {
+      constexpr size_t E = KERNEL::tab_size;
+      using memory_space = typename ExecutionSpace::memory_space;
+      size_t NB;
+      const auto bstride = tab_box_strides(NB);
+      const size_t N = shape_of.size(), NS = rep.size();
+
+      // the buffers only grow: a get() at a new shape rebuilds its table on every call
+      const auto grow = [](auto &view, const size_t size, const std::string &label) {
+        if (view.extent(0) < size)
+          view = std::remove_reference_t<decltype(view)>(Kokkos::view_alloc(Kokkos::WithoutInitializing, label), size);
+      };
+      grow(table.shape_of, N, "trace_table_shape");
+      grow(table.rep, NS, "trace_table_rep");
+      grow(table.fp64, NB * E * NS, "trace_table_fp64");
+      grow(table.data, NB * E * NS, "trace_table");
+      using HostIndices = Kokkos::View<const unsigned *, Kokkos::HostSpace, Kokkos::MemoryUnmanaged>;
+      Kokkos::deep_copy(space, Kokkos::subview(table.shape_of, Kokkos::make_pair(size_t(0), N)),
+                        HostIndices(shape_of.data(), N));
+      Kokkos::deep_copy(space, Kokkos::subview(table.rep, Kokkos::make_pair(size_t(0), NS)), HostIndices(rep.data(), NS));
+      const auto rep_view = table.rep;
+      const auto filled = table.fp64;
+      const auto &n = nodes;
+      const auto &start = grid_start;
+      const auto &scale = grid_scale;
+      const auto gsize = grid_size;
+      device::array<bool, dim> bmask;
+      for (int d = 0; d < dim; ++d)
+        bmask[d] = KERNEL::tab_box_mask[d];
+      const auto args = device_args;
+      Kokkos::parallel_for(
+          "QuadratureIntegrator_point_trace_table", Kokkos::RangePolicy<ExecutionSpace>(space, 0, NB * NS),
+          KOKKOS_LAMBDA(const size_t j) {
+            const size_t s = j / NB, b = j % NB;
+            device::array<ctype, dim> x;
+            for (int d = 0; d < dim; ++d) {
+              const size_t i = bmask[d] ? (b / bstride[d]) % gsize[d] : 0;
+              x[d] = Kokkos::fma(scale[d], n[d][i], start[d]);
+            }
+            const size_t r = rep_view(s);
+            double *out = filled.data() + s * E * NB + b;
+            device::apply(
+                [&](const auto &...xargs) {
+                  device::apply([&](const auto &...a) { KERNEL::tab(out, NB, xargs..., a(r)...); }, args);
+                },
+                x);
+          });
+      const auto data = table.data;
+      Kokkos::parallel_for(
+          "QuadratureIntegrator_point_trace_table_cast", Kokkos::RangePolicy<ExecutionSpace>(space, 0, NB * E * NS),
+          KOKKOS_LAMBDA(const size_t j) { data(j) = static_cast<ctype>(filled(j)); });
+      space.fence();
+      table.n_shape = NS;
+      table.n_box = NB;
+      table.key = std::move(key);
     }
 
     /// Fill the pre() table on @p space. Public only because nvcc rejects extended device lambdas inside non-public
@@ -748,7 +827,63 @@ namespace DiFfRG
       const auto &start = grid_start;
       const auto &scale = grid_scale;
 
-      if constexpr (can_hoist) {
+      if constexpr (can_tab_get) {
+        std::string key = tab_box_key();
+        if (key != m_tab_get.key) {
+          const auto point_args = device::apply(
+              [](const auto &...a) {
+                return device::make_tuple(internal::DevicePointArg<std::remove_cvref_t<decltype(a)>>{nullptr, a}...);
+              },
+              args);
+          build_point_tab(space, m_tab_get, std::move(key), {0u}, {0u}, point_args);
+        }
+        const ctype *tab = m_tab_get.data.data();
+        size_t NB;
+        const auto bstride = tab_box_strides(NB);
+        if constexpr (can_hoist) {
+          using PT = decltype(pre_value(ctype(0), device::tuple<>{}, args));
+          const PT *table = prepare_pre_table<PT>(space, device::tuple<>{}, args, dim, t...);
+          auto functor = KOKKOS_LAMBDA(const device::array<size_t, dim> &idx, NT &update)
+          {
+            device::array<ctype, dim> x;
+            ctype weight = 1;
+            bool is_first = true;
+            size_t b = 0;
+            for (size_t i = 0; i < dim; ++i) {
+              x[i] = Kokkos::fma(scale[i], n[i][idx[i]], start[i]);
+              weight *= w[i][idx[i]] * scale[i];
+              is_first &= idx[i] == 0;
+              b += idx[i] * bstride[i];
+            }
+            update += weight * tab_hoisted_value(table[idx[0]], tab + b, NB, x, device::tuple<>{}, args);
+            device::apply([&](const auto &...iargs) { update += is_first ? KERNEL::constant(iargs...) : NT(0); },
+                          args);
+          };
+          Kokkos::parallel_reduce("QuadratureIntegral_tab_hoisted_" + std::to_string(dim) + "D",
+                                  make_kokkos_nd_range<dim, ExecutionSpace>(space, {0}, grid_size),
+                                  internal::KokkosNDLambdaWrapperReduction<dim, decltype(functor)>(functor), dest);
+        } else {
+          auto functor = KOKKOS_LAMBDA(const device::array<size_t, dim> &idx, NT &update)
+          {
+            device::array<ctype, dim> x;
+            ctype weight = 1;
+            bool is_first = true;
+            size_t b = 0;
+            for (size_t i = 0; i < dim; ++i) {
+              x[i] = Kokkos::fma(scale[i], n[i][idx[i]], start[i]);
+              weight *= w[i][idx[i]] * scale[i];
+              is_first &= idx[i] == 0;
+              b += idx[i] * bstride[i];
+            }
+            update += weight * tab_value(tab + b, NB, x, device::tuple<>{}, args);
+            device::apply([&](const auto &...iargs) { update += is_first ? KERNEL::constant(iargs...) : NT(0); },
+                          args);
+          };
+          Kokkos::parallel_reduce("QuadratureIntegral_tab_" + std::to_string(dim) + "D",
+                                  make_kokkos_nd_range<dim, ExecutionSpace>(space, {0}, grid_size),
+                                  internal::KokkosNDLambdaWrapperReduction<dim, decltype(functor)>(functor), dest);
+        }
+      } else if constexpr (can_hoist) {
         using PT = decltype(pre_value(ctype(0), device::tuple<>{}, args));
         const PT *table = prepare_pre_table<PT>(space, device::tuple<>{}, args, dim, t...);
         auto functor = KOKKOS_LAMBDA(const device::array<size_t, dim> &idx, NT &update)
@@ -900,12 +1035,8 @@ namespace DiFfRG
         const auto shape_of = m_tab.shape_of;
         const size_t NS = m_tab.n_shape;
         constexpr size_t E = KERNEL::tab_size;
-        device::array<size_t, dim> bstride{};
-        for (int d = dim - 1, nb = 1; d >= 0; --d)
-          if (KERNEL::tab_box_mask[d]) {
-            bstride[d] = size_t(nb);
-            nb *= int(grid_size[d]);
-          }
+        size_t NB;
+        const auto bstride = tab_box_strides(NB);
         if constexpr (can_hoist && !internal::pre_reads_any<KERNEL>(dim, dim + cdim)) {
           const device::array<pos_ctype, cdim> pos0{};
           using PT = decltype(pre_value(ctype(0), pos0, m_args));
@@ -1238,6 +1369,27 @@ namespace DiFfRG
       constexpr bool handles = internal::takes_handles<NT, KERNEL, ctype, dim, T...>;
       internal::check_kernel_precision<handles, ctype, T...>();
       const auto device_args = m_map_points.template stage<ctype, handles>(space, n, args...);
+      if constexpr (can_tab) {
+        prepare_points_tab(n, device_args, args...);
+        if constexpr (can_hoist) {
+          bool hoist = true;
+          size_t i = dim;
+          ((hoist = hoist && !(args.per_point() && internal::pre_reads<KERNEL>(i)), ++i), ...);
+          if (hoist) {
+            using PT = decltype(device::apply(
+                [](const auto &...a) { return pre_value(ctype(0), device::tuple<>{}, device::tie(a(0)...)); },
+                device_args));
+            PT *table = pre_table_storage<PT>();
+            m_pre_table.refresh(pre_table_key<PT>(dim, args.value...), space, space,
+                                [&] { fill_pre_table_points(table, device_args); });
+            m_map_points.run(space, dest,
+                             [&](const auto &result) { launch_map_points_tab_hoisted(result, n, device_args, table); });
+            return;
+          }
+        }
+        m_map_points.run(space, dest, [&](const auto &result) { launch_map_points_tab(result, n, device_args); });
+        return;
+      }
       if constexpr (can_hoist) {
         // Hoisted unless pre() reads an argument given per point.
         bool hoist = true;
@@ -1284,6 +1436,262 @@ namespace DiFfRG
       m_pre_table.refresh(pre_table_key<PT>(first, rest...), space, this->space,
                           [&] { fill_pre_table(space, table, pos, args); });
       return table;
+    }
+
+    /// Number of external coordinates the table of a kernel_has_tab kernel distinguishes (tab_ext_mask), else 0.
+    static constexpr size_t tab_ext_dim = internal::tab_ext_mask_of<KERNEL>().size();
+
+    /// A shape: the masked external values of one point as bit patterns of their double values, 0 where unmasked.
+    using TabShape = std::array<std::uint64_t, tab_ext_dim>;
+
+    template <size_t... I, typename Tuple>
+    static TabShape tab_shape_of(std::index_sequence<I...>, const size_t i, const Tuple &args)
+    {
+      TabShape shape{};
+      ((shape[I] = KERNEL::tab_ext_mask[I] ? std::bit_cast<std::uint64_t>(double(std::get<I>(args)[i])) : 0), ...);
+      return shape;
+    }
+
+    /// The shape of point @p i of the map_points() arguments @p a, whose first tab_ext_dim are the external coordinates.
+    template <typename... A> static TabShape tab_shape(const size_t i, const PointArg<A> &...a)
+    {
+      static_assert(sizeof...(A) >= tab_ext_dim, "the table's external coordinates must be kernel arguments");
+      return tab_shape_of(std::make_index_sequence<tab_ext_dim>{}, i, std::tie(a...));
+    }
+
+    /// The bytes of @p shape, for a table key.
+    static std::string tab_shape_bytes(const TabShape &shape)
+    {
+      if constexpr (tab_ext_dim == 0)
+        return {};
+      else
+        return std::string(reinterpret_cast<const char *>(shape.data()), sizeof(TabShape));
+    }
+
+    /// The part of a table key that identifies the entries per node and the grids of the masked integration variables.
+    std::string tab_box_key() const
+    {
+      std::string key = std::to_string(KERNEL::tab_size);
+      for (int d = 0; d < dim; ++d)
+        if (KERNEL::tab_box_mask[d]) {
+          internal::append_bytes(key, nodes[d].data());
+          internal::append_bytes(key, grid_size[d]);
+          internal::append_bytes(key, grid_start[d]);
+          internal::append_bytes(key, grid_scale[d]);
+        }
+      return key;
+    }
+
+    /// The strides of the box nodes along each integration variable (0 where unmasked, the last masked one fastest),
+    /// and their number @p n_box.
+    device::array<size_t, dim> tab_box_strides(size_t &n_box) const
+    {
+      device::array<size_t, dim> bstride{};
+      n_box = 1;
+      for (int d = dim - 1; d >= 0; --d)
+        if (KERNEL::tab_box_mask[d]) {
+          bstride[d] = n_box;
+          n_box *= grid_size[d];
+        }
+      return bstride;
+    }
+
+    /// The point table of map_points() for @p n points with arguments @p args, rebuilt if their shapes changed.
+    template <typename DeviceArgs, typename... T>
+    void prepare_points_tab(const size_t n, const DeviceArgs &device_args, const PointArg<T> &...args)
+    {
+      std::string key = tab_box_key() + "|" + std::to_string(n) + "|";
+      if constexpr (tab_ext_dim > 0) {
+        key.reserve(key.size() + n * sizeof(TabShape));
+        for (size_t i = 0; i < n; ++i)
+          key += tab_shape_bytes(tab_shape(i, args...));
+      }
+      if (key == m_tab_points.key) return;
+      std::map<TabShape, unsigned> ids;
+      std::vector<unsigned> shape_of(n), rep;
+      for (size_t i = 0; i < n; ++i) {
+        const auto [it, inserted] = ids.try_emplace(tab_shape(i, args...), unsigned(ids.size()));
+        if (inserted) rep.push_back(unsigned(i));
+        shape_of[i] = it->second;
+      }
+      build_point_tab(space, m_tab_points, std::move(key), shape_of, rep, device_args);
+    }
+
+  public:
+    /// The kernel launch of map_points() for a kernel_has_tab kernel, reading the point table. Public for the same
+    /// reason as launch_map_points().
+    template <typename ResultView, typename DeviceArgs>
+    void launch_map_points_tab(const ResultView &result, const size_t n, const DeviceArgs &device_args)
+    {
+      using OT = typename ResultView::value_type;
+
+      const auto &nd = nodes;
+      const auto &w = weights;
+      const auto &start = grid_start;
+      const auto &scale = grid_scale;
+      const auto gs = grid_size;
+      const auto args = device_args;
+      constexpr size_t E = KERNEL::tab_size;
+      const ctype *tab = m_tab_points.data.data();
+      const auto shape_of = m_tab_points.shape_of;
+      size_t NB;
+      const auto bstride = tab_box_strides(NB);
+
+      size_t total = 1;
+      for (int d = 0; d < dim; ++d)
+        total *= grid_size[d];
+
+      const MapPointsPolicy policy = internal::resolve_policy(m_map_points_policy, n, total);
+
+      if (policy == MapPointsPolicy::thread_per_point) {
+        Kokkos::parallel_for(
+            "QuadratureIntegrator_map_points_tab", Kokkos::RangePolicy<ExecutionSpace>(space, 0, n),
+            KOKKOS_LAMBDA(const size_t i) {
+              NT sum = device::apply([&](const auto &...a) { return NT(KERNEL::constant(a(i)...)); }, args);
+              NT integral{};
+              const auto point_args = device::apply([&](const auto &...a) { return device::tie(a(i)...); }, args);
+              const ctype *point_tab = tab + size_t(shape_of(i)) * E * NB;
+              device::array<size_t, dim> idx{};
+              for (size_t flat = 0; flat < total; ++flat) {
+                device::array<ctype, dim> x;
+                ctype weight = 1;
+                size_t b = 0;
+                for (int d = 0; d < dim; ++d) {
+                  x[d] = Kokkos::fma(scale[d], nd[d][idx[d]], start[d]);
+                  weight *= w[d][idx[d]] * scale[d];
+                  b += idx[d] * bstride[d];
+                }
+                integral += weight * tab_value(point_tab + b, NB, x, device::tuple<>{}, point_args);
+                for (int d = dim - 1; d >= 0; --d) {
+                  if (++idx[d] < gs[d]) break;
+                  idx[d] = 0;
+                }
+              }
+              sum += integral;
+              result(i) = static_cast<OT>(sum);
+            });
+      } else {
+        using TeamType = typename Kokkos::TeamPolicy<ExecutionSpace>::member_type;
+        constexpr int vector_width = 32;
+        const size_t n_outer = (total + vector_width - 1) / vector_width;
+
+        device::array<size_t, dim> strides;
+        strides[dim - 1] = 1;
+        for (int d = dim - 2; d >= 0; --d)
+          strides[d] = strides[d + 1] * grid_size[d + 1];
+
+        Kokkos::parallel_for(
+            "QuadratureIntegrator_map_points_tab_team",
+            Kokkos::TeamPolicy<ExecutionSpace>(space, n, Kokkos::AUTO, vector_width),
+            KOKKOS_LAMBDA(const TeamType &team) {
+              const size_t i = team.league_rank();
+              const auto point_args = device::apply([&](const auto &...a) { return device::tie(a(i)...); }, args);
+              const ctype *point_tab = tab + size_t(shape_of(i)) * E * NB;
+              NT integral{};
+              Kokkos::parallel_reduce(
+                  Kokkos::TeamThreadRange(team, n_outer),
+                  [&](const size_t outer, NT &team_update) {
+                    NT vec_sum{};
+                    Kokkos::parallel_reduce(
+                        Kokkos::ThreadVectorRange(team, vector_width),
+                        [&](const size_t inner, NT &vec_update) {
+                          const size_t flat = outer * vector_width + inner;
+                          if (flat >= total) return;
+                          device::array<ctype, dim> x;
+                          ctype weight = 1;
+                          size_t remainder = flat, b = 0;
+                          for (int d = 0; d < dim; ++d) {
+                            const size_t id = remainder / strides[d];
+                            remainder -= id * strides[d];
+                            x[d] = Kokkos::fma(scale[d], nd[d][id], start[d]);
+                            weight *= w[d][id] * scale[d];
+                            b += id * bstride[d];
+                          }
+                          vec_update += weight * tab_value(point_tab + b, NB, x, device::tuple<>{}, point_args);
+                        },
+                        vec_sum);
+                    team_update += vec_sum;
+                  },
+                  integral);
+              Kokkos::single(Kokkos::PerTeam(team), [&]() {
+                NT sum = device::apply([&](const auto &...a) { return NT(KERNEL::constant(a(i)...)); }, args);
+                sum += integral;
+                result(i) = static_cast<OT>(sum);
+              });
+            });
+      }
+    }
+
+    /// launch_map_points_tab() for a hoisted kernel, from the pre() table @p table. Public for the same reason as
+    /// launch_map_points().
+    template <typename ResultView, typename DeviceArgs, typename PT>
+    void launch_map_points_tab_hoisted(const ResultView &result, const size_t n, const DeviceArgs &device_args,
+                                       const PT *table)
+    {
+      using OT = typename ResultView::value_type;
+
+      const auto &nd = nodes;
+      const auto &w = weights;
+      const auto &start = grid_start;
+      const auto &scale = grid_scale;
+      const auto args = device_args;
+      constexpr size_t E = KERNEL::tab_size;
+      const ctype *tab = m_tab_points.data.data();
+      const auto shape_of = m_tab_points.shape_of;
+      size_t NB;
+      const auto bstride = tab_box_strides(NB);
+
+      size_t total = 1;
+      for (int d = 0; d < dim; ++d)
+        total *= grid_size[d];
+      device::array<size_t, dim> strides;
+      strides[dim - 1] = 1;
+      for (int d = dim - 2; d >= 0; --d)
+        strides[d] = strides[d + 1] * grid_size[d + 1];
+
+      using TeamType = typename Kokkos::TeamPolicy<ExecutionSpace>::member_type;
+      constexpr int vector_width = 32;
+      const size_t n_outer = (total + vector_width - 1) / vector_width;
+      Kokkos::parallel_for(
+          "QuadratureIntegrator_map_points_tab_hoisted",
+          Kokkos::TeamPolicy<ExecutionSpace>(space, n, Kokkos::AUTO, vector_width),
+          KOKKOS_LAMBDA(const TeamType &team) {
+            const size_t i = team.league_rank();
+            const auto point_args = device::apply([&](const auto &...a) { return device::tie(a(i)...); }, args);
+            const ctype *point_tab = tab + size_t(shape_of(i)) * E * NB;
+            NT integral{};
+            Kokkos::parallel_reduce(
+                Kokkos::TeamThreadRange(team, n_outer),
+                [&](const size_t outer, NT &team_update) {
+                  NT vec_sum{};
+                  Kokkos::parallel_reduce(
+                      Kokkos::ThreadVectorRange(team, vector_width),
+                      [&](const size_t inner, NT &vec_update) {
+                        const size_t flat = outer * vector_width + inner;
+                        if (flat >= total) return;
+                        device::array<ctype, dim> x;
+                        ctype weight = 1;
+                        size_t remainder = flat, b = 0;
+                        for (int d = 0; d < dim; ++d) {
+                          const size_t id = remainder / strides[d];
+                          remainder -= id * strides[d];
+                          x[d] = Kokkos::fma(scale[d], nd[d][id], start[d]);
+                          weight *= w[d][id] * scale[d];
+                          b += id * bstride[d];
+                        }
+                        vec_update += weight * tab_hoisted_value(table[flat / strides[0]], point_tab + b, NB, x,
+                                                                 device::tuple<>{}, point_args);
+                      },
+                      vec_sum);
+                  team_update += vec_sum;
+                },
+                integral);
+            Kokkos::single(Kokkos::PerTeam(team), [&]() {
+              NT sum = device::apply([&](const auto &...a) { return NT(KERNEL::constant(a(i)...)); }, args);
+              sum += integral;
+              result(i) = static_cast<OT>(sum);
+            });
+          });
     }
 
   public:
@@ -1487,8 +1895,11 @@ namespace DiFfRG
     mutable bool m_result_views_initialized = false;
     // The pre() table of a hoisted kernel (see kernel_has_pre).
     internal::PreTable<ExecutionSpace> m_pre_table;
-    // The table of a kernel_has_tab kernel (see prepare_tab()).
+    // The tables of a kernel_has_tab kernel: map()'s (see prepare_tab()), get()'s (see can_tab_get) and map_points()'
+    // (see build_point_tab()).
     mutable internal::TabTable<ctype, ExecutionSpace> m_tab;
+    mutable internal::TabTable<ctype, ExecutionSpace> m_tab_get;
+    internal::TabTable<ctype, ExecutionSpace> m_tab_points;
   };
 
   /**

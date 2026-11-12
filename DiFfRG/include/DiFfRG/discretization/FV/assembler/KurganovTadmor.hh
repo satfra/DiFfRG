@@ -431,7 +431,7 @@ namespace DiFfRG
        * | `/discretization/batched/max_stacked_points` | uint | 16 MiB / point size | points per automatic-differentiation evaluation of the jacobian |
        * | `/discretization/diagnose_flux_conditioning` | bool | false               | on the first residual, warn if a diffusion flux is dominated by a gradient-independent constant, which loses digits in the face differences |
        *
-       * Distributed linear algebra is supported; local_abs_tolerances only works with serial vectors.
+       * Distributed linear algebra is supported, local_abs_tolerances included.
        *
        * @tparam Discretization_ An FV::Discretization on a rectangular mesh.
        * @tparam Model_ The model; by default that of the discretization.
@@ -540,23 +540,25 @@ namespace DiFfRG
         /**
          * @brief Per-dof absolute tolerances from Model::abs_tolerances, evaluated at every cell centre on the
          * readout reconstruction (values, reconstructed gradient, unlimited 3-point curvature).
-         * @see AbstractAssembler::local_abs_tolerances. Serial vectors only: the reconstruction reads neighbour
-         * cells, which a distributed vector would have to provide as ghosts.
+         * @see AbstractAssembler::local_abs_tolerances. The reconstruction reads neighbour cells, so it reads a
+         * replica of @p solution (see SolutionView; for a serial vector, the vector itself). Collective.
          */
         virtual bool local_abs_tolerances(VectorType &atol, const VectorType &solution, double abs_tol,
                                           double rel_tol) const override
         {
-          if constexpr (!def::HasAbsTolerances<Model, dim, AbsTolSolution, n_components> ||
-                        !std::is_same_v<VectorType, dealii::Vector<NumberType>>)
+          if constexpr (!def::HasAbsTolerances<Model, dim, AbsTolSolution, n_components>)
             return false;
           else {
             this->reinit_vector(atol);
+            SolutionView<VectorType> replica;
+            this->reinit_solution_view(replica);
+            replica.refresh(solution);
             std::array<double, n_components> cell_atol{};
             std::vector<types::global_dof_index> dofs(n_components);
             for (const auto &cell : dof_handler.active_cell_iterators()) {
               if (!cell->is_locally_owned()) continue;
               const Point x = cell->center();
-              auto sol = reconstruct_readout_solution(cell, solution, x);
+              auto sol = reconstruct_readout_solution(cell, replica.get(), x);
               cell_atol.fill(abs_tol);
               model.abs_tolerances(cell_atol, x, AbsTolSolution(std::tie(sol.values, sol.gradients, sol.hessians)),
                                    abs_tol, rel_tol);
@@ -564,6 +566,7 @@ namespace DiFfRG
               for (uint i = 0; i < n_components; ++i)
                 atol[dofs[i]] = cell_atol[local_component_of_dof[i]];
             }
+            atol.compress(dealii::VectorOperation::insert);
             return true;
           }
         }

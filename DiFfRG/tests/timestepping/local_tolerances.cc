@@ -187,8 +187,7 @@ TEST_CASE("KT local tolerances sit at each cell centre, per component", "[timest
 {
   DiFfRG::Init();
   ensure_logger();
-  // KT's local tolerances are serial-only (the reconstruction reads neighbour cells); a plain
-  // RectangularMesh is partitioned in an MPI build.
+  // A serial mesh; the partitioned one is tested below.
   using Discretization = FV::Discretization<ModelKT, RectangularMeshSerial<1>, double>;
   const auto config = make_config(0);
   ModelKT model;
@@ -209,6 +208,41 @@ TEST_CASE("KT local tolerances sit at each cell centre, per component", "[timest
     for (uint i = 0; i < dofs.size(); ++i) {
       const uint c = fe.system_to_component_index(i).first;
       // DG0: the reconstructed value at the cell centre is the cell value.
+      REQUIRE(tol.get()[dofs[i]] ==
+              Catch::Approx(expected(model_tolerance(c, cell->center()[0], u[dofs[i]]))).epsilon(1e-12));
+    }
+  }
+}
+
+TEST_CASE("KT local tolerances on a partitioned mesh", "[timestepping][tolerances][mpi]")
+{
+  DiFfRG::Init();
+  ensure_logger();
+  // In an MPI build the plain RectangularMesh is partitioned and the vectors are distributed: the reconstruction
+  // has to read the neighbour cells of other ranks from a replica.
+  using Discretization = FV::Discretization<ModelKT, RectangularMesh<1>, double>;
+  const auto config = make_config(0);
+  ModelKT model;
+  RectangularMesh<1> mesh{Config::ConfigurationMesh<1>(config)};
+  Discretization discretization(mesh, config);
+  FV::KurganovTadmor::Assembler<Discretization, ModelKT> assembler(discretization, model, config);
+  FV::FlowingVariables<Discretization> state(discretization);
+  state.interpolate(model);
+  SolutionView<typename Discretization::VectorType> u;
+  assembler.reinit_solution_view(u);
+  u.refresh(state.spatial_data());
+
+  LocalAbsTolerances<typename Discretization::VectorType, typename Discretization::SparseMatrixType, 1> tol(
+      assembler, abs_tol, rel_tol, refresh);
+  REQUIRE(tol.init(state.spatial_data()));
+  REQUIRE_FALSE(tol.refresh_needed(state.spatial_data()));
+  const auto &fe = discretization.get_fe();
+  std::vector<types::global_dof_index> dofs(fe.n_dofs_per_cell());
+  for (const auto &cell : discretization.get_dof_handler().active_cell_iterators()) {
+    if (!cell->is_locally_owned()) continue;
+    cell->get_dof_indices(dofs);
+    for (uint i = 0; i < dofs.size(); ++i) {
+      const uint c = fe.system_to_component_index(i).first;
       REQUIRE(tol.get()[dofs[i]] ==
               Catch::Approx(expected(model_tolerance(c, cell->center()[0], u[dofs[i]]))).epsilon(1e-12));
     }

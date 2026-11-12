@@ -34,8 +34,10 @@ namespace DiFfRG
    * - `kernel_tab(row, stride, a...)` (and `post_tab(P, row, stride, a...)` with kernel_has_pre), returning
    *   kernel(a...) from the node's entries `row[e * stride]`, of the integrator's ctype.
    *
-   * The integrator builds the table on the first map() and keeps it while the grids of the masked variables are
-   * unchanged; it never depends on the arguments, on k or on the interpolators.
+   * The external coordinates are kernel()'s parameters right after the integration variables: the grid point in
+   * map(), the first `cdim` arguments in map_points() and get(). The integrator builds a table on first use and keeps
+   * it while the grids of the masked variables and the masked external values are unchanged; it never depends on the
+   * other arguments, on k or on the interpolators. get() reads a table only if tab_ext_mask is all false.
    */
   template <class K>
   inline constexpr bool kernel_has_tab = requires {
@@ -50,9 +52,10 @@ namespace DiFfRG
     /**
      * @brief The table of a kernel_has_tab kernel and the maps from the integrator's indices into it.
      *
-     * Entry e of the node (box node b, shape s) sits at `data[(b * tab_size + e) * n_shape + s]`: the shapes (the
-     * external points restricted to tab_ext_mask) are fastest because Kokkos walks the external index fastest
-     * within a GPU warp, so a warp's loads of one entry are contiguous.
+     * A shape is an external point restricted to tab_ext_mask; a box node a node of the masked integration variables.
+     * map() stores entry e of (box node b, shape s) at `data[(b * tab_size + e) * n_shape + s]`, shapes fastest, since
+     * Kokkos walks the external index fastest within a GPU warp. map_points() and get() store it at
+     * `data[(s * tab_size + e) * n_box + b]`, box nodes fastest, since there a team walks the nodes of one point.
      */
     template <typename ctype, typename ExecutionSpace> struct TabTable {
       using memory_space = typename ExecutionSpace::memory_space;
@@ -61,9 +64,14 @@ namespace DiFfRG
        */
       Kokkos::View<ctype *, memory_space> data;
       /**
-       * @brief The shape of each external point, by its linear index.
+       * @brief The shape of each external point, by its linear index (map()) or point index (map_points()).
        */
       Kokkos::View<unsigned *, memory_space> shape_of;
+      /**
+       * @brief The representative point of each shape, and the double-precision entries tab() writes (point tables).
+       */
+      Kokkos::View<unsigned *, memory_space> rep;
+      Kokkos::View<double *, memory_space> fp64;
       /**
        * @brief Number of shapes.
        */

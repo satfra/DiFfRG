@@ -9,6 +9,7 @@
 #include <DiFfRG/physics/interpolation/spline_interpolator_1d.hh>
 #include <DiFfRG/physics/regulators.hh>
 
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -112,16 +113,76 @@ namespace
     }
   };
 
+  /// A kernel whose table does not depend on the external point: PlainKernel with its coefficients at u = 1/4.
+  struct PlainFree : PlainKernel {
+    template <typename A, typename B, typename Z>
+    static KOKKOS_FORCEINLINE_FUNCTION auto kernel(const double x, const double c, const double S, const double u,
+                                                   const A &a, const B &b, const Z &z)
+    {
+      return rest(loop_part(x, z), trace(coeff(0, c, .25), coeff(1, c, .25), coeff(2, c, .25), x, c, S, u), c, u, a,
+                  b);
+    }
+  };
+  struct TabFree : PlainFree {
+    static constexpr bool has_tab = true;
+    static constexpr std::size_t tab_size = 3;
+    static constexpr std::array<bool, 2> tab_box_mask{false, true};
+    static constexpr std::array<bool, 2> tab_ext_mask{false, false};
+
+    template <typename... R>
+    static KOKKOS_FORCEINLINE_FUNCTION void tab(double *out, const std::size_t stride, const double, const double c,
+                                                const R &...)
+    {
+      for (int n = 0; n < 3; ++n)
+        out[n * stride] = coeff(n, c, .25);
+    }
+    template <typename T, typename A, typename B, typename Z>
+    static KOKKOS_FORCEINLINE_FUNCTION auto kernel_tab(const T *row, const std::size_t st, const double x,
+                                                       const double c, const double S, const double u, const A &a,
+                                                       const B &b, const Z &z)
+    {
+      return rest(loop_part(x, z),
+                  trace(TabKernel::read(row, st, 0), TabKernel::read(row, st, 1), TabKernel::read(row, st, 2), x, c, S,
+                        u),
+                  c, u, a, b);
+    }
+  };
+
+  /// Two projections of one loop as a MultiValue, the second weighted by u: a kernel group.
+  template <typename K> struct Pair : K {
+    template <typename... R> static KOKKOS_FORCEINLINE_FUNCTION auto kernel(const double x, const double c,
+                                                                            const double S, const double u,
+                                                                            const R &...r)
+    {
+      const double v = K::kernel(x, c, S, u, r...);
+      return MultiValue<double, 2>(v, u * v);
+    }
+    template <typename T, typename... R>
+    static KOKKOS_FORCEINLINE_FUNCTION auto kernel_tab(const T *row, const std::size_t st, const double x,
+                                                       const double c, const double S, const double u, const R &...r)
+      requires K::has_tab
+    {
+      const double v = K::kernel_tab(row, st, x, c, S, u, r...);
+      return MultiValue<double, 2>(v, u * v);
+    }
+    template <typename... R> static KOKKOS_FORCEINLINE_FUNCTION auto constant(const R &...)
+    {
+      return MultiValue<double, 2>();
+    }
+  };
+
   using Coordinates = LinearCoordinates1D<double>;
   using ExtCoordinates = CoordinatePackND<LinearCoordinates1D<double>, LinearCoordinates1D<double>>;
   using Interpolator = SplineInterpolator1D<double, Coordinates>;
 
-  template <typename K, typename ExecutionSpace> using Integrator = QuadratureIntegrator<2, double, K, ExecutionSpace>;
+  template <typename K, typename ExecutionSpace, typename NT = double>
+  using Integrator = QuadratureIntegrator<2, NT, K, ExecutionSpace>;
 
-  template <typename K, typename ExecutionSpace> Integrator<K, ExecutionSpace> make(QuadratureProvider &provider)
+  template <typename K, typename ExecutionSpace, typename NT = double>
+  Integrator<K, ExecutionSpace, NT> make(QuadratureProvider &provider)
   {
-    return Integrator<K, ExecutionSpace>(provider, {{16, 8}}, {{0., -1.}}, {{2., 1.}},
-                                         {{QuadratureType::legendre, QuadratureType::legendre}});
+    return Integrator<K, ExecutionSpace, NT>(provider, {{16, 8}}, {{0., -1.}}, {{2., 1.}},
+                                             {{QuadratureType::legendre, QuadratureType::legendre}});
   }
 
   void fill(Interpolator &z, const double shift)
@@ -149,6 +210,45 @@ namespace
     }
   }
 
+  /// get() of @p tabbed against PlainKernel's at each external point (S, u) of @p points, in order.
+  template <typename P, typename K, typename ExecutionSpace>
+  void check_get(QuadratureProvider &provider, const std::vector<std::array<double, 2>> &points, const double a,
+                 const double b, const Interpolator &z, Integrator<K, ExecutionSpace> &tabbed)
+  {
+    auto plain = make<P, ExecutionSpace>(provider);
+    for (const auto &[S, u] : points) {
+      double r_plain, r_tab;
+      plain.get(r_plain, S, u, a, b, z);
+      tabbed.get(r_tab, S, u, a, b, z);
+      CAPTURE(S, u, r_plain, r_tab);
+      REQUIRE(close(r_tab, r_plain));
+    }
+  }
+
+  /// map_points() of @p tabbed against PlainKernel's, with S and u per point (u from a few values) or u shared.
+  template <typename P, typename K, typename ExecutionSpace>
+  void check_map_points(QuadratureProvider &provider, const size_t n, const double shift, const bool shared_u,
+                        const double a, const double b, const Interpolator &z, Integrator<K, ExecutionSpace> &tabbed)
+  {
+    auto plain = make<P, ExecutionSpace>(provider);
+    std::vector<double> S(n), u(n), r_plain(n), r_tab(n);
+    for (size_t i = 0; i < n; ++i) {
+      S[i] = 0.05 + 0.37 * double(i % 11) + shift;
+      u[i] = -0.9 + 0.3 * double((i / 3) % 7);
+    }
+    if (shared_u) {
+      plain.map_points(PointSpan<double>(r_plain), S, 0.3 + shift, a, b, z);
+      tabbed.map_points(PointSpan<double>(r_tab), S, 0.3 + shift, a, b, z);
+    } else {
+      plain.map_points(PointSpan<double>(r_plain), S, u, a, b, z);
+      tabbed.map_points(PointSpan<double>(r_tab), S, u, a, b, z);
+    }
+    for (size_t i = 0; i < n; ++i) {
+      CAPTURE(i, S[i], u[i], r_plain[i], r_tab[i]);
+      REQUIRE(close(r_tab[i], r_plain[i]));
+    }
+  }
+
   template <typename ExecutionSpace> void check_all(QuadratureProvider &provider)
   {
     STATIC_REQUIRE(Integrator<TabKernel, ExecutionSpace>::can_tab);
@@ -172,6 +272,94 @@ namespace
     {
       auto tabbed = make<HoistedTabKernel, ExecutionSpace>(provider);
       check_map(provider, ext, 0.6, 0.2, z, tabbed);
+    }
+
+    const std::vector<std::array<double, 2>> points{{0.5, 0.3}, {2.2, 0.3}, {0.05, -0.7}, {0.5, 0.3}, {3., 0.9}};
+
+    STATIC_REQUIRE(!Integrator<TabKernel, ExecutionSpace>::can_tab_get);
+    STATIC_REQUIRE(Integrator<TabFree, ExecutionSpace>::can_tab_get);
+
+    SECTION("get, plain table form")
+    {
+      auto tabbed = make<TabKernel, ExecutionSpace>(provider);
+      check_get<PlainKernel>(provider, points, 0.6, 0.2, z, tabbed);
+    }
+
+    SECTION("get, hoisted table form")
+    {
+      auto tabbed = make<HoistedTabKernel, ExecutionSpace>(provider);
+      check_get<PlainKernel>(provider, points, 0.6, 0.2, z, tabbed);
+      fill(z, 1.);
+      check_get<PlainKernel>(provider, points, 0.9, -0.4, z, tabbed);
+    }
+
+    SECTION("get, a table independent of the external point")
+    {
+      auto tabbed = make<TabFree, ExecutionSpace>(provider);
+      check_get<PlainFree>(provider, points, 0.6, 0.2, z, tabbed);
+      fill(z, 1.);
+      check_get<PlainFree>(provider, points, 0.9, -0.4, z, tabbed);
+    }
+
+    SECTION("get follows the masked grids")
+    {
+      auto tabbed = make<TabFree, ExecutionSpace>(provider);
+      check_get<PlainFree>(provider, points, 0.6, 0.2, z, tabbed);
+      tabbed.set_grid_extents({{0., -0.5}}, {{2.5, 1.}});
+      auto plain = make<PlainFree, ExecutionSpace>(provider);
+      plain.set_grid_extents({{0., -0.5}}, {{2.5, 1.}});
+      double r_plain, r_tab;
+      plain.get(r_plain, 0.5, 0.3, 0.6, 0.2, z);
+      tabbed.get(r_tab, 0.5, 0.3, 0.6, 0.2, z);
+      REQUIRE(close(r_tab, r_plain));
+    }
+
+    for (const auto policy : {MapPointsPolicy::team_per_point, MapPointsPolicy::thread_per_point}) {
+      DYNAMIC_SECTION("map_points, policy " << int(policy))
+      {
+        auto tabbed = make<TabKernel, ExecutionSpace>(provider);
+        tabbed.set_map_points_policy(policy);
+        check_map_points<PlainKernel>(provider, 40, 0., false, 0.6, 0.2, z, tabbed);
+        check_map_points<PlainKernel>(provider, 40, 0., false, 0.9, -0.4, z, tabbed); // same points
+        check_map_points<PlainKernel>(provider, 25, 0.1, false, 0.6, 0.2, z, tabbed); // other points: rebuilt
+        check_map_points<PlainKernel>(provider, 25, 0.1, true, 0.6, 0.2, z, tabbed);  // u shared
+        auto free = make<TabFree, ExecutionSpace>(provider);
+        free.set_map_points_policy(policy);
+        check_map_points<PlainFree>(provider, 30, 0., false, 0.6, 0.2, z, free);
+      }
+    }
+
+    SECTION("map_points, hoisted table form")
+    {
+      auto tabbed = make<HoistedTabKernel, ExecutionSpace>(provider);
+      check_map_points<PlainKernel>(provider, 40, 0., false, 0.6, 0.2, z, tabbed);
+      check_map_points<PlainKernel>(provider, 25, 0.1, true, 0.6, 0.2, z, tabbed);
+    }
+
+    SECTION("a MultiValue kernel: map, get and map_points")
+    {
+      using MV = MultiValue<double, 2>;
+      STATIC_REQUIRE(Integrator<Pair<TabKernel>, ExecutionSpace, MV>::can_tab);
+      auto plain = make<Pair<PlainKernel>, ExecutionSpace, MV>(provider);
+      auto tabbed = make<Pair<TabKernel>, ExecutionSpace, MV>(provider);
+      std::vector<double> p0(ext.size()), p1(ext.size()), t0(ext.size()), t1(ext.size());
+      plain.map({p0.data(), p1.data()}, ext, 0.6, 0.2, z);
+      tabbed.map({t0.data(), t1.data()}, ext, 0.6, 0.2, z);
+      Kokkos::fence();
+      for (size_t i = 0; i < ext.size(); ++i)
+        REQUIRE((close(t0[i], p0[i]) && close(t1[i], p1[i])));
+      for (const auto &[S, u] : points) {
+        MV r_plain, r_tab;
+        plain.get(r_plain, S, u, 0.6, 0.2, z);
+        tabbed.get(r_tab, S, u, 0.6, 0.2, z);
+        REQUIRE((close(r_tab[0], r_plain[0]) && close(r_tab[1], r_plain[1])));
+      }
+      std::vector<double> S{0.1, 0.7, 1.3, 2.9}, u{0.3, -0.6, 0.3, 0.9};
+      std::vector<double> q0(4), q1(4), s0(4), s1(4);
+      plain.map_points(std::array<PointSpan<double>, 2>{q0, q1}, S, u, 0.6, 0.2, z);
+      tabbed.map_points(std::array<PointSpan<double>, 2>{s0, s1}, S, u, 0.6, 0.2, z);
+      for (size_t i = 0; i < 4; ++i)
+        REQUIRE((close(s0[i], q0[i]) && close(s1[i], q1[i])));
     }
 
     SECTION("the table follows the grids, not the arguments")

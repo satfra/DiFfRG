@@ -23,8 +23,8 @@ namespace DiFfRG
      * It is called once per dof location (LDG: support point; KT: cell centre) and fills one absolute tolerance per
      * FE function; @p atol is pre-filled with the uniform @p abs_tol, @p rel_tol is the stepper's relative tolerance.
      * `sol` is a named tuple with `"fe_functions"`, `"fe_derivatives"`, `"fe_hessians"` (LDG: of the FE functions,
-     * not the LDG levels; KT: reconstructed gradient and curvature). Used by the LDG and KT assemblers with serial
-     * vectors only; elsewhere the uniform `abs_tol` applies. @see AbstractAssembler::local_abs_tolerances
+     * not the LDG levels; KT: reconstructed gradient and curvature). Used by the KT assembler, and by the LDG assembler
+     * with serial vectors only; elsewhere the uniform `abs_tol` applies. @see AbstractAssembler::local_abs_tolerances
      */
     template <typename Model, int dim, typename Solution, size_t n>
     concept HasAbsTolerances =

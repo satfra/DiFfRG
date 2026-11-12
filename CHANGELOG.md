@@ -291,6 +291,9 @@
 
 ### Fixed
 
+- The KT assembler's per-dof absolute tolerances (`Model::abs_tolerances`) also work with distributed vectors.
+  An MPI build silently fell back to the uniform `abs_tol`; the reconstruction now reads a replica of the state
+  (`SolutionView`).
 - The implicit residual and jacobian timings of the IDA hybrids (`TimeStepperSUNDIALS_IDA_BoostABM`,
   `_BoostRK`) no longer include the explicit steps. Those run lazily inside the IDA callbacks, when the variables
   are served, and were counted both as explicit and as implicit time.
