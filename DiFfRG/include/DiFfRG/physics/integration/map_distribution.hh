@@ -137,8 +137,11 @@ namespace DiFfRG
      * @brief The MapScheduler half of every integrator's map().
      *
      * Registers the call with the scheduler and hands this rank's slice of the external grid to
-     * `run(dest, coordinates)` -- either the whole grid or a SubCoordinates window of it, with `dest`
-     * offset to match. `run` is responsible for landing (or deferring) its own result.
+     * `run(dest, coordinates)` as a SubCoordinates window, with `dest` offset to match -- also when
+     * the slice is the whole grid. `run` is responsible for landing (or deferring) its own result.
+     *
+     * Always a window, so that every map kernel is compiled once: a second, plain-Coordinates branch
+     * would compile each of them twice, for no difference at runtime.
      *
      * `dest` is a pointer, or a std::array of pointers for a MultiValue result; every array receives
      * the same slice.
@@ -171,10 +174,7 @@ namespace DiFfRG
         if (!MapCompletion::deferral_enabled()) MapCompletion::flush();
         return;
       }
-      if (slice.owns_all(coordinates.size()))
-        run(dest, coordinates);
-      else
-        run(offset_dest(dest, slice.offset), SubCoordinates(coordinates, slice.offset, slice.count));
+      run(offset_dest(dest, slice.offset), SubCoordinates(coordinates, slice.offset, slice.count));
     }
 
     /**

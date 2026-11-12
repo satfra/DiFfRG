@@ -14,6 +14,7 @@ These are prepended to the respective methods of the integration kernel, allowin
 The options \"KernelReturnTransform\" and \"ConstantReturnTransform\" (default Identity) accept a Mathematica function applied to the optimized expression before code generation, which lets you wrap the return value, e.g. \"KernelReturnTransform\" -> Re renders the kernel return as real(...).
 The option \"ComputeType\" (default \"double\") is the value type the kernel is evaluated and integrated in: \"double\", \"float\", \"DiFfRG::complex<double>\" or \"DiFfRG::complex<float>\". With a float type the kernel, its literals and the integrator run in single precision, while map()/get() still write double results.
 The option \"MapPoints\" (default False) additionally emits map_points(dest, args...), which evaluates the integral at dest.size() points in one launch (dest is a DiFfRG::PointSpan); every argument is a DiFfRG::PointArg, i.e. a single value or one value per point (a DiFfRG::PointSpan or std::vector). A model's evaluate_batch calls this. Supported by the vacuum and finite-temperature integrators, not by the lattice ones.
+The option \"Get\" (default True) emits get(dest, args...), the integral at one point. Set it to False for a flow that is only ever mapped: get() is compiled in a translation unit of its own, with its own copy of the whole kernel, so on a large GPU flow it costs as much compile time and memory as map() does.
 The lattice integrator \"Integrator\" -> \"DiFfRG::IntegratorLat\" with \"d\" -> 1..4 sums over the momenta of a periodic lattice; its \"IntegrationVariables\" are the momentum components {q0, ..., q(d-1)}, and the kernel must be even in every spatial component (and in q0 if q0_symmetric is set). It reads /integration/lattice/{N_t, N_s, a_t, a_s} and the optional q0_symmetric (default false) from the parameter file; d = 1 reads only N_t and a_t.
 The option \"SharedGrids\" lists groups of interpolator parameters that live on one coordinate grid, e.g. \"SharedGrids\" -> {{ZA, ZA3, ZA4}}. Lookups of a group with identical arguments then share the coordinate transform (one index(), then at() per interpolator). map() and map_points() check at run time that the group really shares one grid, in builds without NDEBUG or with DIFFRG_CHECK_SHARED_GRIDS.
 The option \"KernelTraits\" declares integrator traits on the emitted kernel class, as a list of names or name -> Boolean rules, e.g. \"KernelTraits\" -> {\"matsubara_finite_extent\"} or {\"matsubara_split\" -> True}. Each becomes a `static constexpr bool <name> = <value>;` member. \"MatsubaraEven\" stays a separate option because it carries a symbolic evenness check that a generic mechanism cannot.";
@@ -89,7 +90,7 @@ CheckKey[kernel_Association, name_String, test_, msg_String] :=
 
 KernelSpecQ[spec_Association] :=
     Module[{validKeys, validKeyTypes},
-        validKeys = CheckKey[spec, "Name", StringQ[#] && StringLength[#] > 0&, "Cannot be empty"] && CheckKey[spec, "Integrator", StringQ[#] && StringLength[#] > 0&, "Cannot be empty"] && CheckKey[spec, "d", IntegerQ[#] && # >= 0&, "Must be an Integer >= 0"] && CheckKey[spec, "AD", BooleanQ, "Must be a Boolean"] && CheckKey[spec, "Device", MemberQ[{"Threads", "TBB", "GPU"}, #]&, "Must be Threads, TBB or GPU."] && CheckKey[spec, "Type", StringQ[#] && StringLength[#] > 0&, "Cannot be empty"] && CheckKey[spec, "ComputeType", StringQ[#] && StringLength[#] > 0&, "Cannot be empty"];
+        validKeys = CheckKey[spec, "Name", StringQ[#] && StringLength[#] > 0&, "Cannot be empty"] && CheckKey[spec, "Integrator", StringQ[#] && StringLength[#] > 0&, "Cannot be empty"] && CheckKey[spec, "d", IntegerQ[#] && # >= 0&, "Must be an Integer >= 0"] && CheckKey[spec, "AD", BooleanQ, "Must be a Boolean"] && CheckKey[spec, "Get", BooleanQ, "Must be a Boolean"] && CheckKey[spec, "Device", MemberQ[{"Threads", "TBB", "GPU"}, #]&, "Must be Threads, TBB or GPU."] && CheckKey[spec, "Type", StringQ[#] && StringLength[#] > 0&, "Cannot be empty"] && CheckKey[spec, "ComputeType", StringQ[#] && StringLength[#] > 0&, "Cannot be empty"];
         Return[validKeys];
     ];
 
@@ -191,7 +192,7 @@ sharedGridCheck[groups_List, paramNames_List] :=
         If[checks === {}, "", "#if !defined(NDEBUG) || defined(DIFFRG_CHECK_SHARED_GRIDS)\n" <> StringJoin[checks] <> "#endif\n"]
     ];
 
-Options[MakeKernel] = {"Coordinates" -> {}, "CoordinateArguments" -> {}, "IntegrationVariables" -> {}, "KernelDefinitions" -> $StandardKernelDefinitions, "Regulator" -> "DiFfRG::PolynomialExpRegulator", "RegulatorOpts" -> {"", ""}, "KernelBody" -> "", "KernelReturnType" -> "auto", "KernelReturnTransform" -> Identity, "ConstantBody" -> "", "ConstantReturnType" -> "auto", "ConstantReturnTransform" -> Identity, "Parameters" -> {}, "Name" -> "", "d" -> -1, "Integrator" -> "", "AD" -> False, "ComputeType" -> "double", "ctype" -> Automatic, "Device" -> "TBB", "Type" -> "double", "SplitKernel" -> False, "SeparateLookups" -> False, "Decorator" -> "static KOKKOS_FUNCTION", "MatsubaraEven" -> False, "KernelTraits" -> {}, "MapPoints" -> False, "SharedGrids" -> {}};
+Options[MakeKernel] = {"Coordinates" -> {}, "CoordinateArguments" -> {}, "IntegrationVariables" -> {}, "KernelDefinitions" -> $StandardKernelDefinitions, "Regulator" -> "DiFfRG::PolynomialExpRegulator", "RegulatorOpts" -> {"", ""}, "KernelBody" -> "", "KernelReturnType" -> "auto", "KernelReturnTransform" -> Identity, "ConstantBody" -> "", "ConstantReturnType" -> "auto", "ConstantReturnTransform" -> Identity, "Parameters" -> {}, "Name" -> "", "d" -> -1, "Integrator" -> "", "AD" -> False, "ComputeType" -> "double", "ctype" -> Automatic, "Device" -> "TBB", "Type" -> "double", "SplitKernel" -> False, "SeparateLookups" -> False, "Decorator" -> "static KOKKOS_FUNCTION", "MatsubaraEven" -> False, "KernelTraits" -> {}, "MapPoints" -> False, "Get" -> True, "SharedGrids" -> {}};
 
 Options[MakeKernelGroup] = Options[MakeKernel];
 
@@ -414,9 +415,9 @@ makeKernel[kernelExpr_, constExpr_, outputs_, OptionsPattern[MakeKernel]] :=
                                         ]
                                     ]
                                     ,
-                                    {FunKit`MakeCppFunction["Name" -> "get", "Return" -> "void", "Body" -> None, "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> getDestType, "Reference" -> True, "Const" -> False|>}, getArgs, params]], FunKit`MakeCppFunction["Name" -> "get", "Return" -> "void", "Body" -> "device::apply([&](const auto...t){get(dest, " <> preArguments <> "t...);}, args);", "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> "IT", "Reference" -> True, "Const" -> False|>}, getArgs, {<|"Name" -> "args", "Type" -> "device::tuple<T...>", "Reference" -> True, "Const" -> True|>}], "Templates" -> {"IT", "...T"}]}
+                                    If[spec["Get"], {FunKit`MakeCppFunction["Name" -> "get", "Return" -> "void", "Body" -> None, "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> getDestType, "Reference" -> True, "Const" -> False|>}, getArgs, params]], FunKit`MakeCppFunction["Name" -> "get", "Return" -> "void", "Body" -> "device::apply([&](const auto...t){get(dest, " <> preArguments <> "t...);}, args);", "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> "IT", "Reference" -> True, "Const" -> False|>}, getArgs, {<|"Name" -> "args", "Type" -> "device::tuple<T...>", "Reference" -> True, "Const" -> True|>}], "Templates" -> {"IT", "...T"}]}, {}]
                                     ,
-                                    Map[FunKit`MakeCppFunction["Name" -> "get", "Return" -> "void", "Body" -> None, "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> #["ReturnType"], "Reference" -> True, "Const" -> False|>}, getArgs, #["Params"]]]&, adSpecs]
+                                    If[spec["Get"], Map[FunKit`MakeCppFunction["Name" -> "get", "Return" -> "void", "Body" -> None, "Parameters" -> Join[{<|"Name" -> "dest", "Type" -> #["ReturnType"], "Reference" -> True, "Const" -> False|>}, getArgs, #["Params"]]]&, adSpecs], {}]
                                     ,
                                     If[TrueQ[spec["MapPoints"]],
                                         Join[
@@ -488,8 +489,10 @@ makeKernel[kernelExpr_, constExpr_, outputs_, OptionsPattern[MakeKernel]] :=
         ExportCode[FileNameJoin[{outputPath, "kernel.hh"}], kernelHeader];
         sources = {FileNameJoin[{outputPath, "src", "constructor.cc"}]};
         ExportCode[sources[[-1]], integratorCpp["Constructor"]];
-        AppendTo[sources, FileNameJoin[{outputPath, "src", "CT_get.cc"}]];
-        ExportCode[sources[[-1]], integratorCpp["CT", "get"]];
+        If[spec["Get"],
+            AppendTo[sources, FileNameJoin[{outputPath, "src", "CT_get.cc"}]];
+            ExportCode[sources[[-1]], integratorCpp["CT", "get"]]
+        ];
         Do[
             AppendTo[sources, FileNameJoin[{outputPath, "src", StringTemplate["CT_map_`1`.cc"][i]}]];
             ExportCode[sources[[-1]], integratorCpp["CT", "map"][[i]]]
@@ -505,8 +508,10 @@ makeKernel[kernelExpr_, constExpr_, outputs_, OptionsPattern[MakeKernel]] :=
             ]
         ];
         If[spec["AD"],
-            AppendTo[sources, FileNameJoin[{outputPath, "src", "AD_get.cc"}]];
-            ExportCode[sources[[-1]], integratorCpp["AD", "get"]];
+            If[spec["Get"],
+                AppendTo[sources, FileNameJoin[{outputPath, "src", "AD_get.cc"}]];
+                ExportCode[sources[[-1]], integratorCpp["AD", "get"]]
+            ];
             Do[
                 AppendTo[sources, FileNameJoin[{outputPath, "src", StringTemplate["AD_map_`1`.cc"][i]}]];
                 ExportCode[sources[[-1]], integratorCpp["AD", "map"][[i]]]

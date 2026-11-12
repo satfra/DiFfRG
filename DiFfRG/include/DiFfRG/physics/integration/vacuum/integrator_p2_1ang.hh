@@ -54,6 +54,59 @@ namespace DiFfRG
         return int_prefactor * powr<dim - 1>(q) * KERNEL::post(P, q, cos, t...);
       }
 
+      // Table form (kernel_has_tab): the kernel's table, forwarded; kernel_tab() and post_tab() add the measure.
+
+      /**
+       * @brief Whether the kernel has a per-run table (see kernel_has_tab).
+       */
+      static constexpr bool has_tab = kernel_has_tab<KERNEL>;
+      /**
+       * @brief Entries per table node.
+       */
+      static constexpr std::size_t tab_size = internal::tab_size_of<KERNEL>();
+      /**
+       * @brief The integration variables the table depends on.
+       */
+      static constexpr auto tab_box_mask = internal::tab_box_mask_of<KERNEL>();
+      /**
+       * @brief The external coordinates the table depends on.
+       */
+      static constexpr auto tab_ext_mask = internal::tab_ext_mask_of<KERNEL>();
+
+      /**
+       * @brief Write the entries of one table node to `out[e * stride]`.
+       */
+      template <typename... T>
+      static KOKKOS_FORCEINLINE_FUNCTION void tab(double *out, const std::size_t stride, const T &...t)
+        requires kernel_has_tab<KERNEL>
+      {
+        KERNEL::tab(out, stride, t...);
+      }
+
+      /**
+       * @brief kernel() with the measure, from the node's table entries `row[e * stride]`.
+       */
+      template <typename... T>
+      static KOKKOS_FORCEINLINE_FUNCTION NT kernel_tab(const ctype *row, const std::size_t stride, const ctype q,
+                                                       const T &...t)
+        requires kernel_has_tab<KERNEL>
+      {
+        using namespace DiFfRG::compute;
+        return int_prefactor * powr<dim - 1>(q) * KERNEL::kernel_tab(row, stride, q, t...);
+      }
+
+      /**
+       * @brief post() with the measure, from the pre() value @p P and the node's table entries `row[e * stride]`.
+       */
+      template <typename PT, typename... T>
+      static KOKKOS_FORCEINLINE_FUNCTION NT post_tab(const PT &P, const ctype *row, const std::size_t stride,
+                                                     const ctype q, const T &...t)
+        requires(kernel_has_tab<KERNEL> && kernel_has_pre<KERNEL>)
+      {
+        using namespace DiFfRG::compute;
+        return int_prefactor * powr<dim - 1>(q) * KERNEL::post_tab(P, row, stride, q, t...);
+      }
+
       template <typename... T>
       static KOKKOS_FORCEINLINE_FUNCTION NT constant(const T &...t)
         requires provides_constant<NT, KERNEL, T...>
