@@ -101,3 +101,41 @@ AUMPTestCase["Without SharedGrids nothing is shared or checked", {"make-kernel",
         AUMPCHECK[StringFreeQ[files["CT_map_1.cc"], "check_shared_grid"]];
     ];
 ];
+
+(* "Get" -> False: a map()-only flow, without get() and the translation unit it is compiled in *)
+AUMPTestCase["Get -> False emits no get()", {"make-kernel", "get"},
+    Module[{files},
+        files = generateFlow["ng", MakeKernel[ZA[l1] / (l1^2 + k^2),
+            "Name" -> "ng", "Integrator" -> "DiFfRG::Integrator_p2", "d" -> 4, "Device" -> "GPU",
+            "IntegrationVariables" -> {"l1"}, "Coordinates" -> {"LinearCoordinates1D<double>"}, "CoordinateArguments" -> {"p"},
+            "Parameters" -> $groupParameters, "Get" -> False]&];
+        AUMPCHECK[StringFreeQ[files["ng.hh"], "void get("]];
+        AUMPCHECK[StringContainsQ[files["ng.hh"], "map(double* dest"]];
+        AUMPCHECK[!KeyExistsQ[files, "CT_get.cc"]];
+        AUMPCHECK[KeyExistsQ[files, "CT_map_1.cc"]];
+        AUMPCHECK[StringFreeQ[files["sources.m"], "CT_get.cc"]];
+    ];
+];
+
+AUMPTestCase["get() is emitted by default", {"make-kernel", "get"},
+    Module[{files},
+        files = generateFlow["dg", MakeKernel[ZA[l1] / (l1^2 + k^2),
+            "Name" -> "dg", "Integrator" -> "DiFfRG::Integrator_p2", "d" -> 4,
+            "IntegrationVariables" -> {"l1"}, "Coordinates" -> {"LinearCoordinates1D<double>"}, "CoordinateArguments" -> {"p"},
+            "Parameters" -> $groupParameters]&];
+        AUMPCHECK[StringContainsQ[files["dg.hh"], "void get("]];
+        AUMPCHECK[StringContainsQ[files["CT_get.cc"], "integrator.get(dest, "]];
+        AUMPCHECK[StringContainsQ[files["sources.m"], "CT_get.cc"]];
+    ];
+];
+
+AUMPTestCase["MakeKernelGroup with Get -> False emits no get()", {"make-kernel", "group", "get", "funkit"},
+    Module[{files = generateFlow["grp", groupOf["Get" -> False]&]},
+        AUMPCHECK[StringFreeQ[files["grp.hh"], "void get("]];
+        AUMPCHECK[!KeyExistsQ[files, "CT_get.cc"]];
+    ];
+];
+
+AUMPTestCase["Get must be a Boolean", {"make-kernel", "get", "abort"},
+    AUMPCHECKAbort[groupOf["Get" -> "no"]];
+];
