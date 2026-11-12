@@ -140,12 +140,8 @@ namespace DiFfRG
      * `run(dest, coordinates)` as a SubCoordinates window, with `dest` offset to match -- also when
      * the slice is the whole grid. `run` is responsible for landing (or deferring) its own result.
      *
-     * Always a window, so that `run` is instantiated for one coordinate type only. A device compiler
-     * gives every kernel its own copy of all the code it calls, so a second, plain-Coordinates branch
-     * would double the device compile time of every map TU. With cacheable positions the window costs
-     * nothing at runtime: the kernels read precomputed positions and never see the coordinate type
-     * (otherwise it is one integer add per point). Check with `cuobjdump -res-usage` on a map TU:
-     * each map kernel appears once.
+     * Always a window, so that every map kernel is compiled once: a second, plain-Coordinates branch
+     * would compile each of them twice, for no difference at runtime.
      *
      * `dest` is a pointer, or a std::array of pointers for a MultiValue result; every array receives
      * the same slice.

@@ -461,7 +461,9 @@ namespace DiFfRG
 
     // ---- Tables (kernel_has_tab) -------------------------------------------------------------------
 
-    /// Whether this kernel provides a per-run table that map() can use.
+    /**
+     * @brief Whether this kernel provides a per-run table that map() can use.
+     */
     static constexpr bool can_tab = [] {
       if constexpr (kernel_has_tab<KERNEL>)
         return KERNEL::tab_box_mask.size() == dim;
@@ -505,7 +507,9 @@ namespace DiFfRG
           x);
     }
 
-    /// kernel() at @p x, @p pos, @p args from its table entries `row[e * stride]`.
+    /**
+     * @brief kernel() at @p x, @p pos, @p args from its table entries `row[e * stride]`.
+     */
     template <typename PosArr, typename ArgTuple>
     KOKKOS_INLINE_FUNCTION static NT tab_value(const ctype *row, const size_t stride, const device::array<ctype, dim> &x,
                                                const PosArr &pos, const ArgTuple &args)
@@ -525,7 +529,9 @@ namespace DiFfRG
           x);
     }
 
-    /// kernel() from its pre() table entry @p P and its table entries `row[e * stride]`.
+    /**
+     * @brief kernel() from its pre() table entry @p P and its table entries `row[e * stride]`.
+     */
     template <typename PT, typename PosArr, typename ArgTuple>
     KOKKOS_INLINE_FUNCTION static NT tab_hoisted_value(const PT &P, const ctype *row, const size_t stride,
                                                        const device::array<ctype, dim> &x, const PosArr &pos,
