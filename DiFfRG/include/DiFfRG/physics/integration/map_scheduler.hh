@@ -102,8 +102,6 @@ namespace DiFfRG
     size_t offset = 0;
     /// Number of grid points; 0 means this rank does not participate in this map().
     size_t count = 0;
-
-    bool owns_all(const size_t grid_size) const { return offset == 0 && count == grid_size; }
   };
 
   /**
