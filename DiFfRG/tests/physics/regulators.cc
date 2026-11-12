@@ -18,12 +18,6 @@ namespace
   template <int n> struct PolynomialExpOrder : PolynomialExpRegulatorOpts {
     static constexpr int order = n;
   };
-  struct AnalyticDelta03 : AnalyticFermionRegulatorOpts {
-    static constexpr double delta = 0.3;
-  };
-  struct AnalyticDelta0 : AnalyticFermionRegulatorOpts {
-    static constexpr double delta = 0.;
-  };
 
   // Every regulator function evaluated in float must stay float -- a double constant anywhere in
   // its body would promote the result -- and agree with the double evaluation to float accuracy.
@@ -54,8 +48,7 @@ TEMPLATE_TEST_CASE("Regulators evaluate in single precision", "[physics][regulat
                    BosonicRegulator<>, ExponentialRegulator<>, SmoothedLitimRegulator<>, RationalExpRegulator<>,
                    RationalExpRegulator<RationalExpOrder<2>>, RationalExpRegulator<RationalExpOrder<5>>,
                    RationalExpRegulator<RationalExpOrder<12>>, RationalExpRegulator<RationalExpOrder<16>>,
-                   PolynomialExpRegulator<>, PolynomialExpRegulator<PolynomialExpOrder<3>>,
-                   AnalyticFermionRegulator<>, AnalyticFermionRegulator<AnalyticDelta03>)
+                   PolynomialExpRegulator<>, PolynomialExpRegulator<PolynomialExpOrder<3>>)
 {
   using R = TestType;
   check_function<R>("RB", [](auto k2, auto q2) { return R::RB(k2, q2); });
@@ -112,8 +105,7 @@ namespace
 TEMPLATE_TEST_CASE("Regulator derivatives match finite differences", "[physics][regulators]", LitimRegulator<>,
                    BosonicRegulator<>, ExponentialRegulator<>, SmoothedLitimRegulator<>, RationalExpRegulator<>,
                    RationalExpRegulator<RationalExpOrder<2>>, RationalExpRegulator<RationalExpOrder<5>>,
-                   PolynomialExpRegulator<>, PolynomialExpRegulator<PolynomialExpOrder<3>>,
-                   AnalyticFermionRegulator<>, AnalyticFermionRegulator<AnalyticDelta03>)
+                   PolynomialExpRegulator<>, PolynomialExpRegulator<PolynomialExpOrder<3>>)
 {
   using R = TestType;
   const auto RB = [](double k2, double q2) { return R::RB(k2, q2); };
@@ -124,30 +116,4 @@ TEMPLATE_TEST_CASE("Regulator derivatives match finite differences", "[physics][
     check_derivative("dq2RB", [](double k2, double q2) { return R::dq2RB(k2, q2); }, d_q2(RB));
   if constexpr (requires { R::dq2RF(1., 1.); })
     check_derivative("dq2RF", [](double k2, double q2) { return R::dq2RF(k2, q2); }, d_q2(RF));
-}
-
-TEST_CASE("AnalyticFermionRegulator: delta = 0 is the base, delta > 0 is analytic at q = 0",
-          "[physics][regulators]")
-{
-  using Base = PolynomialExpRegulator<>;
-  using Zero = AnalyticFermionRegulator<AnalyticDelta0>;
-  using R = AnalyticFermionRegulator<AnalyticDelta03>;
-  const double k2 = 1.3;
-  for (int i = 0; i <= 400; ++i) {
-    const double q2 = k2 * (1e-3 + 4. * i / 400.);
-    CHECK(Zero::RF(k2, q2) == Base::RF(k2, q2));
-    CHECK(Zero::RFdot(k2, q2) == Base::RFdot(k2, q2));
-    CHECK(Zero::dq2RF(k2, q2) == Base::dq2RF(k2, q2));
-    CHECK(R::RB(k2, q2) == Base::RB(k2, q2));
-    // The fermionic dispersion follows the bosonic one, q^2 (1 + r_F)^2 = q^2 + R_B, up to O(delta k^2 / q^2).
-    const double q = std::sqrt(q2), E2 = (q + R::RF(k2, q2)) * (q + R::RF(k2, q2));
-    CHECK(std::abs(E2 - q2 - Base::RB(k2, q2)) <= Base::RB(k2, q2) * R::delta * k2 / q2 + 1e-14 * q2);
-  }
-  // r_F = R_F / q is finite and smooth at q -> 0, with 1 + r_F(0) = sqrt(1 + 1 / delta) since R_B(0) = k^2; the base
-  // grows like k / q instead.
-  const auto rF = [k2](double x) { return R::RF(k2, k2 * x) / std::sqrt(k2 * x); };
-  const double rF0 = std::sqrt(1. + 1. / R::delta) - 1.;
-  CHECK(std::abs(rF(1e-12) - rF0) <= 1e-10);
-  CHECK(std::abs(rF(1e-6) - rF(1e-12)) <= 1e-5);
-  CHECK(Base::RF(k2, k2 * 1e-12) / std::sqrt(k2 * 1e-12) > 1e5);
 }
