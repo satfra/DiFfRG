@@ -98,6 +98,45 @@ namespace DiFfRG
     void reinit_with_size(const int size, const NT T, const NT typical_E = 1.);
 
     /**
+     * @brief The hybrid rule for a summand with structure both below \f$T\f$ and far above it: the lowest modes
+     * summed exactly, the rest integrated.
+     *
+     * \f[
+     *   T \sum_n f(2\pi n T) \approx T f(0) + T \sum_{0 < |n| \le M} f(2\pi n T)
+     *     + \frac{1}{2\pi} \int_{|p_0| > \Lambda} dp_0\, f(p_0) + \text{end corrections}\,,
+     *   \qquad \Lambda = 2\pi (M + \tfrac12) T\,.
+     * \f]
+     * The junction sits midway between two modes, and three Euler-Maclaurin terms (\f$f'\f$, \f$f'''\f$,
+     * \f$f^{(5)}\f$ at \f$\Lambda\f$, by finite differences on the six modes around it) correct the sum-to-integral
+     * step there: modes \f$M-2 \dots M\f$ get reweighted and modes \f$M+1 \dots M+3\f$ are added. The error is then
+     * \f$O((2\pi T/\Lambda)^8)\f$ relative to the tail. The tail is the tangent map of the \f$T = 0\f$ rule, shifted
+     * to start at \f$\Lambda\f$: nodes \f$\Lambda + E\tan\theta_i\f$ with `tail_size` Gauss-Legendre points.
+     *
+     * The light structure must lie well below \f$\Lambda\f$ (see hybrid_exact_modes()); beyond it the summand only
+     * has to be smooth on the scale \f$2\pi T\f$, which a heavy scale \f$E \gg T\f$ is.
+     *
+     * @param T the temperature, positive.
+     * @param exact_modes \f$M \ge 3\f$, the positive modes summed exactly.
+     * @param tail_E the scale of the tail's tangent map, the heavy scale of the summand.
+     * @param tail_size Gauss-Legendre nodes of the tail; values below 16 are raised to 16.
+     */
+    void reinit_hybrid(const NT T, const int exact_modes, const NT tail_E, const int tail_size);
+
+    /**
+     * @brief The number \f$M\f$ of exactly summed modes reinit_hybrid() needs for a summand whose lightest scale is
+     * `light_E`: the junction at \f$\Lambda = 2\pi(M+\tfrac12)T \ge c_J\, c \max(E_l, 2\pi T)\f$, with
+     * \f$c_J = 12\f$ and \f$c\f$ = `precision_factor`, and at least 3.
+     *
+     * \f$c_J = 12\f$ puts the junction error below 2e-10 on the two-scale summands of
+     * tests/physics/integration/finiteT/matsubara_two_scale.cc (light scale from 0.05 T to 25 T, heavy 300 T to
+     * 3000 T, bosonic and fermionic).
+     */
+    static int hybrid_exact_modes(const NT T, const NT light_E, const double precision_factor = 1.);
+
+    /// Nodes of reinit_hybrid() without the zero mode: \f$M\f$ exact modes, 3 correction modes, the tail.
+    static int hybrid_size(const int exact_modes, const int tail_size);
+
+    /**
      * @brief Number of positive Matsubara frequencies \f$2\pi n T \leq\f$ `freq_cutoff`, i.e.
      * \f$\lfloor \mathrm{freq\_cutoff} / (2\pi T) \rfloor\f$.
      *

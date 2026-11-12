@@ -195,6 +195,85 @@ namespace DiFfRG
     write_data(x, w);
   }
 
+  namespace
+  {
+    /**
+     * The junction of the hybrid rule at Lambda = 2 pi (M + 1/2) T, midway between two modes. With h = 2 pi T, the
+     * midpoint Euler-Maclaurin formula for the tail reads
+     *
+     *   h sum_{n > M} f(n h) = int_Lambda^inf f + sum_k beta_k h^(2k) f^(2k-1)(Lambda),  beta_k = -B_2k(1/2) / (2k)!,
+     *
+     * i.e. beta = 1/24, -7/5760, 31/967680. The derivatives are taken by the finite-difference stencil on the six
+     * modes M-2 ... M+3 (offsets -5/2 ... 5/2 in units of h) that reproduces these three terms exactly; its weights,
+     * in units of T, are exact rationals (antisymmetric, so they sum to zero). Index 0 is mode M-2.
+     */
+    constexpr int hybrid_lower = 2; // stencil modes below and at M: M-2, M-1, M
+    constexpr int hybrid_extra = 3; // stencil modes above M: M+1, M+2, M+3
+    constexpr double hybrid_correction[6] = {-367. / 967680.,   4691. / 967680., -26279. / 483840.,
+                                             26279. / 483840., -4691. / 967680., 367. / 967680.};
+    /// c_J: the junction sits at least this many times the light scale (or 2 pi T) above zero; see
+    /// hybrid_exact_modes(). Calibrated on the two-scale summands of matsubara_two_scale.cc: 8 -> 6e-9, 12 -> 2e-10.
+    constexpr double hybrid_junction_factor = 12.;
+  } // namespace
+
+  template <typename NT>
+  int MatsubaraQuadrature<NT>::hybrid_exact_modes(const NT T, const NT light_E, const double precision_factor)
+  {
+    const double c = precision_factor > 0. ? precision_factor : 1.;
+    const double h = 2. * M_PI * double(std::fabs(T));
+    const double scale = std::max(double(std::fabs(light_E)), h);
+    const int M = int(std::ceil(hybrid_junction_factor * c * scale / h - 0.5));
+    return std::max(M, hybrid_lower + 1);
+  }
+
+  template <typename NT> int MatsubaraQuadrature<NT>::hybrid_size(const int exact_modes, const int tail_size)
+  {
+    return exact_modes + hybrid_extra + std::max(tail_size, 16);
+  }
+
+  template <typename NT>
+  void MatsubaraQuadrature<NT>::reinit_hybrid(const NT T, const int exact_modes, const NT tail_E, const int tail_size)
+  {
+    if (!(T > NT(0))) throw std::invalid_argument("MatsubaraQuadrature: reinit_hybrid needs a positive T.");
+    if (exact_modes <= hybrid_lower)
+      throw std::invalid_argument("MatsubaraQuadrature: reinit_hybrid needs at least 3 exact modes.");
+
+    this->T = T;
+    this->typical_E = is_close(tail_E, NT(0)) ? NT(1) : NT(std::fabs(tail_E));
+    const int M = exact_modes;
+    const int n_tail = std::max(tail_size, 16);
+    m_size = hybrid_size(M, n_tail);
+
+    const long double h = 2.0L * (long double)M_PI * (long double)T;
+    std::vector<NT> x(m_size, 0.);
+    std::vector<NT> w(m_size, 0.);
+
+    // The exact modes 1 ... M and the three correction modes M+1 ... M+3, all at weight T times
+    // (1 + correction) below the junction and (correction) above it.
+    for (int n = 1; n <= M + hybrid_extra; ++n) {
+      const int j = n - (M - hybrid_lower); // stencil index, 0 at mode M-2
+      const double corr = (j >= 0 && j < 6) ? hybrid_correction[j] : 0.;
+      x[n - 1] = (NT)(h * n);
+      w[n - 1] = (NT)((long double)T * ((n <= M ? 1.0L : 0.0L) + (long double)corr));
+    }
+
+    // The tail: the T = 0 tangent map (see reinit_0), shifted to start at the junction.
+    Quadrature<NT> quad(n_tail, QuadratureType::legendre);
+    const auto gl_nodes = quad.template nodes<CPU_memory>();
+    const auto gl_weights = quad.template weights<CPU_memory>();
+    const long double Lambda = h * ((long double)M + 0.5L);
+    const long double E = (long double)this->typical_E;
+    constexpr long double half_pi = (long double)M_PI / 2.0L;
+    for (int i = 0; i < n_tail; ++i) {
+      const long double delta = half_pi * (1.0L - (long double)gl_nodes[i]);
+      const long double s = std::sin(delta);
+      x[M + hybrid_extra + i] = (NT)(Lambda + E * std::cos(delta) / s);
+      w[M + hybrid_extra + i] = (NT)(E * (long double)gl_weights[i] / (4.0L * s * s));
+    }
+
+    write_data(x, w);
+  }
+
   template <typename NT>
   void MatsubaraQuadrature<NT>::reinit_finite_interval(const NT cutoff,
                                                        const Kokkos::View<const NT *, CPU_memory> gl_nodes,

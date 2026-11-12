@@ -225,6 +225,7 @@ namespace DiFfRG
 
     /// Set the energy scale the Matsubara rule is built around, replacing \f$k\f$. Zero means: use \f$k\f$.
     void set_typical_E(ctype typical_E) { Base::set_typical_E(typical_E); }
+    void set_light_E(ctype light_E) { Base::set_light_E(light_E); }
 
   private:
     ctype x_extent;

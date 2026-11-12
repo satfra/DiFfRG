@@ -146,6 +146,42 @@ namespace DiFfRG
   }
 
   // ----------------------------------------------------
+  // Setting the light energy scale
+  // ----------------------------------------------------
+
+  /// `T` has a member function `set_light_E(double)`.
+  template <typename T>
+  concept has_set_light_E = requires(T t, double light_E) { t.set_light_E(light_E); };
+
+  /// Calls `integrator.set_light_E(light_E)`.
+  template <typename Int>
+    requires DiFfRG::has_set_light_E<Int>
+  void invoke_set_light_E(Int &integrator, const double light_E)
+  {
+    integrator.set_light_E(light_E);
+  }
+  /// Does nothing: the integrator has no `set_light_E`.
+  template <typename Int>
+    requires(!DiFfRG::has_set_light_E<Int>)
+  void invoke_set_light_E(Int &, const double)
+  {
+    // do nothing
+  }
+  /**
+   * @brief Sets the lightest energy scale with thermal content (see QuadratureIntegrator_fT::set_light_E) on every
+   * integrator of `flow`.
+   *
+   * Calls `set_light_E` on `flow.integrator` and, if present, on `flow.integrator_AD` and `flow.integrator_AD2`.
+   * Members without a `set_light_E` are skipped silently.
+   */
+  template <typename Int> void all_set_light_E(Int &flow, const double light_E)
+  {
+    invoke_set_light_E(flow.integrator, light_E);
+    if constexpr (DiFfRG::has_integrator_AD<Int>) invoke_set_light_E(flow.integrator_AD, light_E);
+    if constexpr (DiFfRG::has_integrator_AD2<Int>) invoke_set_light_E(flow.integrator_AD2, light_E);
+  }
+
+  // ----------------------------------------------------
   // Setting the x-extent
   // ----------------------------------------------------
 

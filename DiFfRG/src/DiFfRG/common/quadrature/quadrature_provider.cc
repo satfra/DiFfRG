@@ -212,6 +212,56 @@ namespace DiFfRG
       return new_it->second;
     }
 
+    MatsubaraQuadrature<double> &MatsubaraStorage::find_hybrid_d(const double T, const int exact_modes,
+                                                                 const double tail_E)
+    {
+      auto T_it = hybrids_d.lower_bound(T);
+      if (!(T_it != hybrids_d.end() && same_key(T_it->first, T))) {
+        if (T_it != hybrids_d.begin() && same_key(std::prev(T_it)->first, T))
+          T_it = std::prev(T_it);
+        else
+          T_it = hybrids_d.insert(std::make_pair(T, std::map<int, std::map<double, MatsubaraQuadrature<double>>>()))
+                     .first;
+      }
+      auto &by_E = T_it->second[exact_modes];
+      // tail_E is already rounded to a power of 2^(1/4) by the caller, so an exact lookup is the right one.
+      auto it = by_E.find(tail_E);
+      if (it != by_E.end()) return it->second;
+
+      auto new_it = by_E.insert(std::make_pair(tail_E, MatsubaraQuadrature<double>())).first;
+      new_it->second.reinit_hybrid(T_it->first, exact_modes, tail_E, vacuum_quad_size);
+      if (verbosity >= 0)
+        log.info("Created hybrid MatsubaraQuadrature<double> with T = {:.4}, {} exact modes and tail scale {:.4}, "
+                 "size = {}",
+                 T_it->first, exact_modes, tail_E, new_it->second.size());
+      return new_it->second;
+    }
+
+    MatsubaraQuadrature<float> &MatsubaraStorage::find_hybrid_f(const float T, const int exact_modes,
+                                                                const double tail_E)
+    {
+      auto T_it = hybrids_f.lower_bound((double)T);
+      if (!(T_it != hybrids_f.end() && same_key(T_it->first, (double)T))) {
+        if (T_it != hybrids_f.begin() && same_key(std::prev(T_it)->first, (double)T))
+          T_it = std::prev(T_it);
+        else
+          T_it = hybrids_f
+                     .insert(std::make_pair((double)T, std::map<int, std::map<double, MatsubaraQuadrature<float>>>()))
+                     .first;
+      }
+      auto &by_E = T_it->second[exact_modes];
+      auto it = by_E.find(tail_E);
+      if (it != by_E.end()) return it->second;
+
+      auto new_it = by_E.insert(std::make_pair(tail_E, MatsubaraQuadrature<float>())).first;
+      new_it->second.reinit_hybrid((float)T_it->first, exact_modes, (float)tail_E, vacuum_quad_size);
+      if (verbosity >= 0)
+        log.info("Created hybrid MatsubaraQuadrature<float> with T = {:.4}, {} exact modes and tail scale {:.4}, "
+                 "size = {}",
+                 T_it->first, exact_modes, tail_E, new_it->second.size());
+      return new_it->second;
+    }
+
     void MatsubaraStorage::set_verbosity(int v) { verbosity = v; }
     void MatsubaraStorage::set_vacuum_quad_size(const int size)
     {

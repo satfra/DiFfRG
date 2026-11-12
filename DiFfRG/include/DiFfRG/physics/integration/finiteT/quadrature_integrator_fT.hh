@@ -167,14 +167,11 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Set the energy scale the frequency rule is sized for, replacing \f$k\f$. Zero (default) means \f$k\f$.
+     * @brief Set the heaviest energy scale of the summand, replacing \f$k\f$. Zero (default) means \f$k\f$.
      *
      * It decides how far the Matsubara rule must reach and where the \f$T = 0\f$ integral places its nodes, and so
-     * also whether the sum or the integral is used.
-     *
-     * Report the scale whose thermal content matters, not simply the largest one present: a
-     * summand carrying a scale below `typical_E` has its thermal content silently discarded when
-     * the rule hands over to the integral, and nothing here can know it was there.
+     * also whether the node budget allows the sum. Report the largest scale the summand carries (e.g.
+     * \f$\sqrt{k^2 + m^2}\f$ of its heaviest line); its lightest scale goes to set_light_E().
      *
      * Set it from replicated or all-reduced data only. It sizes the frequency rule, so a value
      * derived from rank-local data on a distributed grid makes the node count differ between
@@ -187,6 +184,27 @@ namespace DiFfRG
       if (is_close(m_typical_E_user, typical_E, 1e-6 * std::fabs(typical_E))) return;
 
       m_typical_E_user = typical_E;
+      refresh_matsubara();
+    }
+
+    /**
+     * @brief Set the lightest energy scale of the summand that carries thermal content, replacing \f$k\f$. Negative
+     * means \f$k\f$ (the default); zero is a valid scale, e.g. a mode at convexity restoration.
+     *
+     * Only consulted when the Monien rule sized for set_typical_E() does not fit `max_matsubara_size`: then the
+     * frequency sum is replaced by the \f$T = 0\f$ integral if this scale is at least \f$30\,T\f$ (its thermal
+     * content is then \f$\sim 10^{-13}\f$), and by the hybrid rule otherwise, which sums the modes up to about
+     * \f$12\max(E_\text{light}, 2\pi T)\f$ exactly and integrates the rest (see MatsubaraQuadrature::reinit_hybrid).
+     * Report e.g. \f$\sqrt{k^2 + m^2}\f$ of the lightest line, with \f$m^2\f$ clipped at zero: near convexity
+     * restoration that can lie far below \f$k\f$.
+     *
+     * Same distribution rule as set_typical_E(): replicated or all-reduced data only.
+     */
+    void set_light_E(const ctype light_E)
+    {
+      if (is_close(m_light_E_user, light_E, 1e-6 * std::fabs(light_E))) return;
+
+      m_light_E_user = light_E;
       refresh_matsubara();
     }
 
@@ -236,6 +254,9 @@ namespace DiFfRG
 
     /// True if the frequency axis is currently the exact sum rather than a Gaussian quadrature rule.
     bool uses_exact_matsubara_sum() const { return m_using_exact; }
+
+    /// True if the frequency axis is currently the hybrid rule (exact low modes, integrated tail); see refresh_matsubara().
+    bool uses_hybrid_matsubara_rule() const { return m_using_hybrid; }
 
     /**
      * @brief One Matsubara node's contribution at one spatial point, weight excluded.
@@ -1052,24 +1073,25 @@ namespace DiFfRG
     }
 
     /**
-     * @brief Re-select and re-fetch the frequency rule after T, k, typical_E or the cutoff changed.
+     * @brief Re-select and re-fetch the frequency rule after T, k, typical_E, light_E or the cutoff changed.
      *
-     * Three rules are on offer, and every choice between them is made here rather than inside
+     * Every choice between the rules below is made here rather than inside
      * MatsubaraQuadrature, because they are questions about the summand's SPECTRUM and only this
-     * class is told about it (through `k` and `typical_E`).
+     * class is told about it (through `k`, `typical_E` and `light_E`).
      *
-     * 1. Sum or integral, and with how many nodes -- one question, decided on cost alone. Size the
-     *    Monien rule to reach past `typical_E`; if that fits `max_matsubara_size`, sum. If it does
-     *    not, a clamped sum would no longer reach the structure it was sized for, so integrate
-     *    instead. The error that switch commits is then bounded by a budget the user sets, rather
-     *    than by a constant claiming the thermal content has died away -- a claim that was wrong
-     *    by nine orders for a 4D-regulated summand, which has no pole for the `4 exp(-E/T)` law to
-     *    apply to (Part 13 of the convergence study: 3.1e-4 measured against 1.9e-13 claimed).
+     * 1. Sum, integral or hybrid, and with how many nodes. Size the Monien rule to reach past
+     *    `typical_E`; if that fits `max_matsubara_size`, sum. If it does not, a clamped sum would no
+     *    longer reach the structure it was sized for, so the tail has to be integrated: entirely
+     *    (the T = 0 rule) if the lightest scale is at least 30 T, where its thermal content is
+     *    ~4e-13, and otherwise beyond the lowest modes only, which are summed exactly (the hybrid
+     *    rule). The error of the switch is thus bounded by a budget the user sets rather than by a
+     *    constant claiming the thermal content has died away -- a claim that was wrong by nine
+     *    orders for a 4D-regulated summand, which has no pole for the `4 exp(-E/T)` law to apply to
+     *    (Part 13 of the convergence study: 3.1e-4 measured against 1.9e-13 claimed). For such a
+     *    summand light_E ~ typical_E ~ k, so it never reaches the hybrid rule.
      *
-     *    What the switch still cannot see is a scale in the summand LIGHTER than `typical_E`: the
-     *    integral discards its thermal content and nothing here knows it is there. That is the
-     *    reason `typical_E` is worth setting, and the reason it should be the scale that matters
-     *    rather than the largest one present.
+     *    Without the hybrid rule, the integral discarded the thermal content of any scale lighter
+     *    than `typical_E`: O(1) for k << T << typical_E (tests/.../matsubara_two_scale.cc).
      *
      * 2. Which scale to size against. The reach must cover `typical_E` with a multiplier well
      *    above one, or the rule places no nodes where the structure lives. This is not a tail
@@ -1104,14 +1126,52 @@ namespace DiFfRG
       // was tried and is wrong: it makes the budget test below fire on a scale the summand does
       // not have, sending a genuinely thermal sum to the vacuum rule.
       const ctype E = m_typical_E_user > ctype(0) ? m_typical_E_user : m_k;
+      // The lightest scale with thermal content: what the model said (zero included), or k.
+      const ctype E_light = m_light_E_user >= ctype(0) ? m_light_E_user : m_k;
 
-      // Choice 1: build the Monien rule if it fits the budget, otherwise integrate. A T of zero is
-      // how the provider is asked for the vacuum rule; it takes the same scale, since its tangent
-      // map spends its nodes around E and covers the algebraic tail by construction.
-      const bool vacuum = !(T > ctype(0)) || quadrature_provider.template matsubara_predicted_size<ctype>(T, E) >
-                                                 quadrature_provider.max_matsubara_size();
-
-      const auto &standard = quadrature_provider.template matsubara_rule<ctype>(vacuum ? ctype(0) : T, E);
+      // Choice 1: the Monien rule if it fits the budget. A T of zero is how the provider is asked
+      // for the vacuum rule; it takes the same scale, since its tangent map spends its nodes around
+      // E and covers the algebraic tail by construction.
+      //
+      // Over budget, the integral is right only if nothing in the summand is light: it discards
+      // the thermal content of the lightest scale, ~4 exp(-E_light / T), which is 4e-13 at
+      // E_light = 30 T but O(1) at E_light ~ T. A summand with a scale below T next to one far above
+      // it (k << T << typical_E, or a mode near convexity restoration next to a heavy one) gets the
+      // hybrid rule instead: the low modes summed exactly, the tail integrated. Neither choice
+      // exceeds the budget. When E_light ~ E -- every summand of a model that never calls
+      // set_light_E, at k >> T -- this is the old handover unchanged, which also matters for
+      // compactly supported (4D-regulated) summands, whose aliasing the budget is what bounds.
+      const bool thermal = T > ctype(0);
+      const bool over_budget = thermal && quadrature_provider.template matsubara_predicted_size<ctype>(T, E) >
+                                              quadrature_provider.max_matsubara_size();
+      const MatsubaraQuadrature<ctype> *chosen;
+      m_using_hybrid = false;
+      if (!over_budget)
+        chosen = &quadrature_provider.template matsubara_rule<ctype>(T, E);
+      else if (E_light >= ctype(vacuum_min_light_over_T) * T)
+        chosen = &quadrature_provider.template matsubara_rule<ctype>(ctype(0), E);
+      else {
+        const int tail = quadrature_provider.vacuum_quad_size();
+        int M = MatsubaraQuadrature<ctype>::hybrid_exact_modes(T, E_light,
+                                                                 quadrature_provider.matsubara_precision_factor());
+        const int M_max = quadrature_provider.max_matsubara_size() - MatsubaraQuadrature<ctype>::hybrid_size(0, tail);
+        if (M > M_max) {
+          // Only reachable with a raised precision factor or a lowered budget: with the defaults M <= 57 < 61.
+          static bool warned = false;
+          if (!warned) {
+            warned = true;
+            std::cerr << "QuadratureIntegrator_fT: the hybrid Matsubara rule wants " << M
+                      << " exact modes at T = " << T << ", light scale " << E_light
+                      << ", but max_matsubara_size leaves room for " << M_max
+                      << "; the junction moves closer to the light scale and the rule loses accuracy. Raise "
+                         "max_matsubara_size. (warned once)\n";
+          }
+          M = std::max(M_max, 3);
+        }
+        chosen = &quadrature_provider.template matsubara_hybrid<ctype>(T, M, E);
+        m_using_hybrid = true;
+      }
+      const auto &standard = *chosen;
       m_using_exact = false;
 
       // Which rule the finite-extent side should run on. Never *less* accurate than the Gaussian
@@ -1248,6 +1308,12 @@ namespace DiFfRG
     ctype m_k;
     /// The model's heaviest scale, or zero if it never said; see set_typical_E().
     ctype m_typical_E_user = 0;
+    /// The model's lightest scale with thermal content, or negative if it never said; see set_light_E().
+    ctype m_light_E_user = -1;
+    bool m_using_hybrid = false;
+    /// Over budget, the T = 0 integral is used only if the lightest scale is at least this many T: its thermal
+    /// content, ~4 exp(-E_light / T), is then 4e-13. Below, the hybrid rule.
+    static constexpr double vacuum_min_light_over_T = 30.;
     /// Support boundary in frequency; zero means "unknown", which disables the exact sum.
     ctype m_freq_cutoff = 0;
     /// Nodes before the boundary of the concatenated axis of a split kernel; 0 when not split.

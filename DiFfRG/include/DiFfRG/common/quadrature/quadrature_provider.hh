@@ -2,6 +2,7 @@
 
 // standard library
 #include <atomic>
+#include <cmath>
 
 // DiFfRG
 #include <DiFfRG/common/config_tree.hh>
@@ -71,6 +72,29 @@ namespace DiFfRG
       }
 
       /**
+       * @brief The hybrid rule (exact low modes, integrated tail); see MatsubaraQuadrature::reinit_hybrid.
+       *
+       * Keyed on (T, exact modes, tail scale). The tail scale tracks the heavy scale of the summand and so moves
+       * every RG step; it is rounded to the nearest power of 2^(1/4) first. The tangent map is insensitive to its
+       * scale at that level (it only has to be of the order of the heavy scale), and the rounding lets neighbouring
+       * steps share a rule instead of each building one that the cache, which never evicts, would keep.
+       */
+      template <typename NT = double>
+      MatsubaraQuadrature<NT> &get_matsubara_hybrid(const NT T, const int exact_modes, const NT tail_E)
+      {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const double E = std::exp2(std::round(4. * std::log2(std::max(double(std::fabs(tail_E)), 1e-300))) / 4.);
+
+        if constexpr (std::is_same_v<NT, double>) {
+          return find_hybrid_d(T, exact_modes, E);
+        } else if constexpr (std::is_same_v<NT, float>) {
+          return find_hybrid_f(T, exact_modes, E);
+        }
+        static_assert(std::is_same_v<NT, double> || std::is_same_v<NT, float>,
+                      "Unknown type requested of MatsubaraStorage::get_matsubara_hybrid");
+      }
+
+      /**
        * @brief Gauss-Legendre over [-cutoff, cutoff] for a summand of finite extent; see
        * MatsubaraQuadrature::reinit_finite_interval.
        *
@@ -105,6 +129,10 @@ namespace DiFfRG
 
       /// The node ceiling every rule built here is clamped to.
       int get_max_matsubara_size() const { return max_matsubara_size; }
+      /// Nodes of the T = 0 rule, and of the hybrid rule's tail.
+      int get_vacuum_quad_size() const { return vacuum_quad_size; }
+      /// `/integration/matsubara_precision_factor`.
+      double get_matsubara_precision_factor() const { return matsubara_precision_factor; }
 
       /**
        * @brief Nodes the Monien rule would want at (T, typical_E) under THIS provider's dials.
@@ -165,6 +193,14 @@ namespace DiFfRG
 
       IntervalStorageType<double> intervals_d;
       IntervalStorageType<float> intervals_f;
+
+      /// Hybrid rules by T, exact modes and (rounded) tail scale.
+      template <typename NT = double>
+      using HybridStorageType = std::map<double, std::map<int, std::map<double, MatsubaraQuadrature<NT>>>>;
+      MatsubaraQuadrature<double> &find_hybrid_d(const double T, const int exact_modes, const double tail_E);
+      MatsubaraQuadrature<float> &find_hybrid_f(const float T, const int exact_modes, const double tail_E);
+      HybridStorageType<double> hybrids_d;
+      HybridStorageType<float> hybrids_f;
 
       int verbosity = 0;
       // These must agree with the ConfigTree defaults read in QuadratureProvider's
@@ -318,6 +354,23 @@ namespace DiFfRG
 
     /// `/integration/max_matsubara_size`, the largest Monien rule this provider builds.
     int max_matsubara_size() const { return matsubara_storage.get_max_matsubara_size(); }
+
+    /// `/integration/vacuum_quad_size`, the nodes of the T = 0 rule and of the hybrid rule's tail.
+    int vacuum_quad_size() const { return matsubara_storage.get_vacuum_quad_size(); }
+
+    /// `/integration/matsubara_precision_factor`.
+    double matsubara_precision_factor() const { return matsubara_storage.get_matsubara_precision_factor(); }
+
+    /**
+     * @brief The hybrid rule for a summand with structure below T and a heavy scale far above it: `exact_modes`
+     * modes summed exactly, the tail integrated with a tangent map of scale `tail_E` and vacuum_quad_size() nodes.
+     * See MatsubaraQuadrature::reinit_hybrid.
+     */
+    template <typename NT = double>
+    const MatsubaraQuadrature<NT> &matsubara_hybrid(const NT T, const int exact_modes, const NT tail_E)
+    {
+      return matsubara_storage.get_matsubara_hybrid<NT>(T, exact_modes, tail_E);
+    }
 
     /// Nodes the Monien rule would need at (`T`, `typical_E`) with this provider's precision factor, before clamping;
     /// see MatsubaraQuadrature::predict_size().
