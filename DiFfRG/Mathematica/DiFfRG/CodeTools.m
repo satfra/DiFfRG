@@ -295,11 +295,14 @@ updateCMake[varName_:"Flows"] :=
   Module[{folders, sources, cmake, fileName = FileNameJoin[{flowDir, "CMakeLists.txt"}], flowFolderName},
     flowFolderName = StringSplit[flowDir, "/"][[-1]];
     folders = Select[FileNames["*", flowDir, 1], DirectoryQ];
-    sources = Flatten @ Join[Map[Get[# <> "/sources.m"]&, folders]];
+    (* make -j starts the sources in the order listed, and their compile time grows with the size of the
+       flow headers they include. Heaviest first: flows.cc (includes them all), then the flows by the size
+       of their headers, so the longest compiles do not start last. *)
+    folders = SortBy[folders, -Total[FileByteCount /@ FileNames["*.hh", #]]&];
+    sources = Flatten @ Join[{"${CMAKE_CURRENT_SOURCE_DIR}/flows.cc"}, Map[Get[# <> "/sources.m"]&, folders]];
     sources = "    " <> StringRiffle[sources, "\n    "];
-    cmake = "set(" <> varName <> "_SOURCES 
-" <> sources <> "
-    ${CMAKE_CURRENT_SOURCE_DIR}/flows.cc)
+    cmake = "set(" <> varName <> "_SOURCES
+" <> sources <> ")
 
 add_library(" <> varName <> " STATIC ${" <> varName <> "_SOURCES})
 add_library(" <> varName <> "_nowarn INTERFACE)
