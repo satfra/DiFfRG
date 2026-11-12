@@ -174,13 +174,6 @@ namespace
       check_map(provider, ext, 0.6, 0.2, z, tabbed);
     }
 
-    SECTION("set_trace_tables(false) evaluates the kernel")
-    {
-      auto tabbed = make<HoistedTabKernel, ExecutionSpace>(provider);
-      tabbed.set_trace_tables(false);
-      check_map(provider, ext, 0.6, 0.2, z, tabbed);
-    }
-
     SECTION("the table follows the grids, not the arguments")
     {
       auto tabbed = make<HoistedTabKernel, ExecutionSpace>(provider);

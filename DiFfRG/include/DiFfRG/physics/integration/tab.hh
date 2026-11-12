@@ -6,7 +6,6 @@
 // std
 #include <array>
 #include <cstddef>
-#include <cstdlib>
 #include <string>
 
 /**
@@ -59,13 +58,6 @@ namespace DiFfRG
       Kokkos::View<unsigned *, memory_space> shape_of; ///< external linear index -> shape
       std::size_t n_shape = 0, n_box = 0;
       std::string key;
-
-      /// Tables are used unless DIFFRG_NO_TRACE_TABLES is set (an A/B switch needing no code change).
-      static bool env_enabled()
-      {
-        static const bool on = std::getenv("DIFFRG_NO_TRACE_TABLES") == nullptr;
-        return on;
-      }
     };
 
     /// The `tab_box_mask` / `tab_ext_mask` of `K`, or empty ones; for adapters that forward a kernel's table form.

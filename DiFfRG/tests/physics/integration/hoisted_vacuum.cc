@@ -175,15 +175,6 @@ namespace
         }
     }
 
-    SECTION("set_hoist(false) evaluates kernel() only")
-    {
-      double r_on{}, r_off{};
-      hoisted.get(r_on, 0.8, 0.5, 0.3, z);
-      hoisted.set_hoist(false);
-      hoisted.get(r_off, 0.8, 0.5, 0.3, z);
-      REQUIRE(close(r_off, r_on));
-    }
-
     SECTION("reused table follows its inputs")
     {
       auto both = [&](const double a) {
