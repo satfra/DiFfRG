@@ -116,6 +116,7 @@ The most important options to pass to the top-level `cmake` invocation are:
 - `-DMPI=ON/OFF` — MPI support (default `OFF`; a library build configured from `DiFfRG/` against an existing bundle defaults to what the bundle was built with). This is a single switch for the whole superbuild: deal.II, SUNDIALS, PETSc and DiFfRG must all agree about MPI, so it cannot be enabled for DiFfRG alone afterwards.
 - `-DNATIVE=ON/OFF` — optimize for the build machine's CPU (`-march=native`). Disable for portable binaries (default `ON`).
 - `-DDiFfRG_CUDA_ARCH=<list>` — the GPU compute capabilities to compile for, e.g. `90` or `80;90` (also accepted in dotted form, `9.0`). Defaults to the GPUs found on the build machine via `nvidia-smi`; `bundled` keeps whatever the dependency bundle was built for. See {ref}`choosing-the-gpu-architecture`.
+- `-DDiFfRG_PTXAS_SPLIT_COMPILE=<N>` — let `ptxas` compile up to `N` kernels of a translation unit at once (`0`: one per CPU; default empty, i.e. off). The machine code is unchanged, but each kernel in flight needs its own memory, and only translation units with several large kernels get faster. Can also be set when configuring an application.
 - `-DDIFFRG_TEST=ON` — build the test suite (default `OFF`).
 - `-DDIFFRG_DOCS=ON` — build this documentation (default `ON`).
 - `-DDIFFRG_DOCS_ONLY=ON` — when configuring `DiFfRG/` directly, set up only the documentation target and skip the library (default `OFF`).

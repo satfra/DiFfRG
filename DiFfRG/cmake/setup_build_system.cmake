@@ -406,6 +406,13 @@ set(DiFfRG_CUDA_ARCH
 
 include(${CMAKE_CURRENT_LIST_DIR}/cuda_arch.cmake)
 
+set(DiFfRG_PTXAS_SPLIT_COMPILE
+    ""
+    CACHE
+      STRING
+      "Let ptxas compile up to N kernels of a translation unit in parallel (0: one per CPU; empty: off). Same SASS, more peak memory."
+)
+
 # The inherited flag is also how we tell whether this bundle has CUDA at all --
 # there is no other record of it in the installed dependency tree.
 set(DiFfRG_CUDA_ARCH_RESOLVED "")
@@ -480,6 +487,28 @@ if(_diffrg_kokkos_opts MATCHES "-arch=sm_([0-9]+)")
     list(APPEND _diffrg_arch_names "sm_${_cc}")
   endforeach()
   list(JOIN _diffrg_arch_names "," DiFfRG_CUDA_ARCH_DISPLAY)
+
+  # Parallel ptxas, opt-in. ptxas compiles the kernels of a translation unit one
+  # after another; --split-compile=N lets it compile up to N at once (0: one per
+  # CPU). The SASS is unchanged, but every kernel in flight needs its own working
+  # set, so peak memory grows accordingly, and only a TU with several heavy
+  # kernels gains -- e.g. a trace-table flow's map TU (map kernel + table fill):
+  # 1.5x at 1.4x the memory, measured; nothing on a TU with one heavy kernel.
+  if(NOT DiFfRG_PTXAS_SPLIT_COMPILE STREQUAL "")
+    if(NOT DiFfRG_PTXAS_SPLIT_COMPILE MATCHES "^[0-9]+$")
+      message(
+        FATAL_ERROR
+          "DiFfRG_PTXAS_SPLIT_COMPILE must be a non-negative integer (or empty for off), got \"${DiFfRG_PTXAS_SPLIT_COMPILE}\"."
+      )
+    endif()
+    set_property(
+      TARGET dealii::interface_kokkos
+      APPEND
+      PROPERTY
+        INTERFACE_COMPILE_OPTIONS
+        "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xptxas --split-compile=${DiFfRG_PTXAS_SPLIT_COMPILE}>"
+    )
+  endif()
 endif()
 
 # CUDA stub-RUNPATH guard. Offline (driverless) builds link the CUDA driver
