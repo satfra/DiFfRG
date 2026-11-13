@@ -1388,26 +1388,27 @@ namespace DiFfRG
           }
         }
         m_map_points.run(space, dest, [&](const auto &result) { launch_map_points_tab(result, n, device_args); });
-        return;
-      }
-      if constexpr (can_hoist) {
-        // Hoisted unless pre() reads an argument given per point.
-        bool hoist = true;
-        size_t i = dim;
-        ((hoist = hoist && !(args.per_point() && internal::pre_reads<KERNEL>(i)), ++i), ...);
-        if (hoist) {
-          using PT = decltype(device::apply(
-              [](const auto &...a) { return pre_value(ctype(0), device::tuple<>{}, device::tie(a(0)...)); },
-              device_args));
-          PT *table = pre_table_storage<PT>();
-          m_pre_table.refresh(pre_table_key<PT>(dim, args.value...), space, space,
-                              [&] { fill_pre_table_points(table, device_args); });
-          m_map_points.run(space, dest,
-                           [&](const auto &result) { launch_map_points_hoisted(result, n, device_args, table); });
-          return;
+      } else {
+        // Only without a table: every launch instantiated here carries its own copy of the kernel's traces.
+        if constexpr (can_hoist) {
+          // Hoisted unless pre() reads an argument given per point.
+          bool hoist = true;
+          size_t i = dim;
+          ((hoist = hoist && !(args.per_point() && internal::pre_reads<KERNEL>(i)), ++i), ...);
+          if (hoist) {
+            using PT = decltype(device::apply(
+                [](const auto &...a) { return pre_value(ctype(0), device::tuple<>{}, device::tie(a(0)...)); },
+                device_args));
+            PT *table = pre_table_storage<PT>();
+            m_pre_table.refresh(pre_table_key<PT>(dim, args.value...), space, space,
+                                [&] { fill_pre_table_points(table, device_args); });
+            m_map_points.run(space, dest,
+                             [&](const auto &result) { launch_map_points_hoisted(result, n, device_args, table); });
+            return;
+          }
         }
+        m_map_points.run(space, dest, [&](const auto &result) { launch_map_points(result, n, device_args); });
       }
-      m_map_points.run(space, dest, [&](const auto &result) { launch_map_points(result, n, device_args); });
     }
 
     /// Storage for the pre() table with entries of type PT.
