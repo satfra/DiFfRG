@@ -483,6 +483,7 @@ namespace DiFfRG
       get(space, m_result_view, t...);
       Kokkos::deep_copy(space, m_result_host, m_result_view);
       space.fence();
+      check_device_errors("QuadratureIntegrator_fT::get");
       dest = m_result_host();
     }
 
