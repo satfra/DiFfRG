@@ -132,6 +132,9 @@ namespace DiFfRG
       }
 
       Kokkos::fence("DiFfRG::MapCompletion::flush");
+      // Before the copies land, not after: a map whose kernel never launched would otherwise copy whatever was in the
+      // device buffer into the caller's state and the flow would continue on it. See check_device_errors().
+      check_device_errors("DiFfRG::MapCompletion::flush");
       auto &p = pending();
       for (const auto &c : p)
         land(c);
