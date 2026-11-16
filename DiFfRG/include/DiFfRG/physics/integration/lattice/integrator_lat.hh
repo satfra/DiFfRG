@@ -203,6 +203,7 @@ namespace DiFfRG
       reduce(m_space, m_result_view, t...);
       Kokkos::deep_copy(m_space, m_result_host, m_result_view);
       m_space.fence();
+      check_device_errors("IntegratorLat::get");
       dest = m_result_host();
     }
 

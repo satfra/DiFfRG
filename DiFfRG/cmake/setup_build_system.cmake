@@ -511,6 +511,89 @@ if(_diffrg_kokkos_opts MATCHES "-arch=sm_([0-9]+)")
   endif()
 endif()
 
+# ----------------------------------------------------------------------------
+# CUDA toolkit guard.
+#
+# libDiFfRG and the whole dependency bundle are compiled and linked against one
+# CUDA runtime. A consumer's device code, however, is compiled by whichever nvcc
+# the bundle's nvcc_wrapper finds: $CUDA_ROOT if that is set, otherwise the first
+# nvcc on PATH. On a machine whose default CUDA differs from the one the install
+# was built with, every build path that does not set CUDA_ROOT -- a plain
+# `cmake --build`, an IDE, a batch job without the module -- silently mixes the
+# two. Nothing warns at configure or compile time, and the binary dies at the
+# first map() with SIGFPE, in a Kokkos launch whose block size came back 0: the
+# backtrace points into DiFfRG and says nothing about the toolchain.
+#
+# This is the same split the architecture handling above closes for sm_XX, so it
+# is handled the same way: the install records what it was built with
+# (Config.cmake.in hands it to consumers as DiFfRG_CUDA_VERSION_LIBRARY) and a
+# consumer that would use a different major version stops here.
+set(DiFfRG_CUDA_ROOT_DETECTED "")
+set(DiFfRG_CUDA_VERSION_DETECTED "")
+if(NOT DiFfRG_CUDA_ARCH_BUNDLED STREQUAL "")
+  option(
+    DiFfRG_ALLOW_CUDA_TOOLKIT_MISMATCH
+    "Configure even though nvcc's major version differs from the one DiFfRG was built with."
+    OFF)
+
+  # Resolved exactly as nvcc_wrapper does, so that this sees the compiler the
+  # build will actually use and not some other nvcc on the machine.
+  if(NOT "$ENV{CUDA_ROOT}" STREQUAL "")
+    # As in nvcc_wrapper, CUDA_ROOT wins unconditionally -- including when it
+    # points at nothing, in which case the version stays unknown and the check
+    # below does not run rather than vouching for some other nvcc.
+    set(_diffrg_nvcc "$ENV{CUDA_ROOT}/bin/nvcc")
+  else()
+    find_program(DiFfRG_NVCC_EXECUTABLE nvcc)
+    set(_diffrg_nvcc "${DiFfRG_NVCC_EXECUTABLE}")
+  endif()
+
+  if(_diffrg_nvcc)
+    execute_process(
+      COMMAND "${_diffrg_nvcc}" --version
+      OUTPUT_VARIABLE _diffrg_nvcc_banner
+      ERROR_QUIET
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(_diffrg_nvcc_banner MATCHES "release ([0-9]+)\\.([0-9]+)")
+      set(DiFfRG_CUDA_VERSION_DETECTED "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}")
+      get_filename_component(_diffrg_cuda_bin "${_diffrg_nvcc}" DIRECTORY)
+      get_filename_component(DiFfRG_CUDA_ROOT_DETECTED "${_diffrg_cuda_bin}"
+                             DIRECTORY)
+    endif()
+  endif()
+
+  # Only a consumer has this: in DiFfRG's own build nothing has filled it in, and
+  # the detected toolkit *is* the one the library is being built with.
+  if(NOT "${DiFfRG_CUDA_VERSION_LIBRARY}" STREQUAL ""
+     AND NOT "${DiFfRG_CUDA_VERSION_DETECTED}" STREQUAL "")
+    string(REGEX REPLACE "\\..*" "" _diffrg_cuda_major_library
+                         "${DiFfRG_CUDA_VERSION_LIBRARY}")
+    string(REGEX REPLACE "\\..*" "" _diffrg_cuda_major_detected
+                         "${DiFfRG_CUDA_VERSION_DETECTED}")
+    if(NOT _diffrg_cuda_major_library EQUAL _diffrg_cuda_major_detected)
+      set(_diffrg_cuda_mismatch
+          "This build would compile device code with CUDA ${DiFfRG_CUDA_VERSION_DETECTED} (${_diffrg_nvcc}), but DiFfRG and its dependency bundle were built with CUDA ${DiFfRG_CUDA_VERSION_LIBRARY}"
+      )
+      if(NOT DiFfRG_CUDA_ROOT_LIBRARY STREQUAL "")
+        string(APPEND _diffrg_cuda_mismatch " (${DiFfRG_CUDA_ROOT_LIBRARY})")
+      endif()
+      string(
+        APPEND
+        _diffrg_cuda_mismatch
+        ". Mixing the two produces a binary that links and then faults at the first "
+        "GPU integration. Point the build at the matching toolkit -- export "
+        "CUDA_ROOT=<toolkit>, which is what the bundle's nvcc_wrapper reads -- or "
+        "reinstall DiFfRG against the toolkit you want. Set "
+        "-DDiFfRG_ALLOW_CUDA_TOOLKIT_MISMATCH=ON to configure anyway.")
+      if(DiFfRG_ALLOW_CUDA_TOOLKIT_MISMATCH)
+        message(WARNING "${_diffrg_cuda_mismatch}")
+      else()
+        message(FATAL_ERROR "${_diffrg_cuda_mismatch}")
+      endif()
+    endif()
+  endif()
+endif()
+
 # CUDA stub-RUNPATH guard. Offline (driverless) builds link the CUDA driver
 # API against the toolkit's *stub* libcuda.so; that is fine -- dynamic linking
 # records only the SONAME -- unless the stubs directory leaks into a RUNPATH,
@@ -896,6 +979,16 @@ endif()
 if(NOT DiFfRG_CUDA_ARCH_BUNDLED STREQUAL "")
   _diffrg_summary_row("CUDA arch" "${DiFfRG_CUDA_ARCH_DISPLAY}"
                       "bundled Kokkos: sm_${DiFfRG_CUDA_ARCH_BUNDLED}")
+  if(NOT DiFfRG_CUDA_VERSION_DETECTED STREQUAL "")
+    if(DiFfRG_CUDA_VERSION_LIBRARY STREQUAL "")
+      _diffrg_summary_row("CUDA toolkit" "${DiFfRG_CUDA_VERSION_DETECTED}"
+                          "${DiFfRG_CUDA_ROOT_DETECTED}")
+    else()
+      _diffrg_summary_row(
+        "CUDA toolkit" "${DiFfRG_CUDA_VERSION_DETECTED}"
+        "DiFfRG was built with ${DiFfRG_CUDA_VERSION_LIBRARY}")
+    endif()
+  endif()
 endif()
 message(
   "${BoldWhite}======================================================================${ColourReset}"

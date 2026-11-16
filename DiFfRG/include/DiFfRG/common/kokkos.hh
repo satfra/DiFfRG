@@ -4,6 +4,8 @@
 #include <Kokkos_Core.hpp>
 #include <algorithm>
 #include <array>
+#include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -11,6 +13,12 @@
 #include <cuda/std/array>
 #include <cuda/std/tuple>
 #include <cuda/std/utility>
+#include <cuda_runtime_api.h>
+#elif defined(KOKKOS_ENABLE_HIP)
+#include <array>
+#include <hip/hip_runtime.h>
+#include <tuple>
+#include <utility>
 #else
 #include <array>
 #include <tuple>
@@ -101,6 +109,44 @@ namespace DiFfRG
   static_assert(std::is_same_v<CPU_memory, KokkosHost_memory>,
                 "CPU memory space must be the same as the Kokkos host memory space");
   static_assert(std::is_same_v<CPU_memory, TBB_memory>, "CPU memory space must be the same as TBB memory space");
+
+  /**
+   * @brief Throw if the device has recorded an error, most importantly a kernel that never launched.
+   *
+   * A launch that fails -- typically cudaErrorMemoryAllocation, because the per-thread stack of a large kernel times
+   * the threads the device can hold resident exceeds free device memory -- is only *recorded*; the kernel simply does
+   * not run. Kokkos reads that record only in builds with KOKKOS_ENABLE_DEBUG_BOUNDS_CHECK, so in a release build
+   * nothing reads it, the integrator hands back the buffer it was given, and the flow keeps running on stale values:
+   * one sector silently does not move, with no error, no warning and no NaN.
+   *
+   * Call this after the fence that ends a launch sequence and *before* the results are handed on. One call per
+   * get()/map() is free next to the integral itself.
+   *
+   * @param where what was being completed, named in the message.
+   *
+   * @note A launch-configuration failure is a synchronous error: it is returned to the host thread that issued the
+   * launch and is not sticky, so this has to run on that same thread. The integrators satisfy that by construction --
+   * a map is recorded and flushed on one thread. Errors that corrupt the context (an illegal access during execution)
+   * are visible from every thread, so those are caught either way.
+   */
+  inline void check_device_errors([[maybe_unused]] const char *where)
+  {
+#if defined(KOKKOS_ENABLE_CUDA)
+    const cudaError_t error = cudaGetLastError();
+    if (error != cudaSuccess)
+      throw std::runtime_error(std::string("CUDA error before or during ") + where + ": " + cudaGetErrorName(error) +
+                               " (" + cudaGetErrorString(error) +
+                               "). A kernel failed to launch or to run, so whatever it should have written is "
+                               "unchanged from before the call.");
+#elif defined(KOKKOS_ENABLE_HIP)
+    const hipError_t error = hipGetLastError();
+    if (error != hipSuccess)
+      throw std::runtime_error(std::string("HIP error before or during ") + where + ": " + hipGetErrorName(error) +
+                               " (" + hipGetErrorString(error) +
+                               "). A kernel failed to launch or to run, so whatever it should have written is "
+                               "unchanged from before the call.");
+#endif
+  }
 
   namespace device
   {

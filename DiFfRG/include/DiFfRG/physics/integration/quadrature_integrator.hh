@@ -262,6 +262,7 @@ namespace DiFfRG
         if constexpr (host_memory) {
           launch(Kokkos::View<OT *, CPU_memory, Kokkos::MemoryUnmanaged>(dest.data(), n));
           space.fence();
+          check_device_errors("QuadratureIntegrator::map_points");
         } else {
           auto &stage = result.template get<OT>();
           const auto device_result = stage.device_view(space, n);
@@ -269,6 +270,7 @@ namespace DiFfRG
           launch(device_result);
           Kokkos::deep_copy(space, pinned, device_result);
           space.fence();
+          check_device_errors("QuadratureIntegrator::map_points");
           parallel_chunks(n, [&](const size_t begin, const size_t end) {
             std::memcpy(dest.data() + begin, pinned.data() + begin, (end - begin) * sizeof(OT));
           });
@@ -290,6 +292,7 @@ namespace DiFfRG
           src = pinned.data();
         }
         space.fence();
+        check_device_errors("QuadratureIntegrator::map_points");
         parallel_chunks(n, [&](const size_t begin, const size_t end) {
           for (size_t i = begin; i < end; ++i)
             for (size_t j = 0; j < N; ++j)
@@ -789,6 +792,7 @@ namespace DiFfRG
       get(space, m_result_view, t...);
       Kokkos::deep_copy(space, m_result_host, m_result_view);
       space.fence();
+      check_device_errors("QuadratureIntegrator::get");
       dest = m_result_host();
     }
 
@@ -1388,26 +1392,27 @@ namespace DiFfRG
           }
         }
         m_map_points.run(space, dest, [&](const auto &result) { launch_map_points_tab(result, n, device_args); });
-        return;
-      }
-      if constexpr (can_hoist) {
-        // Hoisted unless pre() reads an argument given per point.
-        bool hoist = true;
-        size_t i = dim;
-        ((hoist = hoist && !(args.per_point() && internal::pre_reads<KERNEL>(i)), ++i), ...);
-        if (hoist) {
-          using PT = decltype(device::apply(
-              [](const auto &...a) { return pre_value(ctype(0), device::tuple<>{}, device::tie(a(0)...)); },
-              device_args));
-          PT *table = pre_table_storage<PT>();
-          m_pre_table.refresh(pre_table_key<PT>(dim, args.value...), space, space,
-                              [&] { fill_pre_table_points(table, device_args); });
-          m_map_points.run(space, dest,
-                           [&](const auto &result) { launch_map_points_hoisted(result, n, device_args, table); });
-          return;
+      } else {
+        // Only without a table: every launch instantiated here carries its own copy of the kernel's traces.
+        if constexpr (can_hoist) {
+          // Hoisted unless pre() reads an argument given per point.
+          bool hoist = true;
+          size_t i = dim;
+          ((hoist = hoist && !(args.per_point() && internal::pre_reads<KERNEL>(i)), ++i), ...);
+          if (hoist) {
+            using PT = decltype(device::apply(
+                [](const auto &...a) { return pre_value(ctype(0), device::tuple<>{}, device::tie(a(0)...)); },
+                device_args));
+            PT *table = pre_table_storage<PT>();
+            m_pre_table.refresh(pre_table_key<PT>(dim, args.value...), space, space,
+                                [&] { fill_pre_table_points(table, device_args); });
+            m_map_points.run(space, dest,
+                             [&](const auto &result) { launch_map_points_hoisted(result, n, device_args, table); });
+            return;
+          }
         }
+        m_map_points.run(space, dest, [&](const auto &result) { launch_map_points(result, n, device_args); });
       }
-      m_map_points.run(space, dest, [&](const auto &result) { launch_map_points(result, n, device_args); });
     }
 
     /// Storage for the pre() table with entries of type PT.

@@ -292,9 +292,16 @@ makeKernel[kernelExpr_, constExpr_, outputs_, OptionsPattern[MakeKernel]] :=
         (********************************************************************)
         (* First, the kernel itself *)
         (********************************************************************)
-(* Interpolators are `auto` in kernel() and constant(): the integrators pass a kernel their compact
-   handles in its own precision (has_kernel_handle in DiFfRG/physics/interpolation/interpolator_handle.hh),
-   so a single-precision kernel reads the single-precision copy of a double interpolator. *)
+(* Interpolators are named as kernel_handle_t<Type, ctype> in kernel() and constant(): the integrators
+   pass a kernel their compact handles in its own precision (has_kernel_handle in
+   DiFfRG/physics/interpolation/interpolator_handle.hh), so a single-precision kernel reads the
+   single-precision copy of a double interpolator. kernel_handle_t is by definition the type
+   to_kernel_handle<ctype> returns -- the handle where there is one and the argument itself where there
+   is not -- so this names exactly what the integrator passes, for every parameter type.
+   `auto` would do the same by deduction, but it makes each kernel an abbreviated function template,
+   and nvcc 12.8 hits an internal error (check_name_hiding_by_template_parameters) on one of those in a
+   generated translation unit. The AD parameters below stay `auto`: they are genuinely generic and do
+   not trigger it. *)
         parametersKernel =
             Map[
                 Which[
@@ -302,7 +309,7 @@ makeKernel[kernelExpr_, constExpr_, outputs_, OptionsPattern[MakeKernel]] :=
                         Merge[{#, <|"Type" -> "auto"|>}, Last]
                     ,
                     StringQ[#["Type"]] && StringContainsQ[#["Type"], "Interpolator"],
-                        Merge[{#, <|"Type" -> "auto"|>}, Last]
+                        Merge[{#, <|"Type" -> "DiFfRG::kernel_handle_t<" <> #["Type"] <> ", " <> realType[spec] <> ">"|>}, Last]
                     ,
                     KeyFreeQ[#, "Type"],
                         Message[MakeKernel::MissingType, #["Name"]];
