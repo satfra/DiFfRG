@@ -34,10 +34,6 @@ using VectorType = dealii::Vector<NumberType>;
 using namespace dealii;
 namespace KT = DiFfRG::FV::KurganovTadmor;
 
-/// Cell width handed to the flux helpers below. None of the test models reads it; it is here so the
-/// calls match the signature that carries the local grid spacing through to a model's flux.
-static constexpr double test_cell_width = 1.0;
-
 /// Empty extractor / variable data for the direct helper calls below. The models used there declare
 /// neither, so their fluxes never read them; they are here because the helpers take them
 /// unconditionally.
@@ -50,9 +46,8 @@ using KT::internal::compute_numerical_flux;
 using KT::internal::reconstruct_u;
 
 template <typename Assembler>
-concept CanMakeAssemblyContextViewFromTemporaryCache = requires(const Assembler &assembler) {
-  assembler.make_assembly_context_view(typename Assembler::SolutionReconstructionCache{});
-};
+concept CanMakeAssemblyContextViewFromTemporaryMesh =
+    requires(const Assembler &assembler) { assembler.make_assembly_context_view(typename Assembler::Mesh{}); };
 
 using FEFunctionDesc = DiFfRG::FEFunctionDescriptor<DiFfRG::Scalar<"u">>;
 using Components = DiFfRG::ComponentDescriptor<FEFunctionDesc>;
@@ -165,11 +160,11 @@ public:
     hook_ready = false;
 
     hook_min_u_plus = std::numeric_limits<double>::infinity();
-    for (const auto face : context.faces()) {
+    for (const auto &face : context.faces()) {
       ++hook_face_count;
       saw_boundary_face = saw_boundary_face || face.at_boundary();
       saw_interior_face = saw_interior_face || !face.at_boundary();
-      const auto &reconstruction = face.reconstruction();
+      const auto &reconstruction = face.state.reconstruction;
       last_u_minus = reconstruction.u_minus[0];
       last_u_plus = reconstruction.u_plus[0];
       last_grad_minus = reconstruction.face_grad_minus[0][0];
@@ -182,8 +177,8 @@ public:
         tbb::blocked_range<std::size_t>(0, faces.size()), std::numeric_limits<double>::infinity(),
         [&](const tbb::blocked_range<std::size_t> &range, double local_min) {
           for (std::size_t i = range.begin(); i != range.end(); ++i) {
-            const auto face = faces[i];
-            local_min = std::min(local_min, static_cast<double>(face.reconstruction().u_plus[0]));
+            const auto &face = faces[i];
+            local_min = std::min(local_min, static_cast<double>(face.state.reconstruction.u_plus[0]));
           }
           return local_min;
         },
@@ -192,11 +187,11 @@ public:
     hook_min_cell_u = std::numeric_limits<double>::infinity();
     const auto &cells = context.cells();
     for (std::size_t i = 0; i < cells.size(); ++i) {
-      const auto cell = cells[i];
+      const auto &cell = cells[i];
       ++hook_cell_count;
-      last_cell_u = cell.stencil().cell.u[0];
-      last_cell_point = cell.point()[0];
-      hook_min_cell_u = std::min(hook_min_cell_u, static_cast<double>(cell.stencil().cell.u[0]));
+      last_cell_u = cell.values()[0];
+      last_cell_point = cell.center()[0];
+      hook_min_cell_u = std::min(hook_min_cell_u, static_cast<double>(cell.values()[0]));
     }
 
     hook_flux_scale = hook_min_u_plus;
@@ -605,22 +600,22 @@ make_diffusion_probe_stencils()
   Stencil plus{};
   minus.boundary_ids.fill(dealii::numbers::invalid_boundary_id);
   plus.boundary_ids.fill(dealii::numbers::invalid_boundary_id);
-  for (auto &dofs : minus.neighbors.dof_indices)
+  for (auto &dofs : minus.neighbor_dof_indices)
     dofs.fill(dealii::numbers::invalid_dof_index);
-  for (auto &dofs : plus.neighbors.dof_indices)
+  for (auto &dofs : plus.neighbor_dof_indices)
     dofs.fill(dealii::numbers::invalid_dof_index);
   minus.cell.dof_indices.fill(dealii::numbers::invalid_dof_index);
   plus.cell.dof_indices.fill(dealii::numbers::invalid_dof_index);
 
   minus.cell.x = Point<2>(0.0, 0.0);
   minus.cell.u = {NT(0.0)};
-  minus.neighbors.x = {Point<2>(-1.0, 0.0), Point<2>(1.0, 0.0), Point<2>(0.0, -1.0), Point<2>(0.0, 1.0)};
-  minus.neighbors.u = {{{NT(-1.0)}, {NT(3.0)}, {NT(1.0)}, {NT(2.0)}}};
+  minus.neighbor_x = {Point<2>(-1.0, 0.0), Point<2>(1.0, 0.0), Point<2>(0.0, -1.0), Point<2>(0.0, 1.0)};
+  minus.neighbor_u = {{{NT(-1.0)}, {NT(3.0)}, {NT(1.0)}, {NT(2.0)}}};
 
   plus.cell.x = Point<2>(1.0, 0.0);
   plus.cell.u = {NT(3.0)};
-  plus.neighbors.x = {Point<2>(0.0, 0.0), Point<2>(2.0, 0.0), Point<2>(1.0, -1.0), Point<2>(1.0, 1.0)};
-  plus.neighbors.u = {{{NT(0.0)}, {NT(6.0)}, {NT(4.0)}, {NT(6.0)}}};
+  plus.neighbor_x = {Point<2>(0.0, 0.0), Point<2>(2.0, 0.0), Point<2>(1.0, -1.0), Point<2>(1.0, 1.0)};
+  plus.neighbor_u = {{{NT(0.0)}, {NT(6.0)}, {NT(4.0)}, {NT(6.0)}}};
 
   return {minus, plus};
 }
@@ -659,16 +654,16 @@ TEST_CASE("Corrected weighted least-squares diffusion reconstructor preserves AD
   using ADReconstructor = DiFfRG::def::CorrectedWeightedLeastSquaresDiffusionReconstructor<2, AD>;
 
   auto [minus_ad, plus_ad] = make_diffusion_probe_stencils<AD>();
-  seed(minus_ad.neighbors.u[3][0]);
+  seed(minus_ad.neighbor_u[3][0]);
   const auto ad_state = ADReconstructor::template compute_face_state<1>(minus_ad, plus_ad);
   const auto derivatives = Reconstructor::template extract_derivatives<1>(ad_state);
-  unseed(minus_ad.neighbors.u[3][0]);
+  unseed(minus_ad.neighbor_u[3][0]);
 
   constexpr double eps = 1.0e-6;
   auto [minus_plus, plus_plus] = make_diffusion_probe_stencils<double>();
   auto [minus_minus, plus_minus] = make_diffusion_probe_stencils<double>();
-  minus_plus.neighbors.u[3][0] += eps;
-  minus_minus.neighbors.u[3][0] -= eps;
+  minus_plus.neighbor_u[3][0] += eps;
+  minus_minus.neighbor_u[3][0] -= eps;
   const auto state_plus = Reconstructor::template compute_face_state<1>(minus_plus, plus_plus);
   const auto state_minus = Reconstructor::template compute_face_state<1>(minus_minus, plus_minus);
 
@@ -705,13 +700,11 @@ TEST_CASE("KT diffusion flux averages nonlinear side fluxes", "[FV][KT][diffusio
   grad_plus[0][1] = 1.0;
 
   const auto D = compute_diffusion_flux<NonlinearDiffusionProbeModel, double, 2, 1>(
-      u_minus, u_plus, grad_minus, grad_plus, third_minus, third_plus, Point<2>(), test_cell_width, test_cell_width,
-      no_extractors, no_variables, model);
+      u_minus, u_plus, grad_minus, grad_plus, third_minus, third_plus, Point<2>(), no_extractors, no_variables, model);
   CHECK(D[0][0] == Catch::Approx(0.625).margin(1.0e-14));
 
   const auto J = compute_diffusion_flux_jacobian<NonlinearDiffusionProbeModel, double, 2, 1>(
-      u_minus, u_plus, grad_minus, grad_plus, third_minus, third_plus, Point<2>(), test_cell_width, test_cell_width,
-      no_extractors, no_variables, model);
+      u_minus, u_plus, grad_minus, grad_plus, third_minus, third_plus, Point<2>(), no_extractors, no_variables, model);
   CHECK(J.grad[0](0, 0)[0][1] == Catch::Approx(0.5).margin(1.0e-14));
   CHECK(J.grad[1](0, 0)[0][1] == Catch::Approx(1.0).margin(1.0e-14));
 }
@@ -934,7 +927,7 @@ TEST_CASE("KT HDF5-only output keeps all field series in one file", "[FV][KT][Eo
   }
 }
 
-TEST_CASE("KT reconstruction cache recomputes cell stencil values per solution", "[FV][KT][cache]")
+TEST_CASE("KT mesh reconstruction recomputes cell stencil values per solution", "[FV][KT][mesh]")
 {
   using Model = ResidualContributionModel;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<1>, NumberType>;
@@ -960,40 +953,42 @@ TEST_CASE("KT reconstruction cache recomputes cell stencil values per solution",
   ++cell;
   REQUIRE(cell != discretization.get_dof_handler().end());
 
-  typename Assembler::SolutionReconstructionCache first_cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(first, first_cache);
-  typename Assembler::SolutionReconstructionCache second_cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(second, second_cache);
+  typename Assembler::Mesh first_cache;
+  assembler.initialize_mesh(first_cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(first, first_cache);
+  typename Assembler::Mesh second_cache;
+  assembler.initialize_mesh(second_cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(second, second_cache);
 
   const auto cell_index = cell->active_cell_index();
-  const auto &first_stencil = first_cache.cell_stencils[cell_index];
-  const auto &second_stencil = second_cache.cell_stencils[cell_index];
+  const auto &first_stencil = first_cache.cells()[cell_index];
+  const auto &second_stencil = second_cache.cells()[cell_index];
 
-  CHECK(first_stencil.cell.x == second_stencil.cell.x);
-  CHECK(first_stencil.cell.dof_indices == second_stencil.cell.dof_indices);
-  CHECK(first_stencil.cell.u[0] == Catch::Approx(first[first_stencil.cell.dof_indices[0]]));
-  CHECK(second_stencil.cell.u[0] == Catch::Approx(second[second_stencil.cell.dof_indices[0]]));
-  CHECK(first_stencil.cell.u[0] != Catch::Approx(second_stencil.cell.u[0]));
+  CHECK(first_stencil.center() == second_stencil.center());
+  CHECK(first_stencil.dofs() == second_stencil.dofs());
+  CHECK(first_stencil.values()[0] == Catch::Approx(first[first_stencil.dofs()[0]]));
+  CHECK(second_stencil.values()[0] == Catch::Approx(second[second_stencil.dofs()[0]]));
+  CHECK(first_stencil.values()[0] != Catch::Approx(second_stencil.values()[0]));
 
   for (const auto face_index : cell->face_indices()) {
-    CHECK(first_stencil.neighbors.x[face_index] == second_stencil.neighbors.x[face_index]);
-    CHECK(first_stencil.neighbors.dof_indices[face_index] == second_stencil.neighbors.dof_indices[face_index]);
-    const auto neighbor_dof = first_stencil.neighbors.dof_indices[face_index][0];
-    CHECK(first_stencil.neighbors.u[face_index][0] == Catch::Approx(first[neighbor_dof]));
-    CHECK(second_stencil.neighbors.u[face_index][0] == Catch::Approx(second[neighbor_dof]));
-    CHECK(first_stencil.neighbors.u[face_index][0] != Catch::Approx(second_stencil.neighbors.u[face_index][0]));
+    CHECK(first_stencil.neighbor_center(face_index) == second_stencil.neighbor_center(face_index));
+    CHECK(first_stencil.neighbor_dofs(face_index) == second_stencil.neighbor_dofs(face_index));
+    const auto neighbor_dof = first_stencil.neighbor_dofs(face_index)[0];
+    CHECK(first_stencil.neighbor_values(face_index)[0] == Catch::Approx(first[neighbor_dof]));
+    CHECK(second_stencil.neighbor_values(face_index)[0] == Catch::Approx(second[neighbor_dof]));
+    CHECK(first_stencil.neighbor_values(face_index)[0] != Catch::Approx(second_stencil.neighbor_values(face_index)[0]));
   }
 
   const auto face_index = 1U;
-  REQUIRE(first_cache.face_reconstruction_valid[cell_index][face_index]);
-  REQUIRE(second_cache.face_reconstruction_valid[cell_index][face_index]);
-  const auto &first_reconstruction = assembler.get_cached_face_reconstruction(first_cache, cell, face_index);
-  const auto &second_reconstruction = assembler.get_cached_face_reconstruction(second_cache, cell, face_index);
+  REQUIRE(first_cache.face(cell_index, face_index).state.reconstruction_valid);
+  REQUIRE(second_cache.face(cell_index, face_index).state.reconstruction_valid);
+  const auto &first_reconstruction = assembler.face_reconstruction(first_cache, cell, face_index);
+  const auto &second_reconstruction = assembler.face_reconstruction(second_cache, cell, face_index);
   CHECK(first_reconstruction.u_minus[0] != Catch::Approx(second_reconstruction.u_minus[0]));
   CHECK(first_reconstruction.u_plus[0] != Catch::Approx(second_reconstruction.u_plus[0]));
 }
 
-TEST_CASE("KT solution reconstruction cache stores reversed interior face orientations", "[FV][KT][cache]")
+TEST_CASE("KT shared face data provides both interior orientations", "[FV][KT][mesh]")
 {
   using Model = ResidualContributionModel;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<1>, NumberType>;
@@ -1019,19 +1014,50 @@ TEST_CASE("KT solution reconstruction cache stores reversed interior face orient
   const auto face_index = 1U;
   REQUIRE(!cell->at_boundary(face_index));
   const auto neighbor = cell->neighbor(face_index);
-  const auto neighbor_face_index = assembler.find_neighbor_face(cell, neighbor);
+  const auto neighbor_face_index = (face_index ^ 1U);
 
-  typename Assembler::SolutionReconstructionCache cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(solution, cache);
-  REQUIRE(cache.face_reconstruction_valid[cell->active_cell_index()][face_index]);
-  REQUIRE(cache.face_reconstruction_valid[neighbor->active_cell_index()][neighbor_face_index]);
+  typename Assembler::Mesh cache;
+  assembler.initialize_mesh(cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(solution, cache);
+  REQUIRE(cache.face(cell->active_cell_index(), face_index).state.reconstruction_valid);
+  REQUIRE(cache.face(neighbor->active_cell_index(), neighbor_face_index).state.reconstruction_valid);
+  const auto &shared_face = cache.face(cell->active_cell_index(), face_index);
+  REQUIRE(&shared_face == &cache.face(neighbor->active_cell_index(), neighbor_face_index));
+  REQUIRE(&shared_face == &shared_face.minus.faces[shared_face.minus_face_index].get());
+  REQUIRE(&shared_face == &shared_face.plus.faces[shared_face.plus_face_index].get());
+  REQUIRE(cache.faces().size() == discretization.get_triangulation().n_active_cells() + 1);
+  // There is one record per interface, rather than a record per incident cell face (or ghost slot).
 
-  const auto &cell_state = assembler.get_cached_face_reconstruction(cache, cell, face_index);
-  const auto &neighbor_state = assembler.get_cached_face_reconstruction(cache, neighbor, neighbor_face_index);
+  const auto &cell_state = assembler.face_reconstruction(cache, cell, face_index);
+  const auto &neighbor_state = assembler.face_reconstruction(cache, neighbor, neighbor_face_index);
   check_face_reconstruction_state_reversed_1d(cell_state, neighbor_state);
+  CHECK(shared_face.state.reconstruction.u_minus == cell_state.u_minus);
+  CHECK(shared_face.state.reconstruction.u_plus == cell_state.u_plus);
+
+  // Updating the solution refreshes the shared record seen by both cells.
+  for (unsigned int i = 0; i < solution.size(); ++i)
+    solution[i] += 2.;
+  assembler.template reconstruct<typename Assembler::Reconstructor>(solution, cache);
+  REQUIRE(&shared_face == &cache.face(neighbor->active_cell_index(), neighbor_face_index));
+  CHECK(shared_face.state.reconstruction.u_minus[0] == Catch::Approx(cell_state.u_minus[0] + 2.));
+  CHECK(shared_face.state.reconstruction.u_plus[0] == Catch::Approx(cell_state.u_plus[0] + 2.));
+
+  // Rebuild the independent diagnostic mesh after reinit, even when the mesh cell count stays unchanged.
+  const auto old_center = cache.cells()[cell->active_cell_index()].center();
+  GridTools::transform([](const Point<1> &x) { return Point<1>(2. * x[0]); }, discretization.get_triangulation());
+  discretization.reinit();
+  assembler.reinit();
+  assembler.initialize_mesh(cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(solution, cache);
+  cell = discretization.get_dof_handler().begin_active();
+  ++cell;
+  CHECK(cache.cells()[cell->active_cell_index()].center()[0] == Catch::Approx(2. * old_center[0]));
+  const auto &rebound_face = cache.face(cell->active_cell_index(), face_index);
+  CHECK(rebound_face.center[0] == Catch::Approx(cell->face(face_index)->center()[0]));
+  REQUIRE(&rebound_face == &cache.face(cell->neighbor(face_index)->active_cell_index(), neighbor_face_index));
 }
 
-TEST_CASE("KT solution reconstruction cache matches direct interior reconstruction", "[FV][KT][cache]")
+TEST_CASE("KT mesh reconstruction matches direct interior reconstruction", "[FV][KT][mesh]")
 {
   using Model = ResidualContributionModel;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<1>, NumberType>;
@@ -1059,9 +1085,10 @@ TEST_CASE("KT solution reconstruction cache matches direct interior reconstructi
   const auto neighbor = cell->neighbor(face_index);
   const auto x_q = cell->face(face_index)->center();
 
-  typename Assembler::SolutionReconstructionCache cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(solution, cache);
-  const auto &cached = assembler.get_cached_face_reconstruction(cache, cell, face_index);
+  typename Assembler::Mesh cache;
+  assembler.initialize_mesh(cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(solution, cache);
+  const auto &cached = assembler.face_reconstruction(cache, cell, face_index);
 
   typename Assembler::CellStencilData cell_stencil;
   typename Assembler::CellStencilData neighbor_stencil;
@@ -1073,7 +1100,7 @@ TEST_CASE("KT solution reconstruction cache matches direct interior reconstructi
   check_face_reconstruction_state_1d(cached, expected);
 }
 
-TEST_CASE("KT solution reconstruction cache matches direct boundary reconstruction", "[FV][KT][cache]")
+TEST_CASE("KT mesh reconstruction matches direct boundary reconstruction", "[FV][KT][mesh]")
 {
   using Model = ResidualContributionModel;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<1>, NumberType>;
@@ -1097,19 +1124,19 @@ TEST_CASE("KT solution reconstruction cache matches direct boundary reconstructi
   REQUIRE(cell->at_boundary(face_index));
   const auto x_q = cell->face(face_index)->center();
 
-  typename Assembler::SolutionReconstructionCache cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(solution, cache);
-  const auto &cached = assembler.get_cached_face_reconstruction(cache, cell, face_index);
+  typename Assembler::Mesh cache;
+  assembler.initialize_mesh(cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(solution, cache);
+  const auto &cached = assembler.face_reconstruction(cache, cell, face_index);
 
-  const auto boundary_stencil =
-      assembler.template build_boundary_stencil_from_cache<NumberType>(cell, face_index, solution);
+  const auto boundary_stencil = assembler.template build_boundary_stencil<NumberType>(cell, face_index, solution);
   const auto expected = KT::internal::compute_boundary_face_reconstruction_state<typename Assembler::Reconstructor>(
-      boundary_stencil, cache.cell_stencils[cell->active_cell_index()], x_q, model);
+      boundary_stencil, DiFfRG::FV::materialize_stencil(cache.cells()[cell->active_cell_index()]), x_q, model);
 
   check_face_reconstruction_state_1d(cached, expected);
 }
 
-TEST_CASE("KT boundary stencil cache recomputes values per solution", "[FV][KT][cache]")
+TEST_CASE("KT boundary stencil recomputes values per solution", "[FV][KT][mesh]")
 {
   using Model = ResidualContributionModel;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<1>, NumberType>;
@@ -1133,8 +1160,8 @@ TEST_CASE("KT boundary stencil cache recomputes values per solution", "[FV][KT][
   }
 
   const auto cell = discretization.get_dof_handler().begin_active();
-  const auto first_boundary = assembler.template build_boundary_stencil_from_cache<NumberType>(cell, 0, first);
-  const auto second_boundary = assembler.template build_boundary_stencil_from_cache<NumberType>(cell, 0, second);
+  const auto first_boundary = assembler.template build_boundary_stencil<NumberType>(cell, 0, first);
+  const auto second_boundary = assembler.template build_boundary_stencil<NumberType>(cell, 0, second);
 
   for (const auto stencil_index :
        {BoundaryIndex::physical_cell, BoundaryIndex::upper_inner, BoundaryIndex::upper_outer}) {
@@ -1147,7 +1174,7 @@ TEST_CASE("KT boundary stencil cache recomputes values per solution", "[FV][KT][
   }
 }
 
-TEST_CASE("KT 2D topology cache stores four face neighbours for an interior cell", "[FV][KT][cache][2d]")
+TEST_CASE("KT 2D mesh stores four face neighbours for an interior cell", "[FV][KT][mesh][2d]")
 {
   using Model = DiFfRG::Testing::ModelBurgers2DKT;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<2>, NumberType>;
@@ -1180,13 +1207,13 @@ TEST_CASE("KT 2D topology cache stores four face neighbours for an interior cell
     CAPTURE(face_index);
     REQUIRE(!cell->at_boundary(face_index));
     CHECK(stencil.face_centers[face_index] == cell->face(face_index)->center());
-    CHECK(stencil.neighbors.x[face_index] == cell->neighbor(face_index)->center());
-    CHECK(stencil.neighbors.dof_indices[face_index][0] != dealii::numbers::invalid_dof_index);
-    CHECK(stencil.neighbors.u[face_index][0] == Catch::Approx(solution[stencil.neighbors.dof_indices[face_index][0]]));
+    CHECK(stencil.neighbor_x[face_index] == cell->neighbor(face_index)->center());
+    CHECK(stencil.neighbor_dof_indices[face_index][0] != dealii::numbers::invalid_dof_index);
+    CHECK(stencil.neighbor_u[face_index][0] == Catch::Approx(solution[stencil.neighbor_dof_indices[face_index][0]]));
   }
 }
 
-TEST_CASE("KT 2D boundary stencil cache stores two interior cells behind boundary faces", "[FV][KT][cache][2d]")
+TEST_CASE("KT 2D boundary stencil stores two interior cells behind boundary faces", "[FV][KT][mesh][2d]")
 {
   using Model = DiFfRG::Testing::ModelBurgers2DKT;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<2>, NumberType>;
@@ -1219,8 +1246,7 @@ TEST_CASE("KT 2D boundary stencil cache stores two interior cells behind boundar
     const auto first_interior = cell->neighbor(interior_face);
     const auto second_interior = first_interior->neighbor(interior_face);
 
-    const auto boundary_stencil =
-        assembler.template build_boundary_stencil_from_cache<NumberType>(cell, face_index, solution);
+    const auto boundary_stencil = assembler.template build_boundary_stencil<NumberType>(cell, face_index, solution);
 
     CHECK(boundary_stencil.cell_face == face_index);
     CHECK(boundary_stencil.lower_boundary == (face_index % 2 == 0));
@@ -1241,7 +1267,7 @@ TEST_CASE("KT 2D boundary stencil cache stores two interior cells behind boundar
   }
 }
 
-TEST_CASE("KT 2D solution reconstruction cache recomputes values per solution", "[FV][KT][cache][2d]")
+TEST_CASE("KT 2D mesh reconstruction recomputes values per solution", "[FV][KT][mesh][2d]")
 {
   using Model = DiFfRG::Testing::ModelBurgers2DKT;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<2>, NumberType>;
@@ -1271,31 +1297,33 @@ TEST_CASE("KT 2D solution reconstruction cache recomputes values per solution", 
   auto cell = find_2d_interior_cell(discretization.get_dof_handler());
   REQUIRE(cell != discretization.get_dof_handler().end());
 
-  typename Assembler::SolutionReconstructionCache first_cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(first, first_cache);
-  typename Assembler::SolutionReconstructionCache second_cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(second, second_cache);
+  typename Assembler::Mesh first_cache;
+  assembler.initialize_mesh(first_cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(first, first_cache);
+  typename Assembler::Mesh second_cache;
+  assembler.initialize_mesh(second_cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(second, second_cache);
 
   const auto cell_index = cell->active_cell_index();
-  const auto &first_stencil = first_cache.cell_stencils[cell_index];
-  const auto &second_stencil = second_cache.cell_stencils[cell_index];
+  const auto &first_stencil = first_cache.cells()[cell_index];
+  const auto &second_stencil = second_cache.cells()[cell_index];
 
-  CHECK(first_stencil.cell.x == second_stencil.cell.x);
-  CHECK(first_stencil.cell.dof_indices == second_stencil.cell.dof_indices);
-  CHECK(first_stencil.cell.u[0] == Catch::Approx(first[first_stencil.cell.dof_indices[0]]));
-  CHECK(second_stencil.cell.u[0] == Catch::Approx(second[second_stencil.cell.dof_indices[0]]));
-  CHECK(first_stencil.cell.u[0] != Catch::Approx(second_stencil.cell.u[0]));
+  CHECK(first_stencil.center() == second_stencil.center());
+  CHECK(first_stencil.dofs() == second_stencil.dofs());
+  CHECK(first_stencil.values()[0] == Catch::Approx(first[first_stencil.dofs()[0]]));
+  CHECK(second_stencil.values()[0] == Catch::Approx(second[second_stencil.dofs()[0]]));
+  CHECK(first_stencil.values()[0] != Catch::Approx(second_stencil.values()[0]));
 
   for (const auto face_index : cell->face_indices()) {
-    REQUIRE(first_cache.face_reconstruction_valid[cell_index][face_index]);
-    REQUIRE(second_cache.face_reconstruction_valid[cell_index][face_index]);
-    const auto &first_reconstruction = assembler.get_cached_face_reconstruction(first_cache, cell, face_index);
-    const auto &second_reconstruction = assembler.get_cached_face_reconstruction(second_cache, cell, face_index);
+    REQUIRE(first_cache.face(cell_index, face_index).state.reconstruction_valid);
+    REQUIRE(second_cache.face(cell_index, face_index).state.reconstruction_valid);
+    const auto &first_reconstruction = assembler.face_reconstruction(first_cache, cell, face_index);
+    const auto &second_reconstruction = assembler.face_reconstruction(second_cache, cell, face_index);
     CHECK(first_reconstruction.u_minus[0] != Catch::Approx(second_reconstruction.u_minus[0]));
   }
 }
 
-TEST_CASE("KT 2D solution reconstruction cache matches direct interior reconstruction", "[FV][KT][cache][2d]")
+TEST_CASE("KT 2D mesh reconstruction matches direct interior reconstruction", "[FV][KT][mesh][2d]")
 {
   using Model = DiFfRG::Testing::ModelBurgers2DKT;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<2>, NumberType>;
@@ -1322,15 +1350,16 @@ TEST_CASE("KT 2D solution reconstruction cache matches direct interior reconstru
   auto cell = find_2d_interior_cell(discretization.get_dof_handler());
   REQUIRE(cell != discretization.get_dof_handler().end());
 
-  typename Assembler::SolutionReconstructionCache cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(solution, cache);
+  typename Assembler::Mesh cache;
+  assembler.initialize_mesh(cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(solution, cache);
 
   for (const auto face_index : {1U, 3U}) {
     CAPTURE(face_index);
     REQUIRE(!cell->at_boundary(face_index));
     const auto neighbor = cell->neighbor(face_index);
     const auto x_q = cell->face(face_index)->center();
-    const auto &cached = assembler.get_cached_face_reconstruction(cache, cell, face_index);
+    const auto &cached = assembler.face_reconstruction(cache, cell, face_index);
 
     typename Assembler::CellStencilData cell_stencil;
     typename Assembler::CellStencilData neighbor_stencil;
@@ -1343,7 +1372,7 @@ TEST_CASE("KT 2D solution reconstruction cache matches direct interior reconstru
   }
 }
 
-TEST_CASE("KT 2D boundary reconstruction cache reconstructs affine ghost side", "[FV][KT][cache][2d]")
+TEST_CASE("KT 2D boundary reconstruction reconstructs affine ghost side", "[FV][KT][mesh][2d]")
 {
   using Model = DiFfRG::Testing::ModelBurgers2DKT;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<2>, NumberType>;
@@ -1369,8 +1398,9 @@ TEST_CASE("KT 2D boundary reconstruction cache reconstructs affine ghost side", 
   for (unsigned int i = 0; i < solution.size(); ++i)
     solution[i] = model.solution(support_points[i])[0];
 
-  typename Assembler::SolutionReconstructionCache cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(solution, cache);
+  typename Assembler::Mesh cache;
+  assembler.initialize_mesh(cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(solution, cache);
 
   const auto check_boundary_face = [&](const auto &cell, const unsigned int face_index) {
     CAPTURE(face_index, cell->center());
@@ -1378,7 +1408,7 @@ TEST_CASE("KT 2D boundary reconstruction cache reconstructs affine ghost side", 
     REQUIRE(cell->at_boundary(face_index));
 
     const auto x_q = cell->face(face_index)->center();
-    const auto &cached = assembler.get_cached_face_reconstruction(cache, cell, face_index);
+    const auto &cached = assembler.face_reconstruction(cache, cell, face_index);
     const double expected_value = model.solution(x_q)[0];
     constexpr double tolerance = 1.0e-12;
 
@@ -1399,7 +1429,7 @@ TEST_CASE("KT 2D boundary reconstruction cache reconstructs affine ghost side", 
   check_boundary_face(corner_cell, 2U);
 }
 
-TEST_CASE("KT 2D boundary reconstruction cache derives tangential ghost side from named slots", "[FV][KT][cache][2d]")
+TEST_CASE("KT 2D boundary reconstruction derives tangential ghost side from named slots", "[FV][KT][mesh][2d]")
 {
   using Model = NamedSlotAffineBoundary2DModel;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<2>, NumberType>;
@@ -1420,8 +1450,9 @@ TEST_CASE("KT 2D boundary reconstruction cache derives tangential ghost side fro
   for (unsigned int i = 0; i < solution.size(); ++i)
     solution[i] = model.solution(support_points[i])[0];
 
-  typename Assembler::SolutionReconstructionCache cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(solution, cache);
+  typename Assembler::Mesh cache;
+  assembler.initialize_mesh(cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(solution, cache);
 
   for (const auto face_index : {0U, 1U, 2U, 3U}) {
     CAPTURE(face_index);
@@ -1430,7 +1461,7 @@ TEST_CASE("KT 2D boundary reconstruction cache derives tangential ghost side fro
     REQUIRE(cell->at_boundary(face_index));
 
     const auto x_q = cell->face(face_index)->center();
-    const auto &cached = assembler.get_cached_face_reconstruction(cache, cell, face_index);
+    const auto &cached = assembler.face_reconstruction(cache, cell, face_index);
     constexpr double tolerance = 1.0e-12;
 
     CHECK(cached.u_minus[0] == Catch::Approx(model.solution(x_q)[0]).margin(tolerance));
@@ -1442,7 +1473,7 @@ TEST_CASE("KT 2D boundary reconstruction cache derives tangential ghost side fro
   }
 }
 
-TEST_CASE("KT 2D boundary reconstruction cache uses model-owned tangential ghost neighbours", "[FV][KT][cache][2d]")
+TEST_CASE("KT 2D boundary reconstruction uses model-owned tangential ghost neighbours", "[FV][KT][mesh][2d]")
 {
   using Model = NonAffineTangentialGhostBoundary2DModel;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<2>, NumberType>;
@@ -1463,8 +1494,9 @@ TEST_CASE("KT 2D boundary reconstruction cache uses model-owned tangential ghost
   for (unsigned int i = 0; i < solution.size(); ++i)
     solution[i] = model.solution(support_points[i])[0];
 
-  typename Assembler::SolutionReconstructionCache cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(solution, cache);
+  typename Assembler::Mesh cache;
+  assembler.initialize_mesh(cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(solution, cache);
 
   for (const auto face_index : {0U, 1U, 2U, 3U}) {
     CAPTURE(face_index);
@@ -1472,7 +1504,7 @@ TEST_CASE("KT 2D boundary reconstruction cache uses model-owned tangential ghost
     REQUIRE(cell != discretization.get_dof_handler().end());
     REQUIRE(cell->at_boundary(face_index));
 
-    const auto &cached = assembler.get_cached_face_reconstruction(cache, cell, face_index);
+    const auto &cached = assembler.face_reconstruction(cache, cell, face_index);
     const unsigned int normal_axis = face_index / 2;
     const unsigned int tangential_axis = 1U - normal_axis;
     const double base_tangential_slope = tangential_axis == 0 ? Model::x_slope : Model::y_slope;
@@ -1484,7 +1516,7 @@ TEST_CASE("KT 2D boundary reconstruction cache uses model-owned tangential ghost
   }
 }
 
-TEST_CASE("KT origin-odd boundary reconstruction remains curl-free", "[FV][KT][cache][boundary][2d]")
+TEST_CASE("KT origin-odd boundary reconstruction remains curl-free", "[FV][KT][mesh][boundary][2d]")
 {
   using Model = OriginOddCurlFreeBoundary2DModel;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<2>, NumberType>;
@@ -1507,8 +1539,9 @@ TEST_CASE("KT origin-odd boundary reconstruction remains curl-free", "[FV][KT][c
   state.interpolate(model);
   const VectorType &solution = state.spatial_data();
 
-  typename Assembler::SolutionReconstructionCache cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(solution, cache);
+  typename Assembler::Mesh cache;
+  assembler.initialize_mesh(cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(solution, cache);
 
   const auto check_gradient = [](const auto &gradient) {
     constexpr double tolerance = 1.0e-12;
@@ -1527,7 +1560,7 @@ TEST_CASE("KT origin-odd boundary reconstruction remains curl-free", "[FV][KT][c
 
     const auto x_q = cell->face(face_index)->center();
     const auto expected = model.solution(x_q);
-    const auto &reconstruction = assembler.get_cached_face_reconstruction(cache, cell, face_index);
+    const auto &reconstruction = assembler.face_reconstruction(cache, cell, face_index);
 
     for (std::size_t component = 0; component < expected.size(); ++component) {
       CHECK(reconstruction.u_minus[component] == Catch::Approx(expected[component]).margin(1.0e-12));
@@ -1542,7 +1575,7 @@ TEST_CASE("KT origin-odd boundary reconstruction remains curl-free", "[FV][KT][c
   }
 }
 
-TEST_CASE("KT 2D solution reconstruction cache stores reversed interior face orientations", "[FV][KT][cache][2d]")
+TEST_CASE("KT 2D mesh reconstruction stores reversed interior face orientations", "[FV][KT][mesh][2d]")
 {
   using Model = DiFfRG::Testing::ModelBurgers2DKT;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<2>, NumberType>;
@@ -1569,21 +1602,22 @@ TEST_CASE("KT 2D solution reconstruction cache stores reversed interior face ori
   auto cell = find_2d_interior_cell(discretization.get_dof_handler());
   REQUIRE(cell != discretization.get_dof_handler().end());
 
-  typename Assembler::SolutionReconstructionCache cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(solution, cache);
+  typename Assembler::Mesh cache;
+  assembler.initialize_mesh(cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(solution, cache);
 
   for (const auto face_index : {1U, 3U}) {
     CAPTURE(face_index);
     REQUIRE(!cell->at_boundary(face_index));
     const auto neighbor = cell->neighbor(face_index);
-    const auto neighbor_face_index = assembler.find_neighbor_face(cell, neighbor);
-    const auto &cell_state = assembler.get_cached_face_reconstruction(cache, cell, face_index);
-    const auto &neighbor_state = assembler.get_cached_face_reconstruction(cache, neighbor, neighbor_face_index);
+    const auto neighbor_face_index = (face_index ^ 1U);
+    const auto &cell_state = assembler.face_reconstruction(cache, cell, face_index);
+    const auto &neighbor_state = assembler.face_reconstruction(cache, neighbor, neighbor_face_index);
     check_face_reconstruction_state_reversed<2>(cell_state, neighbor_state);
   }
 }
 
-TEST_CASE("KT face hook exposes cached reconstruction before residual flux", "[FV][KT][hook]")
+TEST_CASE("KT face hook exposes mesh reconstruction before residual flux", "[FV][KT][hook]")
 {
   using Model = FaceHookProbeModel;
   using Discretization = DiFfRG::FV::Discretization<Model, DiFfRG::RectangularMeshSerial<1>, NumberType>;
@@ -1602,11 +1636,12 @@ TEST_CASE("KT face hook exposes cached reconstruction before residual flux", "[F
   state.interpolate(model);
   const VectorType &solution = state.spatial_data();
 
-  typename Assembler::SolutionReconstructionCache cache;
-  assembler.template rebuild_solution_reconstruction_cache<typename Assembler::Reconstructor>(solution, cache);
+  typename Assembler::Mesh cache;
+  assembler.initialize_mesh(cache);
+  assembler.template reconstruct<typename Assembler::Reconstructor>(solution, cache);
   const auto context = assembler.make_assembly_context_view(cache);
   STATIC_REQUIRE(KT::HasAssemblyContextView<decltype(context)>);
-  STATIC_REQUIRE(!CanMakeAssemblyContextViewFromTemporaryCache<Assembler>);
+  STATIC_REQUIRE(!CanMakeAssemblyContextViewFromTemporaryMesh<Assembler>);
 
   VectorType residual(solution.size());
   VectorType solution_dot(solution.size());
@@ -1711,8 +1746,10 @@ TEST_CASE("reconstruct_u_derivative 1D single component", "[FV][KT]")
     std::array<AD, 1> u_c = {AD(2.0)};
     std::array<std::array<AD, 1>, 2> u_n = {std::array<AD, 1>{AD(1.0)}, std::array<AD, 1>{AD(4.0)}};
     seed(u_c[0]);
-    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor, dim, NumberType, n_components>(
-        u_c, center, x_q, x_n, u_n);
+    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor>(
+        DiFfRG::FV::CellStencilData<dim, AD, n_components>{
+            .cell = {.x = center, .u = u_c}, .neighbor_x = x_n, .neighbor_u = u_n},
+        x_q);
     unseed(u_c[0]);
     CHECK(result[0] == Catch::Approx(1.5));
   }
@@ -1725,8 +1762,10 @@ TEST_CASE("reconstruct_u_derivative 1D single component", "[FV][KT]")
     std::array<AD, 1> u_c = {AD(2.0)};
     std::array<std::array<AD, 1>, 2> u_n = {std::array<AD, 1>{AD(1.0)}, std::array<AD, 1>{AD(4.0)}};
     seed(u_n[0][0]);
-    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor, dim, NumberType, n_components>(
-        u_c, center, x_q, x_n, u_n);
+    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor>(
+        DiFfRG::FV::CellStencilData<dim, AD, n_components>{
+            .cell = {.x = center, .u = u_c}, .neighbor_x = x_n, .neighbor_u = u_n},
+        x_q);
     unseed(u_n[0][0]);
     CHECK(result[0] == Catch::Approx(-0.5));
   }
@@ -1738,8 +1777,10 @@ TEST_CASE("reconstruct_u_derivative 1D single component", "[FV][KT]")
     std::array<AD, 1> u_c = {AD(2.0)};
     std::array<std::array<AD, 1>, 2> u_n = {std::array<AD, 1>{AD(1.0)}, std::array<AD, 1>{AD(4.0)}};
     seed(u_n[1][0]);
-    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor, dim, NumberType, n_components>(
-        u_c, center, x_q, x_n, u_n);
+    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor>(
+        DiFfRG::FV::CellStencilData<dim, AD, n_components>{
+            .cell = {.x = center, .u = u_c}, .neighbor_x = x_n, .neighbor_u = u_n},
+        x_q);
     unseed(u_n[1][0]);
     CHECK(result[0] == Catch::Approx(0.0));
   }
@@ -1765,8 +1806,10 @@ TEST_CASE("reconstruct_u_derivative at local extremum (vanishing limiter)", "[FV
     std::array<AD, 1> u_c = {AD(3.0)};
     std::array<std::array<AD, 1>, 2> u_n = {std::array<AD, 1>{AD(4.0)}, std::array<AD, 1>{AD(4.0)}};
     seed(u_c[0]);
-    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor, dim, NumberType, n_components>(
-        u_c, center, x_q, x_n, u_n);
+    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor>(
+        DiFfRG::FV::CellStencilData<dim, AD, n_components>{
+            .cell = {.x = center, .u = u_c}, .neighbor_x = x_n, .neighbor_u = u_n},
+        x_q);
     unseed(u_c[0]);
     CHECK(result[0] == Catch::Approx(1.0));
   }
@@ -1776,8 +1819,10 @@ TEST_CASE("reconstruct_u_derivative at local extremum (vanishing limiter)", "[FV
     std::array<AD, 1> u_c = {AD(3.0)};
     std::array<std::array<AD, 1>, 2> u_n = {std::array<AD, 1>{AD(4.0)}, std::array<AD, 1>{AD(4.0)}};
     seed(u_n[0][0]);
-    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor, dim, NumberType, n_components>(
-        u_c, center, x_q, x_n, u_n);
+    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor>(
+        DiFfRG::FV::CellStencilData<dim, AD, n_components>{
+            .cell = {.x = center, .u = u_c}, .neighbor_x = x_n, .neighbor_u = u_n},
+        x_q);
     unseed(u_n[0][0]);
     CHECK(result[0] == Catch::Approx(0.0));
   }
@@ -1812,8 +1857,10 @@ TEST_CASE("reconstruct_u_derivative 2D single component", "[FV][KT]")
     std::array<std::array<AD, 1>, 4> u_n = {std::array<AD, 1>{AD(1.0)}, std::array<AD, 1>{AD(4.0)},
                                             std::array<AD, 1>{AD(0.5)}, std::array<AD, 1>{AD(5.0)}};
     seed(u_c[0]);
-    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor, dim, NumberType, n_components>(
-        u_c, center, x_q, x_n, u_n);
+    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor>(
+        DiFfRG::FV::CellStencilData<dim, AD, n_components>{
+            .cell = {.x = center, .u = u_c}, .neighbor_x = x_n, .neighbor_u = u_n},
+        x_q);
     unseed(u_c[0]);
     CHECK(result[0] == Catch::Approx(1.8));
   }
@@ -1827,8 +1874,10 @@ TEST_CASE("reconstruct_u_derivative 2D single component", "[FV][KT]")
     std::array<std::array<AD, 1>, 4> u_n = {std::array<AD, 1>{AD(1.0)}, std::array<AD, 1>{AD(4.0)},
                                             std::array<AD, 1>{AD(0.5)}, std::array<AD, 1>{AD(5.0)}};
     seed(u_n[0][0]);
-    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor, dim, NumberType, n_components>(
-        u_c, center, x_q, x_n, u_n);
+    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor>(
+        DiFfRG::FV::CellStencilData<dim, AD, n_components>{
+            .cell = {.x = center, .u = u_c}, .neighbor_x = x_n, .neighbor_u = u_n},
+        x_q);
     unseed(u_n[0][0]);
     CHECK(result[0] == Catch::Approx(-0.5));
   }
@@ -1842,8 +1891,10 @@ TEST_CASE("reconstruct_u_derivative 2D single component", "[FV][KT]")
     std::array<std::array<AD, 1>, 4> u_n = {std::array<AD, 1>{AD(1.0)}, std::array<AD, 1>{AD(4.0)},
                                             std::array<AD, 1>{AD(0.5)}, std::array<AD, 1>{AD(5.0)}};
     seed(u_n[2][0]);
-    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor, dim, NumberType, n_components>(
-        u_c, center, x_q, x_n, u_n);
+    const auto result = KT::internal::reconstruct_u_derivative<Reconstructor>(
+        DiFfRG::FV::CellStencilData<dim, AD, n_components>{
+            .cell = {.x = center, .u = u_c}, .neighbor_x = x_n, .neighbor_u = u_n},
+        x_q);
     unseed(u_n[2][0]);
     CHECK(result[0] == Catch::Approx(-0.3));
   }
@@ -1947,7 +1998,7 @@ TEST_CASE("Test compute_kt_flux_and_speeds with Burgers flux in 1D", "[FV][KT]")
     const std::array<NumberType, n_components> u_minus = {1.0};
 
     const auto [F_plus, F_minus, a_half] = DiFfRG::Testing::compute_kt_flux_and_speeds<WaveSpeedStrategy>(
-        u_plus, u_minus, x_q, test_cell_width, test_cell_width, no_extractors, no_variables, model);
+        u_plus, u_minus, x_q, no_extractors, no_variables, model);
     CHECK(F_plus[0][0] == Catch::Approx(2.5));
     CHECK(F_minus[0][0] == Catch::Approx(1.0));
     CHECK(a_half[0][0] == Catch::Approx(2.0));
@@ -1963,7 +2014,7 @@ TEST_CASE("Test compute_kt_flux_and_speeds with Burgers flux in 1D", "[FV][KT]")
     const std::array<NumberType, n_components> u_minus = {3.0};
 
     const auto [F_plus, F_minus, a_half] = DiFfRG::Testing::compute_kt_flux_and_speeds<WaveSpeedStrategy>(
-        u_plus, u_minus, x_q, test_cell_width, test_cell_width, no_extractors, no_variables, model);
+        u_plus, u_minus, x_q, no_extractors, no_variables, model);
     CHECK(F_plus[0][0] == Catch::Approx(5.5));
     CHECK(F_minus[0][0] == Catch::Approx(5.5));
     CHECK(a_half[0][0] == Catch::Approx(3.0));
@@ -1981,7 +2032,7 @@ TEST_CASE("Test compute_kt_flux_and_speeds with Burgers flux in 1D", "[FV][KT]")
     const std::array<NumberType, n_components> u_minus = {-3.0};
 
     const auto [F_plus, F_minus, a_half] = DiFfRG::Testing::compute_kt_flux_and_speeds<WaveSpeedStrategy>(
-        u_plus, u_minus, x_q, test_cell_width, test_cell_width, no_extractors, no_variables, model);
+        u_plus, u_minus, x_q, no_extractors, no_variables, model);
     CHECK(F_plus[0][0] == Catch::Approx(0.5));
     CHECK(F_minus[0][0] == Catch::Approx(4.5));
     CHECK(a_half[0][0] == Catch::Approx(3.0));
@@ -1997,7 +2048,7 @@ TEST_CASE("Test compute_kt_flux_and_speeds with Burgers flux in 1D", "[FV][KT]")
     const std::array<NumberType, n_components> u_minus = {1.0};
 
     const auto [F_plus, F_minus, a_half] = DiFfRG::Testing::compute_kt_flux_and_speeds<WaveSpeedStrategy>(
-        u_plus, u_minus, x_q, test_cell_width, test_cell_width, no_extractors, no_variables, model);
+        u_plus, u_minus, x_q, no_extractors, no_variables, model);
     const auto H = compute_numerical_flux(F_plus, F_minus, a_half, u_plus, u_minus, Tensor<1, dim>({1.0}));
     CHECK(H[0][0] == Catch::Approx(0.75));
   }
@@ -2007,10 +2058,10 @@ TEST_CASE("Test compute_kt_flux_and_speeds with Burgers flux in 1D", "[FV][KT]")
 // Tests for tag_cell_dofs
 // ---------------------------------------------------------------------------
 
-using KT::internal::make_tagged_neighbors;
 using KT::internal::tag_cell_dofs;
+using KT::internal::tag_cell_stencil_dofs;
 template <int dim, typename NT, size_t nc> using KTCellData = KT::internal::CellData<dim, NT, nc>;
-template <int dim, typename NT, size_t nc> using KTNeighborData = KT::internal::NeighborData<dim, NT, nc>;
+template <int dim, typename NT, size_t nc> using KTMutableStencil = KT::internal::CellStencilData<dim, NT, nc>;
 
 // nvcc's cudafe emits the first use of a specialization symbolically but constant-folds every
 // later one, rendering a size_t argument as the ill-formed functional cast `unsigned long((1))`.
@@ -2018,9 +2069,9 @@ template <int dim, typename NT, size_t nc> using KTNeighborData = KT::internal::
 using KTCellData_1_1 = KTCellData<1, NumberType, 1>; // <dim, n_components>
 using KTCellData_1_2 = KTCellData<1, NumberType, 2>;
 using KTCellData_2_1 = KTCellData<2, NumberType, 1>;
-using KTNeighborData_1_1 = KTNeighborData<1, NumberType, 1>;
-using KTNeighborData_1_2 = KTNeighborData<1, NumberType, 2>;
-using KTNeighborData_2_1 = KTNeighborData<2, NumberType, 1>;
+using KTMutableStencil_1_1 = KTMutableStencil<1, NumberType, 1>;
+using KTMutableStencil_1_2 = KTMutableStencil<1, NumberType, 2>;
+using KTMutableStencil_2_1 = KTMutableStencil<2, NumberType, 1>;
 using AD = autodiff::Real<1, NumberType>;
 
 TEST_CASE("tag_cell_dofs 1D single component — matching dof is seeded", "[FV][KT][tag_cell_dofs]")
@@ -2110,137 +2161,137 @@ TEST_CASE("tag_cell_dofs 2D single component — point preserved and seeded", "[
 }
 
 // ---------------------------------------------------------------------------
-// Tests for make_tagged_neighbors
+// Tests for tag_cell_stencil_dofs
 // ---------------------------------------------------------------------------
 
-TEST_CASE("make_tagged_neighbors 1D single component — matching dof in one face", "[FV][KT][make_tagged_neighbors]")
+TEST_CASE("tag_cell_stencil_dofs 1D single component — matching dof in one face", "[FV][KT][tag_cell_stencil_dofs]")
 {
   constexpr int dim = 1;
   constexpr size_t nc = 1;
 
-  const KTNeighborData_1_1 nd{
-      .x = {Point<dim>(-1.0), Point<dim>(1.0)},
-      .u = {std::array<NumberType, nc>{1.0}, std::array<NumberType, nc>{2.0}},
-      .dof_indices = {std::array<dealii::types::global_dof_index, nc>{10},
-                      std::array<dealii::types::global_dof_index, nc>{20}},
+  const KTMutableStencil_1_1 nd{
+      .neighbor_x = {Point<dim>(-1.0), Point<dim>(1.0)},
+      .neighbor_u = {std::array<NumberType, nc>{1.0}, std::array<NumberType, nc>{2.0}},
+      .neighbor_dof_indices = {std::array<dealii::types::global_dof_index, nc>{10},
+                               std::array<dealii::types::global_dof_index, nc>{20}},
   };
 
-  const auto result = make_tagged_neighbors(nd, 10);
+  const auto result = tag_cell_stencil_dofs(nd, 10);
 
   // Face 0 matches — seeded
-  CHECK(val(result.u[0][0]) == Catch::Approx(1.0));
-  CHECK(derivative(result.u[0][0]) == Catch::Approx(1.0));
+  CHECK(val(result.neighbor_u[0][0]) == Catch::Approx(1.0));
+  CHECK(derivative(result.neighbor_u[0][0]) == Catch::Approx(1.0));
 
   // Face 1 does not match — not seeded
-  CHECK(val(result.u[1][0]) == Catch::Approx(2.0));
-  CHECK(derivative(result.u[1][0]) == Catch::Approx(0.0));
+  CHECK(val(result.neighbor_u[1][0]) == Catch::Approx(2.0));
+  CHECK(derivative(result.neighbor_u[1][0]) == Catch::Approx(0.0));
 
   // Positions preserved
-  CHECK(result.x[0][0] == Catch::Approx(-1.0));
-  CHECK(result.x[1][0] == Catch::Approx(1.0));
+  CHECK(result.neighbor_x[0][0] == Catch::Approx(-1.0));
+  CHECK(result.neighbor_x[1][0] == Catch::Approx(1.0));
 
   // dof_indices preserved
-  CHECK(result.dof_indices[0][0] == 10);
-  CHECK(result.dof_indices[1][0] == 20);
+  CHECK(result.neighbor_dof_indices[0][0] == 10);
+  CHECK(result.neighbor_dof_indices[1][0] == 20);
 }
 
-TEST_CASE("make_tagged_neighbors 1D single component — no matching dof", "[FV][KT][make_tagged_neighbors]")
+TEST_CASE("tag_cell_stencil_dofs 1D single component — no matching dof", "[FV][KT][tag_cell_stencil_dofs]")
 {
   constexpr int dim = 1;
   constexpr size_t nc = 1;
 
-  const KTNeighborData_1_1 nd{
-      .x = {Point<dim>(-1.0), Point<dim>(1.0)},
-      .u = {std::array<NumberType, nc>{1.0}, std::array<NumberType, nc>{2.0}},
-      .dof_indices = {std::array<dealii::types::global_dof_index, nc>{10},
-                      std::array<dealii::types::global_dof_index, nc>{20}},
+  const KTMutableStencil_1_1 nd{
+      .neighbor_x = {Point<dim>(-1.0), Point<dim>(1.0)},
+      .neighbor_u = {std::array<NumberType, nc>{1.0}, std::array<NumberType, nc>{2.0}},
+      .neighbor_dof_indices = {std::array<dealii::types::global_dof_index, nc>{10},
+                               std::array<dealii::types::global_dof_index, nc>{20}},
   };
 
-  const auto result = make_tagged_neighbors(nd, 99);
+  const auto result = tag_cell_stencil_dofs(nd, 99);
 
-  for (size_t face = 0; face < KTNeighborData_1_1::n_faces; ++face)
+  for (size_t face = 0; face < KTMutableStencil_1_1::n_faces; ++face)
     for (size_t c = 0; c < nc; ++c)
-      CHECK(derivative(result.u[face][c]) == Catch::Approx(0.0));
+      CHECK(derivative(result.neighbor_u[face][c]) == Catch::Approx(0.0));
 }
 
-TEST_CASE("make_tagged_neighbors 1D multi-component — specific face and component seeded",
-          "[FV][KT][make_tagged_neighbors]")
+TEST_CASE("tag_cell_stencil_dofs 1D multi-component — specific face and component seeded",
+          "[FV][KT][tag_cell_stencil_dofs]")
 {
   constexpr int dim = 1;
   constexpr size_t nc = 2;
 
-  const KTNeighborData_1_2 nd{
-      .x = {Point<dim>(-1.0), Point<dim>(1.0)},
-      .u = {std::array<NumberType, nc>{1.0, 2.0}, std::array<NumberType, nc>{3.0, 4.0}},
-      .dof_indices = {std::array<dealii::types::global_dof_index, nc>{10, 20},
-                      std::array<dealii::types::global_dof_index, nc>{30, 40}},
+  const KTMutableStencil_1_2 nd{
+      .neighbor_x = {Point<dim>(-1.0), Point<dim>(1.0)},
+      .neighbor_u = {std::array<NumberType, nc>{1.0, 2.0}, std::array<NumberType, nc>{3.0, 4.0}},
+      .neighbor_dof_indices = {std::array<dealii::types::global_dof_index, nc>{10, 20},
+                               std::array<dealii::types::global_dof_index, nc>{30, 40}},
   };
 
   SECTION("tag dof 20 — face 0, component 1")
   {
-    const auto result = make_tagged_neighbors(nd, 20);
+    const auto result = tag_cell_stencil_dofs(nd, 20);
 
     // Only face 0, component 1 should be seeded
-    CHECK(derivative(result.u[0][0]) == Catch::Approx(0.0));
-    CHECK(derivative(result.u[0][1]) == Catch::Approx(1.0));
-    CHECK(derivative(result.u[1][0]) == Catch::Approx(0.0));
-    CHECK(derivative(result.u[1][1]) == Catch::Approx(0.0));
+    CHECK(derivative(result.neighbor_u[0][0]) == Catch::Approx(0.0));
+    CHECK(derivative(result.neighbor_u[0][1]) == Catch::Approx(1.0));
+    CHECK(derivative(result.neighbor_u[1][0]) == Catch::Approx(0.0));
+    CHECK(derivative(result.neighbor_u[1][1]) == Catch::Approx(0.0));
 
     // Values preserved
-    CHECK(val(result.u[0][0]) == Catch::Approx(1.0));
-    CHECK(val(result.u[0][1]) == Catch::Approx(2.0));
-    CHECK(val(result.u[1][0]) == Catch::Approx(3.0));
-    CHECK(val(result.u[1][1]) == Catch::Approx(4.0));
+    CHECK(val(result.neighbor_u[0][0]) == Catch::Approx(1.0));
+    CHECK(val(result.neighbor_u[0][1]) == Catch::Approx(2.0));
+    CHECK(val(result.neighbor_u[1][0]) == Catch::Approx(3.0));
+    CHECK(val(result.neighbor_u[1][1]) == Catch::Approx(4.0));
   }
 
   SECTION("tag dof 30 — face 1, component 0")
   {
-    const auto result = make_tagged_neighbors(nd, 30);
+    const auto result = tag_cell_stencil_dofs(nd, 30);
 
-    CHECK(derivative(result.u[0][0]) == Catch::Approx(0.0));
-    CHECK(derivative(result.u[0][1]) == Catch::Approx(0.0));
-    CHECK(derivative(result.u[1][0]) == Catch::Approx(1.0));
-    CHECK(derivative(result.u[1][1]) == Catch::Approx(0.0));
+    CHECK(derivative(result.neighbor_u[0][0]) == Catch::Approx(0.0));
+    CHECK(derivative(result.neighbor_u[0][1]) == Catch::Approx(0.0));
+    CHECK(derivative(result.neighbor_u[1][0]) == Catch::Approx(1.0));
+    CHECK(derivative(result.neighbor_u[1][1]) == Catch::Approx(0.0));
   }
 }
 
-TEST_CASE("make_tagged_neighbors 2D single component — 4 faces, one matching", "[FV][KT][make_tagged_neighbors]")
+TEST_CASE("tag_cell_stencil_dofs 2D single component — 4 faces, one matching", "[FV][KT][tag_cell_stencil_dofs]")
 {
   constexpr int dim = 2;
   constexpr size_t nc = 1;
 
-  const KTNeighborData_2_1 nd{
-      .x = {Point<dim>(-1.0, 0.0), Point<dim>(1.0, 0.0), Point<dim>(0.0, -1.0), Point<dim>(0.0, 1.0)},
-      .u = {std::array<NumberType, nc>{1.0}, std::array<NumberType, nc>{2.0}, std::array<NumberType, nc>{3.0},
-            std::array<NumberType, nc>{4.0}},
-      .dof_indices = {std::array<dealii::types::global_dof_index, nc>{100},
-                      std::array<dealii::types::global_dof_index, nc>{200},
-                      std::array<dealii::types::global_dof_index, nc>{300},
-                      std::array<dealii::types::global_dof_index, nc>{400}},
+  const KTMutableStencil_2_1 nd{
+      .neighbor_x = {Point<dim>(-1.0, 0.0), Point<dim>(1.0, 0.0), Point<dim>(0.0, -1.0), Point<dim>(0.0, 1.0)},
+      .neighbor_u = {std::array<NumberType, nc>{1.0}, std::array<NumberType, nc>{2.0}, std::array<NumberType, nc>{3.0},
+                     std::array<NumberType, nc>{4.0}},
+      .neighbor_dof_indices = {std::array<dealii::types::global_dof_index, nc>{100},
+                               std::array<dealii::types::global_dof_index, nc>{200},
+                               std::array<dealii::types::global_dof_index, nc>{300},
+                               std::array<dealii::types::global_dof_index, nc>{400}},
   };
 
-  const auto result = make_tagged_neighbors(nd, 300);
+  const auto result = tag_cell_stencil_dofs(nd, 300);
 
   // Only face 2 should be seeded
-  CHECK(derivative(result.u[0][0]) == Catch::Approx(0.0));
-  CHECK(derivative(result.u[1][0]) == Catch::Approx(0.0));
-  CHECK(derivative(result.u[2][0]) == Catch::Approx(1.0));
-  CHECK(derivative(result.u[3][0]) == Catch::Approx(0.0));
+  CHECK(derivative(result.neighbor_u[0][0]) == Catch::Approx(0.0));
+  CHECK(derivative(result.neighbor_u[1][0]) == Catch::Approx(0.0));
+  CHECK(derivative(result.neighbor_u[2][0]) == Catch::Approx(1.0));
+  CHECK(derivative(result.neighbor_u[3][0]) == Catch::Approx(0.0));
 
   // Values preserved
-  CHECK(val(result.u[0][0]) == Catch::Approx(1.0));
-  CHECK(val(result.u[1][0]) == Catch::Approx(2.0));
-  CHECK(val(result.u[2][0]) == Catch::Approx(3.0));
-  CHECK(val(result.u[3][0]) == Catch::Approx(4.0));
+  CHECK(val(result.neighbor_u[0][0]) == Catch::Approx(1.0));
+  CHECK(val(result.neighbor_u[1][0]) == Catch::Approx(2.0));
+  CHECK(val(result.neighbor_u[2][0]) == Catch::Approx(3.0));
+  CHECK(val(result.neighbor_u[3][0]) == Catch::Approx(4.0));
 
   // Positions preserved
-  CHECK(result.x[0][0] == Catch::Approx(-1.0));
-  CHECK(result.x[0][1] == Catch::Approx(0.0));
-  CHECK(result.x[2][0] == Catch::Approx(0.0));
-  CHECK(result.x[2][1] == Catch::Approx(-1.0));
+  CHECK(result.neighbor_x[0][0] == Catch::Approx(-1.0));
+  CHECK(result.neighbor_x[0][1] == Catch::Approx(0.0));
+  CHECK(result.neighbor_x[2][0] == Catch::Approx(0.0));
+  CHECK(result.neighbor_x[2][1] == Catch::Approx(-1.0));
 
   // dof_indices preserved
-  CHECK(result.dof_indices[2][0] == 300);
+  CHECK(result.neighbor_dof_indices[2][0] == 300);
 }
 
 // -----------------------------------------------------------------------------

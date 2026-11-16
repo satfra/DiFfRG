@@ -324,7 +324,6 @@ namespace dg_test
     typename S::VectorType r(s.u);
     r = 0;
     const std::array<double, S::Model::Components::count_extractors()> no_extractors{};
-    const double cell_width = 0.;
     // The point data the assembler hands the model: zero derivatives / hessians unless it gathers them.
     struct PointData {
       Vector<double> u{2};
@@ -348,9 +347,7 @@ namespace dg_test
       return p;
     };
     // The full tuple, with zeros for what the assembler does not gather.
-    const auto at = [&](PointData &p) {
-      return batch_tie<true, true>(p.u, p.du, p.ddu, no_extractors, s.u, cell_width);
-    };
+    const auto at = [&](PointData &p) { return batch_tie<true, true>(p.u, p.du, p.ddu, no_extractors, s.u); };
 
     const auto cell_worker = [&](const Iterator &cell, Scratch &sc, Copy &copy) {
       copy.parts.clear();

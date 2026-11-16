@@ -126,7 +126,7 @@ Step by step:
   `map_points` also accepts directly.
 - **One `map_points` call per integral**, which on the GPU is one kernel launch.
 
-`batch.extractors()`, `batch.variables()` (shared by all points), `batch.x(i)` and `batch.cell_width(i)` are also
+`batch.extractors()`, `batch.variables()` (shared by all points), `batch.x(i)` are also
 available.
 
 `model.hh` keeps the per-point `flux` as well. It is not needed by the batched path, but with

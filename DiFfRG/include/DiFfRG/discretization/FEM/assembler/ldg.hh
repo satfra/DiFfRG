@@ -819,11 +819,10 @@ namespace DiFfRG
         boundary_normals.resize(boundary_b.size());
         face_normals.resize(faces_b[0].size());
 
-        const auto geometry = [](Batch &batch, const size_t first, const auto &fev, const double width) {
+        const auto geometry = [](Batch &batch, const size_t first, const auto &fev) {
           for (const auto &q : fev.quadrature_point_indices()) {
             for (uint d = 0; d < dim; ++d)
               batch.coordinate(d, first + q) = fev.quadrature_point(q)[d];
-            batch.width(first + q) = width;
           }
         };
         tbb::parallel_for(tbb::blocked_range<size_t>(0, cells[0].size()), [&](const tbb::blocked_range<size_t> &r) {
@@ -831,7 +830,7 @@ namespace DiFfRG
           for (size_t k = r.begin(); k != r.end(); ++k) {
             for (uint l = 0; l < n_levels; ++l)
               s.fe_v[l]->reinit(cells[l][k]);
-            geometry(cells_b, k * n_q, *s.fe_v[0], DiFfRG::internal::cell_width(cells[0][k]));
+            geometry(cells_b, k * n_q, *s.fe_v[0]);
             store(
                 cells_b, k * n_q, [&](const uint l) -> const FEValuesBase<dim> & { return *s.fe_v[l]; },
                 [&](const uint l) -> auto & { return s.values[l]; });
@@ -845,7 +844,7 @@ namespace DiFfRG
                 for (uint l = 0; l < n_levels; ++l)
                   s.fe_fv[l]->reinit(DiFfRG::internal::on(*dof_handler_list[l], cell),
                                      topology.boundary_faces[f].second);
-                geometry(boundary_b, f * n_q_face, *s.fe_fv[0], DiFfRG::internal::cell_width(cell));
+                geometry(boundary_b, f * n_q_face, *s.fe_fv[0]);
                 store(
                     boundary_b, f * n_q_face, [&](const uint l) -> const FEValuesBase<dim> & { return *s.fe_fv[l]; },
                     [&](const uint l) -> auto & { return s.face_values[l]; });
@@ -859,8 +858,7 @@ namespace DiFfRG
               for (size_t f = r.begin(); f != r.end(); ++f) {
                 const auto &fe_iv0 = reinit_interface(s, f);
                 for (uint side = 0; side < 2; ++side) {
-                  geometry(faces_b[side], f * n_q_face, fe_iv0.get_fe_face_values(side),
-                           DiFfRG::internal::cell_width(topology.faces[f].cell[side]));
+                  geometry(faces_b[side], f * n_q_face, fe_iv0.get_fe_face_values(side));
                   store(
                       faces_b[side], f * n_q_face,
                       [&](const uint l) -> const FEValuesBase<dim> & { return s.fe_iv[l]->get_fe_face_values(side); },

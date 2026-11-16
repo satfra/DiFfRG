@@ -258,7 +258,7 @@ namespace DiFfRG
        * @param F_i the result, one \f$d\f$-vector per FE function.
        * @param x the point in field space.
        * @param sol named tuple: `"fe_functions"`, `"fe_derivatives"`, `"fe_third_derivatives"` (\f$\partial_x^3
-       * u_i\f$, 1D only; zero otherwise), `"extractors"`, `"variables"`, `"cell_width"`. Extractors are frozen, as
+       * u_i\f$, 1D only; zero otherwise), `"extractors"`, `"variables"`. Extractors are frozen, as
        * for flux().
        */
       template <int dim, typename NumberType, typename Solutions, size_t n_fe_functions>
@@ -277,11 +277,10 @@ namespace DiFfRG
        * @param sol named tuple; its entries depend on the assembler:
        * - CG, DG: `"fe_functions"` \f$u_i\f$, `"fe_derivatives"` \f$\partial u_i\f$ (unless
        *   `use_derivatives = false`), `"fe_hessians"` \f$\partial^2 u_i\f$ (unless `use_hessians = false`),
-       *   `"extractors"` \f$e_b\f$, `"variables"` \f$v_a\f$, `"cell_width"`.
-       * - LDG main level: `"fe_functions"`, `"LDG1"`, ... (the LDG levels), `"extractors"`, `"variables"`,
-       *   `"cell_width"`.
+       *   `"extractors"` \f$e_b\f$, `"variables"` \f$v_a\f$.
+       * - LDG main level: `"fe_functions"`, `"LDG1"`, ... (the LDG levels), `"extractors"`, `"variables"`.
        * - KT: `"fe_functions"`, `"fe_derivatives"` (the limited reconstructed gradient), `"fe_hessians"` (the diagonal
-       *   stencil curvature; unless `use_hessians = false`), `"extractors"`, `"variables"`, `"cell_width"`.
+       *   stencil curvature; unless `use_hessians = false`), `"extractors"`, `"variables"`.
        *
        * The same tuple is passed to flux() (on KT faces without hessians).
        */
@@ -305,7 +304,7 @@ namespace DiFfRG
        * component c, direction d, point i. Compute only what `out.requested(Term::...)` asks for; all columns are
        * zero on entry.
        * @param batch a PointBatch: `values(c)`, `derivatives(c, d)`, `hessians(c, d1, d2)`, `coordinates(d)`,
-       * `extractors()`, `variables()`, `x(i)`, `cell_width(i)`, `size()`. LDG adds `ldg_values(k, c)`, KT diffusion
+       * `extractors()`, `variables()`, `x(i)`, `size()`. LDG adds `ldg_values(k, c)`, KT diffusion
        * traces `third_derivatives(c, d0, d1, d2)`. Inputs the assembler does not gather do not compile; test with
        * `if constexpr (Batch::has_derivatives)` / `Batch::has_hessians`.
        *

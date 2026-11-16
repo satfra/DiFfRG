@@ -78,28 +78,22 @@ namespace DiFfRG
       /**
        * @brief The limited cell slope \f$g_K\f$, per component and direction.
        *
-       * @param center_pos The cell centre.
-       * @param u_center The cell averages.
-       * @param x_n The centres of the \f$2d\f$ face neighbours, ordered (lower, upper) for direction 0, then 1.
-       * @param u_n Their cell averages (model ghosts across the boundary).
+       * @param stencil Cell and neighboring positions and values, ordered lower/upper per direction.
        */
-      template <int n_components>
-      static GradientType<dim, NumberType, n_components>
-      compute_gradient(const dealii::Point<dim> &center_pos, const std::array<NumberType, n_components> &u_center,
-                       const std::array<dealii::Point<dim>, n_faces> &x_n,
-                       const std::array<std::array<NumberType, n_components>, n_faces> &u_n)
+      template <int n_components, typename Stencil>
+      static GradientType<dim, NumberType, n_components> compute_gradient(const Stencil &stencil)
       {
         GradientType<dim, NumberType, n_components> u_grad{};
         for (size_t c = 0; c < static_cast<size_t>(n_components); c++) {
-          const NumberType &u_val = u_center[c];
+          const NumberType &u_val = stencil.values()[c];
           for (int d = 0, i_n_1 = 0, i_n_2 = 1; d < dim; d++, i_n_1 += 2, i_n_2 += 2) {
 
-            const auto &u_n_1 = u_n[i_n_1][c];
-            const auto &u_n_2 = u_n[i_n_2][c];
+            const auto &u_n_1 = stencil.neighbor_values(i_n_1)[c];
+            const auto &u_n_2 = stencil.neighbor_values(i_n_2)[c];
 
-            const auto dx_1 = x_n[i_n_1] - center_pos;
+            const auto dx_1 = stencil.neighbor_center(i_n_1) - stencil.center();
             const NumberType du_1 = (u_n_1 - u_val) / dx_1[d];
-            const auto dx_2 = x_n[i_n_2] - center_pos;
+            const auto dx_2 = stencil.neighbor_center(i_n_2) - stencil.center();
             const NumberType du_2 = (u_n_2 - u_val) / dx_2[d];
 
             u_grad[c][d] = Limiter::slope_limit(du_1, du_2);
@@ -109,31 +103,26 @@ namespace DiFfRG
         return u_grad;
       }
 
-      /// The gradient handed to the model at @p x: per direction the one-sided slope towards @p x, or the limited
-      /// slope if @p x is level with the centre.
-      template <int n_components>
-      static GradientType<dim, NumberType, n_components>
-      compute_gradient_at_point(const dealii::Point<dim> &center_pos, const dealii::Point<dim> &x,
-                                const std::array<NumberType, n_components> &u_center,
-                                const std::array<dealii::Point<dim>, n_faces> &x_n,
-                                const std::array<std::array<NumberType, n_components>, n_faces> &u_n)
+      template <int n_components, typename Stencil>
+      static GradientType<dim, NumberType, n_components> compute_gradient_at_point(const Stencil &stencil,
+                                                                                   const dealii::Point<dim> &x)
       {
         GradientType<dim, NumberType, n_components> u_grad{};
 
         for (size_t c = 0; c < static_cast<size_t>(n_components); ++c) {
-          const NumberType &u_val = u_center[c];
+          const NumberType &u_val = stencil.values()[c];
           for (int d = 0, i_n_1 = 0, i_n_2 = 1; d < dim; ++d, i_n_1 += 2, i_n_2 += 2) {
-            const auto dx_1 = x_n[i_n_1] - center_pos;
-            const NumberType du_1 = (u_n[i_n_1][c] - u_val) / dx_1[d];
-            const auto dx_2 = x_n[i_n_2] - center_pos;
-            const NumberType du_2 = (u_n[i_n_2][c] - u_val) / dx_2[d];
+            const auto dx_1 = stencil.neighbor_center(i_n_1) - stencil.center();
+            const NumberType du_1 = (stencil.neighbor_values(i_n_1)[c] - u_val) / dx_1[d];
+            const auto dx_2 = stencil.neighbor_center(i_n_2) - stencil.center();
+            const NumberType du_2 = (stencil.neighbor_values(i_n_2)[c] - u_val) / dx_2[d];
 
             // x at the centre along d, up to rounding: the source points come from FEValues, the centre from
             // the cell, and the two need not agree to the last bit.
             const double tolerance = 1e-10 * std::min(std::abs(dx_1[d]), std::abs(dx_2[d]));
-            if (x[d] < center_pos[d] - tolerance)
+            if (x[d] < stencil.center()[d] - tolerance)
               u_grad[c][d] = du_1;
-            else if (x[d] > center_pos[d] + tolerance)
+            else if (x[d] > stencil.center()[d] + tolerance)
               u_grad[c][d] = du_2;
             else
               u_grad[c][d] = Limiter::slope_limit(du_1, du_2);
@@ -143,39 +132,19 @@ namespace DiFfRG
         return u_grad;
       }
 
-      /**
-       * @brief The derivative of compute_gradient by the one stencil value whose autodiff input is seeded.
-       *
-       * @param center_pos The cell centre.
-       * @param u_center The cell averages, as autodiff numbers.
-       * @param x_n The centres of the \f$2d\f$ face neighbours.
-       * @param u_n Their cell averages, as autodiff numbers.
-       */
-      template <int n_components>
-      static GradientType<dim, NumberType, n_components>
-      compute_gradient_derivative(const dealii::Point<dim> &center_pos,
-                                  const std::array<ADNumberType, n_components> &u_center,
-                                  const std::array<dealii::Point<dim>, n_faces> &x_n,
-                                  const std::array<std::array<ADNumberType, n_components>, n_faces> &u_n)
-      {
-        // Forward AD through the limiter, not a finite difference: a difference step straddles the limiter's
-        // kink whenever the two one-sided slopes differ by less than the step, and then returns the mean of
-        // both branches instead of the derivative of the branch the residual takes.
-        return derivative_of<n_components>(TVDReconstructor<dim, Limiter, ADNumberType>::template compute_gradient<n_components>(
-            center_pos, u_center, x_n, u_n));
-      }
-
-      /// The derivative of compute_gradient_at_point by the one seeded stencil value.
-      template <int n_components>
-      static GradientType<dim, NumberType, n_components>
-      compute_gradient_at_point_derivative(const dealii::Point<dim> &center_pos, const dealii::Point<dim> &x,
-                                           const std::array<ADNumberType, n_components> &u_center,
-                                           const std::array<dealii::Point<dim>, n_faces> &x_n,
-                                           const std::array<std::array<ADNumberType, n_components>, n_faces> &u_n)
+      template <int n_components, typename Stencil>
+      static GradientType<dim, NumberType, n_components> compute_gradient_derivative(const Stencil &stencil)
       {
         return derivative_of<n_components>(
-            TVDReconstructor<dim, Limiter, ADNumberType>::template compute_gradient_at_point<n_components>(
-                center_pos, x, u_center, x_n, u_n));
+            TVDReconstructor<dim, Limiter, ADNumberType>::template compute_gradient<n_components>(stencil));
+      }
+
+      template <int n_components, typename Stencil>
+      static GradientType<dim, NumberType, n_components>
+      compute_gradient_at_point_derivative(const Stencil &stencil, const dealii::Point<dim> &x)
+      {
+        return derivative_of<n_components>(
+            TVDReconstructor<dim, Limiter, ADNumberType>::template compute_gradient_at_point<n_components>(stencil, x));
       }
 
       /// In 1D, \f$u'''\f$ from the divided difference of the four cell averages around a face; zero otherwise.

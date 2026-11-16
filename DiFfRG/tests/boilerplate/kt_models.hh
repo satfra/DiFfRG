@@ -1,3 +1,4 @@
+#include <DiFfRG/discretization/FV/stencil.hh>
 #pragma once
 
 // DiFfRG
@@ -29,8 +30,10 @@ namespace DiFfRG
           u_stencil[lower_inner][c] = face_value[c];
 
         const auto interior_gradient = Reconstructor::template compute_gradient<n_components>(
-            x_stencil[physical_cell], u_stencil[physical_cell], {x_stencil[lower_inner], x_stencil[upper_inner]},
-            {u_stencil[lower_inner], u_stencil[upper_inner]});
+            DiFfRG::FV::CellStencilData<1, NumberType, n_components>{
+                .cell = {.x = x_stencil[physical_cell], .u = u_stencil[physical_cell]},
+                .neighbor_x = {x_stencil[lower_inner], x_stencil[upper_inner]},
+                .neighbor_u = {u_stencil[lower_inner], u_stencil[upper_inner]}});
 
         x_stencil[lower_outer][0] = 2.0 * x_stencil[lower_inner][0] - x_stencil[physical_cell][0];
         for (size_t c = 0; c < n_components; ++c)
@@ -44,8 +47,10 @@ namespace DiFfRG
         u_stencil[upper_inner][c] = face_value[c];
 
       const auto interior_gradient = Reconstructor::template compute_gradient<n_components>(
-          x_stencil[physical_cell], u_stencil[physical_cell], {x_stencil[lower_inner], x_stencil[upper_inner]},
-          {u_stencil[lower_inner], u_stencil[upper_inner]});
+          DiFfRG::FV::CellStencilData<1, NumberType, n_components>{
+              .cell = {.x = x_stencil[physical_cell], .u = u_stencil[physical_cell]},
+              .neighbor_x = {x_stencil[lower_inner], x_stencil[upper_inner]},
+              .neighbor_u = {u_stencil[lower_inner], u_stencil[upper_inner]}});
 
       x_stencil[upper_outer][0] = 2.0 * x_stencil[upper_inner][0] - x_stencil[physical_cell][0];
       for (size_t c = 0; c < n_components; ++c)

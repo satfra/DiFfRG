@@ -26,44 +26,28 @@ namespace DiFfRG
       /// A face depends on its two cells only.
       static constexpr int jacobian_stencil_radius = 1;
 
-      template <int n_components>
-      static GradientType<dim, NumberType, n_components>
-      compute_gradient([[maybe_unused]] const dealii::Point<dim> &center_pos,
-                       [[maybe_unused]] const std::array<NumberType, n_components> &u_center,
-                       [[maybe_unused]] const std::array<dealii::Point<dim>, n_faces> &x_n,
-                       [[maybe_unused]] const std::array<std::array<NumberType, n_components>, n_faces> &u_n)
+      template <int n_components, typename Stencil>
+      static GradientType<dim, NumberType, n_components> compute_gradient(const Stencil &)
       {
         return {};
       }
 
-      template <int n_components>
-      static GradientType<dim, NumberType, n_components>
-      compute_gradient_at_point([[maybe_unused]] const dealii::Point<dim> &center_pos,
-                                [[maybe_unused]] const dealii::Point<dim> &x,
-                                [[maybe_unused]] const std::array<NumberType, n_components> &u_center,
-                                [[maybe_unused]] const std::array<dealii::Point<dim>, n_faces> &x_n,
-                                [[maybe_unused]] const std::array<std::array<NumberType, n_components>, n_faces> &u_n)
+      template <int n_components, typename Stencil>
+      static GradientType<dim, NumberType, n_components> compute_gradient_at_point(const Stencil &,
+                                                                                   const dealii::Point<dim> &)
       {
         return {};
       }
 
-      template <int n_components>
-      static GradientType<dim, NumberType, n_components>
-      compute_gradient_derivative([[maybe_unused]] const dealii::Point<dim> &center_pos,
-                                  [[maybe_unused]] const std::array<ADNumberType, n_components> &u_center,
-                                  [[maybe_unused]] const std::array<dealii::Point<dim>, n_faces> &x_n,
-                                  [[maybe_unused]] const std::array<std::array<ADNumberType, n_components>, n_faces> &u_n)
+      template <int n_components, typename Stencil>
+      static GradientType<dim, NumberType, n_components> compute_gradient_derivative(const Stencil &)
       {
         return {};
       }
 
-      template <int n_components>
+      template <int n_components, typename Stencil>
       static GradientType<dim, NumberType, n_components>
-      compute_gradient_at_point_derivative(
-          [[maybe_unused]] const dealii::Point<dim> &center_pos, [[maybe_unused]] const dealii::Point<dim> &x,
-          [[maybe_unused]] const std::array<ADNumberType, n_components> &u_center,
-          [[maybe_unused]] const std::array<dealii::Point<dim>, n_faces> &x_n,
-          [[maybe_unused]] const std::array<std::array<ADNumberType, n_components>, n_faces> &u_n)
+      compute_gradient_at_point_derivative(const Stencil &, const dealii::Point<dim> &)
       {
         return {};
       }

@@ -594,8 +594,9 @@ namespace
                                              const Discretization &discretization, const CaseVAssembler &assembler,
                                              const VectorType &solution, const GammaRunParameters &params)
   {
-    typename CaseVAssembler::SolutionReconstructionCache cache;
-    assembler.template rebuild_solution_reconstruction_cache<typename CaseVAssembler::Reconstructor>(solution, cache);
+    typename CaseVAssembler::Mesh cache;
+    assembler.initialize_mesh(cache);
+    assembler.template reconstruct<typename CaseVAssembler::Reconstructor>(solution, cache);
 
     std::vector<CaseVFaceDiffusionDiagnostic> diagnostics;
     diagnostics.reserve(params.n_cells_per_direction * (params.n_cells_per_direction - 1) * dim);
@@ -617,12 +618,12 @@ namespace
         const auto neighbor = cell->neighbor(face_index);
         const unsigned int neighbor_index = neighbor->active_cell_index();
         if (neighbor_index < cell_index) continue;
-        if (!cache.face_reconstruction_valid[cell_index][face_index]) continue;
+        if (!cache.face(cell_index, face_index).state.reconstruction_valid) continue;
 
-        const auto &reconstruction = cache.face_reconstructions[cell_index][face_index];
-        const auto &minus_stencil = cache.cell_stencils[cell_index];
-        const auto &plus_stencil = cache.cell_stencils[neighbor_index];
-        const Tensor<1, dim> face_vector = plus_stencil.cell.x - minus_stencil.cell.x;
+        const auto &reconstruction = cache.face(cell_index, face_index).state.reconstruction;
+        const auto &minus_stencil = cache.cells()[cell_index];
+        const auto &plus_stencil = cache.cells()[neighbor_index];
+        const Tensor<1, dim> face_vector = plus_stencil.center() - minus_stencil.center();
         const double face_distance = face_vector.norm();
         Tensor<1, dim> face_normal;
         if (face_distance > 0.0) face_normal = face_vector / face_distance;
@@ -645,15 +646,15 @@ namespace
         record.cell_index = cell_index;
         record.neighbor_index = neighbor_index;
         record.face_index = face_index;
-        record.cell_grid_index = {coordinate_index(minus_stencil.cell.x[0], params),
-                                  coordinate_index(minus_stencil.cell.x[1], params)};
-        record.neighbor_grid_index = {coordinate_index(plus_stencil.cell.x[0], params),
-                                      coordinate_index(plus_stencil.cell.x[1], params)};
-        record.dof_minus = minus_stencil.cell.dof_indices;
-        record.dof_plus = plus_stencil.cell.dof_indices;
+        record.cell_grid_index = {coordinate_index(minus_stencil.center()[0], params),
+                                  coordinate_index(minus_stencil.center()[1], params)};
+        record.neighbor_grid_index = {coordinate_index(plus_stencil.center()[0], params),
+                                      coordinate_index(plus_stencil.center()[1], params)};
+        record.dof_minus = minus_stencil.dofs();
+        record.dof_plus = plus_stencil.dofs();
         record.face_center = face_center;
-        record.minus_center = minus_stencil.cell.x;
-        record.plus_center = plus_stencil.cell.x;
+        record.minus_center = minus_stencil.center();
+        record.plus_center = plus_stencil.center();
         record.radius = radius;
         record.surface_distance = radius - 3.0;
         record.grad_minus = copy_gradient(reconstruction.diffusion_grad_minus);

@@ -27,7 +27,7 @@ namespace DiFfRG
       {
         /// Which per-point tuple a TraceBatch hands the model.
         enum class TraceKind {
-          /// flux_tie: "fe_functions", "fe_derivatives", "extractors", "variables", "cell_width"
+          /// flux_tie: "fe_functions", "fe_derivatives", "extractors", "variables"
           flux,
           /// diffusion_flux_tie: flux_tie plus "fe_third_derivatives" after the derivatives
           diffusion,
@@ -107,15 +107,14 @@ namespace DiFfRG
           {
             if constexpr (with_third)
               return diffusion_flux_tie(s.values, s.derivatives, s.third_derivatives, this->extractors(),
-                                        this->variables(), s.cell_width);
+                                        this->variables());
             else if constexpr (Base::has_hessians)
-              return named_tuple<
-                  std::tuple<decltype(s.values) &, decltype(s.derivatives) &, decltype(s.hessians) &,
-                             const Extractors &, const Variables &, double &>,
-                  StringSet<"fe_functions", "fe_derivatives", "fe_hessians", "extractors", "variables", "cell_width">>(
-                  std::tie(s.values, s.derivatives, s.hessians, this->extractors(), this->variables(), s.cell_width));
+              return named_tuple<std::tuple<decltype(s.values) &, decltype(s.derivatives) &, decltype(s.hessians) &,
+                                            const Extractors &, const Variables &>,
+                                 StringSet<"fe_functions", "fe_derivatives", "fe_hessians", "extractors", "variables">>(
+                  std::tie(s.values, s.derivatives, s.hessians, this->extractors(), this->variables()));
             else
-              return flux_tie(s.values, s.derivatives, this->extractors(), this->variables(), s.cell_width);
+              return flux_tie(s.values, s.derivatives, this->extractors(), this->variables());
           }
 
           template <typename Src> void copy_point(const size_t j, const Src &src, const size_t i)

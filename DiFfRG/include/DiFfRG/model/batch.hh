@@ -51,25 +51,24 @@ namespace DiFfRG
   /**
    * @brief The named tuple the per-point callbacks (flux, source, numflux, boundary_numflux and their jacobians)
    * receive from CG and DG. It holds only the inputs the assembler gathered:
-   * - `use_derivatives = false`: "fe_functions", "extractors", "variables", "cell_width"
-   * - `use_hessians = false`: "fe_functions", "fe_derivatives", "extractors", "variables", "cell_width"
-   * - otherwise: "fe_functions", "fe_derivatives", "fe_hessians", "extractors", "variables", "cell_width"
+   * - `use_derivatives = false`: "fe_functions", "extractors", "variables"
+   * - `use_hessians = false`: "fe_functions", "fe_derivatives", "extractors", "variables"
+   * - otherwise: "fe_functions", "fe_derivatives", "fe_hessians", "extractors", "variables"
    *
-   * "cell_width" is the width of the cell the point belongs to. Reading an entry that is not there does not compile.
+   * Reading an entry that is not there does not compile.
    */
   template <bool with_derivatives, bool with_hessians, typename... T> auto batch_tie(T &&...t)
   {
     static_assert(with_derivatives || !with_hessians, "Hessians are only gathered together with derivatives.");
     if constexpr (with_hessians)
-      return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "fe_derivatives", "fe_hessians", "extractors",
-                                                       "variables", "cell_width">>(std::tie(t...));
-    else if constexpr (with_derivatives)
       return named_tuple<std::tuple<T &...>,
-                         StringSet<"fe_functions", "fe_derivatives", "extractors", "variables", "cell_width">>(
+                         StringSet<"fe_functions", "fe_derivatives", "fe_hessians", "extractors", "variables">>(
+          std::tie(t...));
+    else if constexpr (with_derivatives)
+      return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "fe_derivatives", "extractors", "variables">>(
           std::tie(t...));
     else
-      return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "extractors", "variables", "cell_width">>(
-          std::tie(t...));
+      return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "extractors", "variables">>(std::tie(t...));
   }
 
   /**
@@ -108,13 +107,12 @@ namespace DiFfRG
       std::array<NT, n_fe> values;
       std::array<dealii::Tensor<1, dim, NT>, n_fe> derivatives;
       std::array<dealii::Tensor<2, dim, NT>, n_fe> hessians;
-      double cell_width;
     };
   } // namespace internal
 
   /**
    * @brief The solution at a set of points: values and (if gathered) derivatives and hessians of every FE
-   * function, plus position and cell width of each point. Extractors and variables are shared by all points.
+   * function, plus position of each point. Extractors and variables are shared by all points.
    *
    * Columns are contiguous over the points (see batch.hh); the order of the points carries no meaning.
    *
@@ -156,7 +154,6 @@ namespace DiFfRG
       n = n_points;
       state.resize(n * n_columns);
       positions.resize(n * dim);
-      widths.resize(n);
     }
 
     /// Assembler side: point the batch to the extractors and variables, which must outlive its use.
@@ -200,8 +197,6 @@ namespace DiFfRG
         p[d] = positions[d * n + i];
       return p;
     }
-    /// Width of the cell containing point @p i.
-    double cell_width(const size_t i) const { return widths[i]; }
 
     /// The extractors \f$e_b\f$, the same for all points.
     const Extractors &extractors() const { return *m_extractors; }
@@ -221,18 +216,17 @@ namespace DiFfRG
                 s.hessians[c][d1][d2] = column(hessian_column(c, d1, d2))[i];
           }
       }
-      s.cell_width = widths[i];
     }
 
     /// The named tuple the per-point callbacks receive for a loaded State; see batch_tie.
     auto tie(State &s) const
     {
       if constexpr (with_hessians)
-        return batch_tie<true, true>(s.values, s.derivatives, s.hessians, extractors(), variables(), s.cell_width);
+        return batch_tie<true, true>(s.values, s.derivatives, s.hessians, extractors(), variables());
       else if constexpr (with_derivatives)
-        return batch_tie<true, false>(s.values, s.derivatives, extractors(), variables(), s.cell_width);
+        return batch_tie<true, false>(s.values, s.derivatives, extractors(), variables());
       else
-        return batch_tie<false, false>(s.values, extractors(), variables(), s.cell_width);
+        return batch_tie<false, false>(s.values, extractors(), variables());
     }
 
     /// Point j of this batch = point i of @p src, which has the same inputs but may differ in number type.
@@ -250,7 +244,6 @@ namespace DiFfRG
       }
       for (int d = 0; d < dim; ++d)
         coordinate(d, j) = src.coordinates(d)[i];
-      width(j) = src.cell_width(i);
     }
 
     // Writable access for whoever fills the batch.
@@ -266,7 +259,6 @@ namespace DiFfRG
       return column(hessian_column(c, d1, d2))[i];
     }
     double &coordinate(const size_t d, const size_t i) { return positions[d * n + i]; }
-    double &width(const size_t i) { return widths[i]; }
 
   protected:
     const NT *column(const size_t col) const { return state.data() + col * n; }
@@ -284,7 +276,6 @@ namespace DiFfRG
     size_t n = 0;
     std::vector<NT> state;
     std::vector<double> positions;
-    std::vector<double> widths;
     const Extractors *m_extractors = nullptr;
     const Variables *m_variables = nullptr;
   };
@@ -303,24 +294,23 @@ namespace DiFfRG
     template <uint n_levels, typename... T> auto ldg_tie(T &&...t)
     {
       if constexpr (n_levels == 2)
-        return named_tuple<std::tuple<T &...>,
-                           StringSet<"fe_functions", "LDG1", "extractors", "variables", "cell_width">>(std::tie(t...));
+        return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "LDG1", "extractors", "variables">>(
+            std::tie(t...));
       else if constexpr (n_levels == 3)
-        return named_tuple<std::tuple<T &...>,
-                           StringSet<"fe_functions", "LDG1", "LDG2", "extractors", "variables", "cell_width">>(
+        return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "LDG1", "LDG2", "extractors", "variables">>(
             std::tie(t...));
       else {
         static_assert(n_levels == 4, "LDG supports at most three levels besides the FE functions.");
         return named_tuple<std::tuple<T &...>,
-                           StringSet<"fe_functions", "LDG1", "LDG2", "LDG3", "extractors", "variables", "cell_width">>(
+                           StringSet<"fe_functions", "LDG1", "LDG2", "LDG3", "extractors", "variables">>(
             std::tie(t...));
       }
     }
   } // namespace internal
 
   /**
-   * @brief The batch of the LDG main level: values of the FE functions and of every LDG level, plus position and
-   * cell width; no derivatives. `values(c)` is FE function c, `ldg_values(k, c)` component c of level k >= 1.
+   * @brief The batch of the LDG main level: values of the FE functions and of every LDG level, plus position;
+   * no derivatives. `values(c)` is FE function c, `ldg_values(k, c)` component c of level k >= 1.
    *
    * Internally a PointBatch over the components of all levels in a row, so the AD jacobian covers all levels.
    */
@@ -355,7 +345,6 @@ namespace DiFfRG
 
     struct State {
       decltype(internal::level_arrays<NT, Components>(std::make_index_sequence<n_levels>{})) levels;
-      double cell_width;
     };
 
     void load(const size_t i, State &s) const
@@ -365,15 +354,12 @@ namespace DiFfRG
         for (size_t c = 0; c < level.size(); ++c)
           level[c] = this->column(level_offset(l) + c)[i]; // not Base::, GCC 13 ICEs on it
       });
-      s.cell_width = this->cell_width(i);
     }
 
     auto tie(State &s) const
     {
       return std::apply(
-          [&](auto &...level) {
-            return internal::ldg_tie<n_levels>(level..., this->extractors(), this->variables(), s.cell_width);
-          },
+          [&](auto &...level) { return internal::ldg_tie<n_levels>(level..., this->extractors(), this->variables()); },
           s.levels);
     }
   };

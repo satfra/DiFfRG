@@ -316,19 +316,17 @@ namespace ldg_test
   {
     /// The point tuple of the main level, with the names of the LDG assembler (no extractors).
     template <typename L0, typename L1>
-    auto tie(L0 &l0, L1 &l1, const std::array<double, 0> &e, const Vector<double> &v, const double &w)
+    auto tie(L0 &l0, L1 &l1, const std::array<double, 0> &e, const Vector<double> &v)
     {
-      return named_tuple<std::tuple<L0 &, L1 &, const std::array<double, 0> &, const Vector<double> &, const double &>,
-                         StringSet<"fe_functions", "LDG1", "extractors", "variables", "cell_width">>(
-          std::tie(l0, l1, e, v, w));
+      return named_tuple<std::tuple<L0 &, L1 &, const std::array<double, 0> &, const Vector<double> &>,
+                         StringSet<"fe_functions", "LDG1", "extractors", "variables">>(std::tie(l0, l1, e, v));
     }
     template <typename L0, typename L1, typename L2>
-    auto tie(L0 &l0, L1 &l1, L2 &l2, const std::array<double, 0> &e, const Vector<double> &v, const double &w)
+    auto tie(L0 &l0, L1 &l1, L2 &l2, const std::array<double, 0> &e, const Vector<double> &v)
     {
-      return named_tuple<
-          std::tuple<L0 &, L1 &, L2 &, const std::array<double, 0> &, const Vector<double> &, const double &>,
-          StringSet<"fe_functions", "LDG1", "LDG2", "extractors", "variables", "cell_width">>(
-          std::tie(l0, l1, l2, e, v, w));
+      return named_tuple<std::tuple<L0 &, L1 &, L2 &, const std::array<double, 0> &, const Vector<double> &>,
+                         StringSet<"fe_functions", "LDG1", "LDG2", "extractors", "variables">>(
+          std::tie(l0, l1, l2, e, v));
     }
 
     /**
@@ -525,7 +523,6 @@ namespace ldg_test
     const auto comp = [&](const uint i) { return fe.system_to_component_index(i).first; };
     const std::array<double, 0> no_extractors{};
     const Vector<double> variables;
-    const double width = 0.;
 
     // The point tuple at point q of every level's values.
     const auto at = [&](auto &vals, const uint q, auto &&body) {
@@ -533,9 +530,9 @@ namespace ldg_test
       auto l1 = reference::as_array<2>(vals[1][q]);
       if constexpr (n_levels > 2) {
         auto l2 = reference::as_array<1>(vals[2][q]);
-        body(reference::tie(l0, l1, l2, no_extractors, variables, width), l0);
+        body(reference::tie(l0, l1, l2, no_extractors, variables), l0);
       } else
-        body(reference::tie(l0, l1, no_extractors, variables, width), l0);
+        body(reference::tie(l0, l1, no_extractors, variables), l0);
     };
     const auto all_values = [&](const auto &fe_values_of) {
       std::vector<std::vector<Vector<double>>> vals;
