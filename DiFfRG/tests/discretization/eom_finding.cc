@@ -13,6 +13,7 @@
 #include <deal.II/fe/mapping_q1.h>
 #include <deal.II/grid/grid_generator.h>
 
+#include <boilerplate/eom_accuracy.hh>
 #include <boilerplate/models.hh>
 
 #include <DiFfRG/common/init.hh>
@@ -52,7 +53,6 @@ namespace
            {"output_subdivisions", 2},
            {"EoM_abs_tol", 1e-12},
            {"EoM_max_iter", 200},
-           {"EoM_smoothing_length", -1.},
            {"grid", {{"x_grid", "0:0.1:1"}, {"y_grid", "0:0.1:1"}, {"z_grid", "0:0.1:1"}, {"refine", refinement}}},
            {"adaptivity",
             {{"start_adapt_at", 0.},
@@ -183,6 +183,16 @@ namespace
     {
     }
 
+    Point<dim> reference_point() const { return minimum; }
+    Tensor<2, dim> reference_derivative() const
+    {
+      Tensor<2, dim> derivative;
+      for (unsigned int i = 0; i < dim; ++i)
+        for (unsigned int j = 0; j < dim; ++j)
+          derivative[i][j] = hessian[i][j];
+      return derivative;
+    }
+
     template <typename Vector> void initial_condition(const Point<dim> &pos, Vector &values) const
     {
       for (uint d = 0; d < dim; ++d) {
@@ -258,17 +268,6 @@ namespace
     template <typename Vector> std::array<double, 1> EoM(const Point<1> &pos, const Vector &) const
     {
       return {{(pos[0] - 0.03) * (pos[0] - 0.06)}};
-    }
-  };
-
-  using DefaultRawPotentialComponents = typename Testing::compFactory<2>::value;
-
-  class DefaultRawPotentialModel : public def::AbstractModel<DefaultRawPotentialModel, DefaultRawPotentialComponents>
-  {
-  public:
-    template <typename Vector> std::array<double, 2> EoM(const Point<2> &, const Vector &values) const
-    {
-      return {{values[0] - 1., values[1] - 2.}};
     }
   };
 
@@ -387,32 +386,10 @@ namespace
   }
 
   template <int dim, template <typename...> typename DiscretizationTemplate, typename Model>
-  void check_raw_potential_is_scalar_cg2(const Model &model, const int fe_order)
-  {
-    using Discretization = DiscretizationTemplate<Model, RectangularMesh<dim>>;
+  auto locate_with_model(const Model &model, const int fe_order, const uint refinement = 0,
+                         const std::optional<Point<dim>> &initial_guess = std::nullopt,
 
-    auto json = make_json(fe_order);
-    RectangularMesh<dim> mesh{Config::ConfigurationMesh<dim>(json)};
-    Discretization discretization(mesh, json);
-    FE::FlowingVariables state(discretization);
-    state.interpolate(model);
-
-    const auto raw = reconstruct_raw_potential(
-        state.spatial_data(), discretization.get_dof_handler(), discretization.get_mapping(),
-        [&](const auto &point, const auto &values) { return model.raw_potential_gradient(point, values); },
-        Config::EoMConfig(json));
-
-    REQUIRE(raw.finite_element != nullptr);
-    CHECK(dynamic_cast<const FE_Q<dim> *>(raw.finite_element.get()) != nullptr);
-    CHECK(raw.finite_element->degree == 2);
-    CHECK(raw.finite_element->n_components() == 1);
-    CHECK(raw.finite_element->conforms(FiniteElementData<dim>::H1));
-  }
-
-  template <int dim, template <typename...> typename DiscretizationTemplate, typename Model>
-  auto reconstruct_with_potential_with_model(const Model &model, const int fe_order,
-                                             const double smoothing_length = -1., const uint refinement = 0,
-                                             const std::optional<Point<dim>> &initial_guess = std::nullopt)
+                         const bool report_accuracy = false)
   {
     using NumberType = double;
     using Discretization = DiscretizationTemplate<Model, RectangularMesh<dim>, NumberType>;
@@ -433,34 +410,40 @@ namespace
 
     auto EoM_cell = dof_handler.begin_active();
     auto EoM_config = Config::EoMConfig(json);
-    EoM_config.smoothing_length = smoothing_length;
     EoM_config.validate();
-    return get_EoM_point_with_potential(
+    auto result = get_EoM_result(
         EoM_cell, src, dof_handler, mapping, [&](const auto &p, const auto &values) { return model.EoM(p, values); },
         [&](const auto &p, const auto &) { return p; }, EoM_config, initial_guess);
+    if constexpr (requires {
+                    model.reference_point();
+                    model.reference_derivative();
+                  }) {
+      if (report_accuracy) {
+        const auto du = Testing::direct_eom_state_derivative(src, dof_handler, mapping, result.point);
+        Testing::print_direct_eom_accuracy(fe_order == 0 ? "FV affine" : "FE affine", result.point,
+                                           model.reference_point(), du, model.reference_derivative());
+      }
+    }
+    return result;
   }
 
   template <int dim, template <typename...> typename DiscretizationTemplate, typename Model>
-  Point<dim> reconstruct_minimum_with_model(const Model &model, const int fe_order, const double smoothing_length = -1.,
-                                            const uint refinement = 0,
-                                            const std::optional<Point<dim>> &initial_guess = std::nullopt)
+  Point<dim> locate_minimum_with_model(const Model &model, const int fe_order, const uint refinement = 0,
+                                       const std::optional<Point<dim>> &initial_guess = std::nullopt)
   {
-    return reconstruct_with_potential_with_model<dim, DiscretizationTemplate>(model, fe_order, smoothing_length,
-                                                                              refinement, initial_guess)
-        .point;
+    return locate_with_model<dim, DiscretizationTemplate>(model, fe_order, refinement, initial_guess).point;
   }
 
   template <int dim, template <typename...> typename DiscretizationTemplate>
-  Point<dim> reconstruct_minimum(const Testing::PhysicalParameters &prm, const int fe_order,
-                                 const double smoothing_length = -1., const uint refinement = 0)
+  Point<dim> locate_minimum(const Testing::PhysicalParameters &prm, const int fe_order, const uint refinement = 0)
   {
     using Model = Testing::ModelConstant<dim, dim>;
     Model model(prm);
-    return reconstruct_minimum_with_model<dim, DiscretizationTemplate>(model, fe_order, smoothing_length, refinement);
+    return locate_minimum_with_model<dim, DiscretizationTemplate>(model, fe_order, refinement);
   }
 } // namespace
 
-TEST_CASE("CG EoM potential reconstruction finds 1D affine minima", "[discretization][EoM][cg][1d]")
+TEST_CASE("CG EoM direct search finds 1D affine minima", "[discretization][EoM][cg][1d]")
 {
   DiFfRG::Init();
   constexpr uint dim = 1;
@@ -468,12 +451,12 @@ TEST_CASE("CG EoM potential reconstruction finds 1D affine minima", "[discretiza
   const double slope = GENERATE(1.25, 2., 2.5, 5., 10.);
   const auto prm = parameters_from_affine<dim>(std::array<double, dim>{{-1.}}, std::array<double, dim>{{slope}});
   const auto expected = affine_minimum<dim>(prm);
-  const auto EoM = reconstruct_minimum<dim, CG::Discretization>(prm, fe_order);
+  const auto EoM = locate_minimum<dim, CG::Discretization>(prm, fe_order);
 
   REQUIRE(distance(EoM, expected) < 6e-2);
 }
 
-TEST_CASE("CG EoM potential reconstruction finds 2D affine and boundary minima", "[discretization][EoM][cg][2d]")
+TEST_CASE("CG EoM direct search finds 2D affine and boundary minima", "[discretization][EoM][cg][2d]")
 {
   DiFfRG::Init();
   constexpr uint dim = 2;
@@ -489,12 +472,12 @@ TEST_CASE("CG EoM potential reconstruction finds 2D affine and boundary minima",
   const auto prm =
       parameters_from_affine<dim>(std::array<double, dim>{{c[0], c[2]}}, std::array<double, dim>{{c[1], c[3]}});
   const auto expected = affine_minimum<dim>(prm);
-  const auto EoM = reconstruct_minimum<dim, CG::Discretization>(prm, fe_order);
+  const auto EoM = locate_minimum<dim, CG::Discretization>(prm, fe_order);
 
   REQUIRE(distance(EoM, expected) < 8e-2);
 }
 
-TEST_CASE("CG EoM potential reconstruction finds 3D affine minima", "[discretization][EoM][cg][3d]")
+TEST_CASE("CG EoM direct search finds 3D affine minima", "[discretization][EoM][cg][3d]")
 {
   DiFfRG::Init();
   constexpr uint dim = 3;
@@ -508,270 +491,99 @@ TEST_CASE("CG EoM potential reconstruction finds 3D affine minima", "[discretiza
   const auto prm = parameters_from_affine<dim>(std::array<double, dim>{{c[0], c[2], c[4]}},
                                                std::array<double, dim>{{c[1], c[3], c[5]}});
   const auto expected = affine_minimum<dim>(prm);
-  const auto EoM = reconstruct_minimum<dim, CG::Discretization>(prm, fe_order);
+  const auto EoM = locate_minimum<dim, CG::Discretization>(prm, fe_order);
 
   REQUIRE(distance(EoM, expected) < 1.1e-1);
 }
 
-TEST_CASE("Detailed EoM reconstruction owns the scalar potential and its gauge", "[discretization][EoM][potential]")
+TEST_CASE("Direct FV vacuum root and vector Hessian accuracy under mesh coarsening",
+          "[discretization][EoM][direct][fv][accuracy][coarsening]")
 {
   DiFfRG::Init();
   setup_logger();
-
-  const auto check_result = []<int dim>() {
-    const Point<dim> expected = []() {
-      if constexpr (dim == 1)
-        return Point<dim>(0.4);
-      else if constexpr (dim == 2)
-        return Point<dim>(0.4, 0.6);
-      else
-        return Point<dim>(0.4, 0.6, 0.8);
-    }();
-
-    using Model = Testing::ModelConstant<dim, dim>;
-    using Discretization = CG::Discretization<Model, RectangularMesh<dim>>;
-
-    auto json = make_json(2);
-    Model model(parameters_with_minimum(expected));
-    RectangularMesh<dim> mesh{Config::ConfigurationMesh<dim>(json)};
-    Discretization discretization(mesh, json);
-    FE::FlowingVariables initial_condition(discretization);
-    initial_condition.interpolate(model);
-
-    const auto &dof_handler = discretization.get_dof_handler();
-    auto EoM_cell = dof_handler.begin_active();
-    const auto result = get_EoM_point_with_potential(
-        EoM_cell, initial_condition.spatial_data(), dof_handler, discretization.get_mapping(),
-        [&](const auto &p, const auto &values) { return model.EoM(p, values); },
-        [&](const auto &p, const auto &) { return p; }, 1e-12, 100);
-
-    REQUIRE(distance(result.point, expected) < 1.1e-1);
-    REQUIRE(result.potential.has_value());
-    const auto &potential = result.potential.value();
-    REQUIRE(potential.finite_element != nullptr);
-    REQUIRE(potential.dof_handler != nullptr);
-    REQUIRE(potential.values.size() == potential.dof_handler->n_dofs());
-    REQUIRE(potential.finite_element->n_components() == 1);
-    REQUIRE(distance(potential.minimum, result.point) < 1e-12);
-
-    const auto support_points = DoFTools::map_dofs_to_support_points(MappingQ1<dim>(), *potential.dof_handler);
-    auto gauge_dof = support_points.begin()->first;
-    double gauge_distance = support_points.begin()->second.distance(Point<dim>());
-    for (const auto &[dof, point] : support_points) {
-      const double current_distance = point.distance(Point<dim>());
-      if (current_distance < gauge_distance) {
-        gauge_distance = current_distance;
-        gauge_dof = dof;
-      }
-    }
-    CHECK(potential.values[gauge_dof] == Catch::Approx(0.).margin(1e-12));
-  };
-
-  check_result.template operator()<1>();
-  check_result.template operator()<2>();
-  check_result.template operator()<3>();
-}
-
-TEST_CASE("Raw potential evaluation stays independent of the EoM used to select the point",
-          "[discretization][EoM][raw-potential]")
-{
-  DiFfRG::Init();
-  constexpr uint dim = 1;
-  using Model = ModelAffineEoM<dim>;
-  using Discretization = CG::Discretization<Model, RectangularMesh<dim>>;
-
-  setup_logger();
-  auto json = make_json(2);
-  Model model(Point<dim>(0.2), {{{2.}}});
-  RectangularMesh<dim> mesh{Config::ConfigurationMesh<dim>(json)};
-  Discretization discretization(mesh, json);
-  FE::FlowingVariables state(discretization);
-  state.interpolate(model);
-
-  const auto &dof_handler = discretization.get_dof_handler();
-  const auto &mapping = discretization.get_mapping();
-  const auto config = Config::EoMConfig(json);
-  auto EoM_cell = dof_handler.begin_active();
-  const auto EoM_result = get_EoM_point_with_potential(
-      EoM_cell, state.spatial_data(), dof_handler, mapping,
-      [&](const auto &, const auto &values) { return std::array<double, 1>{{values[0] - 0.6}}; },
-      [&](const auto &p, const auto &) { return p; }, config);
-
-  const auto raw_potential = reconstruct_raw_potential(
-      state.spatial_data(), dof_handler, mapping,
-      [&](const auto &p, const auto &values) { return model.raw_potential_gradient(p, values); }, config);
-  const auto raw = evaluate_raw_potential(raw_potential, mapping, EoM_result.point);
-
-  CHECK(EoM_result.point[0] == Catch::Approx(0.5).margin(1e-8));
-  CHECK(raw.value == Catch::Approx(0.05).margin(1e-8));
-  CHECK(raw.gradient[0] == Catch::Approx(0.6).margin(1e-8));
-  CHECK(raw.potential_hessian[0][0] == Catch::Approx(2.).margin(1e-8));
-  CHECK(raw.mass_hessian[0][0] == raw.potential_hessian[0][0]);
-
-  auto origin_config = config;
-  origin_config.max_iter = 0;
-  const auto raw_without_eom_search = reconstruct_raw_potential(
-      state.spatial_data(), dof_handler, mapping,
-      [&](const auto &p, const auto &values) { return model.raw_potential_gradient(p, values); }, origin_config);
-  const auto at_origin = evaluate_raw_potential(raw_without_eom_search, mapping, Point<dim>());
-  CHECK(at_origin.value == Catch::Approx(0.).margin(1e-12));
-  CHECK(at_origin.gradient[0] == Catch::Approx(-0.4).margin(1e-8));
-}
-
-TEST_CASE("Origin-centred FV vacuum keeps the diquark EoM near zero and its raw curvature positive",
-          "[discretization][EoM][raw-potential][fv][origin]")
-{
-  DiFfRG::Init();
-  constexpr uint dim = 2;
+  constexpr unsigned int dim = 2;
   using Model = QMDVacuumModel;
   using Discretization = FV::Discretization<Model, RectangularMesh<dim>>;
-
-  setup_logger();
+  const double requested_h = GENERATE(.005, .01, .02, .04, .05, .1);
+  const unsigned int fit_mode = GENERATE(0u, 1u, 2u);
   auto json = make_json(0);
-  json.set_string("/discretization/grid/x_grid", "0:0.005:0.2");
-  json.set_string("/discretization/grid/y_grid", "0:0.005:0.2");
+  const std::string grid = "0:" + std::to_string(requested_h) + ":0.2";
+  json.set_string("/discretization/grid/x_grid", grid);
+  json.set_string("/discretization/grid/y_grid", grid);
   Model model;
   RectangularMesh<dim> mesh(Config::ConfigurationMesh<dim>(json), RectangularMeshOptions{.origin_cell_centered = true});
   Discretization discretization(mesh, json);
   FE::FlowingVariables state(discretization);
   state.interpolate(model);
-
-  const auto &dof_handler = discretization.get_dof_handler();
+  const auto &dofs = discretization.get_dof_handler();
   const auto &mapping = discretization.get_mapping();
-  auto EoM_cell = dof_handler.begin_active();
-  const auto config = Config::EoMConfig(json);
-  const auto EoM_result = get_EoM_point_with_potential(
-      EoM_cell, state.spatial_data(), dof_handler, mapping,
+  {
+    // FV data are always the exact cell averages of the cubic vacuum field.
+    std::vector<types::global_dof_index> indices(dofs.get_fe().n_dofs_per_cell());
+    for (const auto &cell : dofs.active_cell_iterators()) {
+      cell->get_dof_indices(indices);
+      const double delta = cell->center()[1];
+      const double width = cell->extent_in_direction(1);
+      for (unsigned int i = 0; i < indices.size(); ++i)
+        if (dofs.get_fe().system_to_component_index(i).first == 1)
+          state.spatial_data()[indices[i]] += Model::diquark_quartic * delta * width * width / 4.;
+    }
+  }
+  auto config = Config::EoMConfig(json);
+  config.patch_order = fit_mode == 0 ? 0 : 3;
+  if (fit_mode >= 2) {
+    config.patch_parity = {{-1, 1}, {1, -1}};
+    config.patch_direction = {1., 0.};
+    config.patch_skip_layers = 0;
+  }
+  const auto bounds = mesh.get_physical_bounds();
+  auto cell = dofs.begin_active();
+  const auto result = get_EoM_result<dim>(
+      cell, state.spatial_data(), dofs, mapping,
       [&](const auto &point, const auto &values) { return model.EoM(point, values); },
-      [](const auto &point, const auto &) { return point; }, config);
-
-  const auto raw_potential = reconstruct_raw_potential(
-      state.spatial_data(), dof_handler, mapping,
-      [&](const auto &point, const auto &values) { return model.raw_potential_gradient(point, values); }, config);
-  const auto raw = evaluate_raw_potential(raw_potential, mapping, EoM_result.point);
-  const double h = dof_handler.begin_active()->extent_in_direction(1);
-  const double origin_tolerance = 1e-5 * h;
-  const double current_mass_square = raw.mass_hessian[1][1];
-  const double goldstone_mass_square =
-      std::abs(EoM_result.point[1]) <= origin_tolerance ? current_mass_square : raw.gradient[1] / EoM_result.point[1];
-
-  CHECK(std::abs(EoM_result.point[1]) <= origin_tolerance);
-  CHECK(EoM_result.point[0] == Catch::Approx(Model::explicit_breaking / Model::sigma_mass_square).margin(h));
-  CHECK(std::isfinite(raw.value));
-  CHECK(std::isfinite(raw.gradient[1]));
-  CHECK(std::isfinite(raw.mass_hessian[1][1]));
-  CHECK(current_mass_square == Catch::Approx(Model::diquark_mass_square).epsilon(0.05));
-  CHECK(goldstone_mass_square == Catch::Approx(Model::diquark_mass_square).epsilon(0.05));
-}
-
-TEST_CASE("Raw-potential reconstruction preserves signed negative curvature",
-          "[discretization][EoM][raw-potential][hessian][signed]")
-{
-  constexpr uint dim = 1;
-  Triangulation<dim> triangulation;
-  GridGenerator::subdivided_hyper_cube(triangulation, 8, 0., 1.);
-  FE_Q<dim> source_fe(1);
-  DoFHandler<dim> source_dof_handler(triangulation);
-  source_dof_handler.distribute_dofs(source_fe);
-  Vector<double> source(source_dof_handler.n_dofs());
-  MappingQ1<dim> mapping;
-  VectorTools::interpolate(source_dof_handler, Functions::ZeroFunction<dim>(), source);
-
-  Config::EoMConfig config;
-  config.smoothing_length = 0.;
-  const auto raw_potential = reconstruct_raw_potential(
-      source, source_dof_handler, mapping,
-      [](const Point<dim> &point, const auto &) { return std::array<double, dim>{{-2. * point[0]}}; }, config);
-  const auto value = evaluate_raw_potential(raw_potential, mapping, Point<dim>(0.5));
-
-  CHECK(value.potential_hessian[0][0] == Catch::Approx(-2.).margin(1e-10));
-  CHECK(value.mass_hessian[0][0] == value.potential_hessian[0][0]);
-  CHECK(value.potential_hessian[0][0] < 0.);
-}
-
-TEST_CASE("Default raw potential gradient copies solution components instead of the physical EoM",
-          "[discretization][EoM][raw-potential][model]")
-{
-  DefaultRawPotentialModel model;
-  Vector<double> values(2);
-  values[0] = 3.;
-  values[1] = 5.;
-
-  const auto raw_gradient = model.raw_potential_gradient(Point<2>(), values);
-  const auto physical_eom = model.EoM(Point<2>(), values);
-
-  CHECK(raw_gradient[0] == 3.);
-  CHECK(raw_gradient[1] == 5.);
-  CHECK(physical_eom[0] == 2.);
-  CHECK(physical_eom[1] == 3.);
-
-  Vector<double> scalar_values(1);
-  scalar_values[0] = 7.;
-  const auto zero_filled_gradient = model.raw_potential_gradient(Point<2>(), scalar_values);
-  CHECK(zero_filled_gradient[0] == 7.);
-  CHECK(zero_filled_gradient[1] == 0.);
-}
-
-TEST_CASE("EoM and raw potential reconstruction always target scalar CG2",
-          "[discretization][EoM][raw-potential][potential][cg2]")
-{
-  DiFfRG::Init();
-  constexpr uint dim = 1;
-  using Model = Testing::ModelConstant<dim, dim>;
-  const Model model(parameters_with_minimum(Point<dim>(0.4)));
-
-  const auto check_cg2_potential = [](const auto &result) {
-    REQUIRE(result.potential.has_value());
-    const auto &potential = result.potential.value();
-    REQUIRE(potential.finite_element != nullptr);
-    CHECK(dynamic_cast<const FE_Q<dim> *>(potential.finite_element.get()) != nullptr);
-    CHECK(potential.finite_element->degree == 2);
-    CHECK(potential.finite_element->n_components() == 1);
-    CHECK(potential.finite_element->conforms(FiniteElementData<dim>::H1));
-  };
-
-  SECTION("CG source")
-  {
-    const auto result = reconstruct_with_potential_with_model<dim, CG::Discretization>(model, 5);
-    check_cg2_potential(result);
-    check_raw_potential_is_scalar_cg2<dim, CG::Discretization>(model, 5);
-  }
-
-  SECTION("higher-order DG source")
-  {
-    const auto result = reconstruct_with_potential_with_model<dim, DG::Discretization>(model, 3);
-    check_cg2_potential(result);
-    check_raw_potential_is_scalar_cg2<dim, DG::Discretization>(model, 3);
-  }
-
-  SECTION("DG0 source")
-  {
-    const auto result = reconstruct_with_potential_with_model<dim, DG::Discretization>(model, 0);
-    check_cg2_potential(result);
-    check_raw_potential_is_scalar_cg2<dim, DG::Discretization>(model, 0);
-  }
-
-  SECTION("FV source")
-  {
-    const auto result = reconstruct_with_potential_with_model<dim, FV::Discretization>(model, 0);
-    check_cg2_potential(result);
-    check_raw_potential_is_scalar_cg2<dim, FV::Discretization>(model, 0);
+      [](const auto &point, const auto &) { return point; }, config, std::optional<Point<dim>>{}, nullptr, &bounds,
+      EoMDataKind::finite_volume);
+  const auto du = result.local_fit
+                      ? result.local_fit->state_jacobian(result.search_point)
+                      : Testing::direct_eom_state_derivative(state.spatial_data(), dofs, mapping, result.point);
+  const Point<dim> exact_root(Model::explicit_breaking / Model::sigma_mass_square, 0.);
+  Tensor<2, dim> exact_du;
+  exact_du[0][0] = Model::sigma_mass_square;
+  exact_du[1][1] = Model::diquark_mass_square;
+  Testing::print_direct_eom_accuracy("FV vacuum requested_h=" + std::to_string(requested_h) +
+                                         " actual_h=" + std::to_string(dofs.begin_active()->extent_in_direction(0)) +
+                                         " mode=" + std::to_string(fit_mode) +
+                                         " cells=" + std::to_string(mesh.get_triangulation().n_active_cells()),
+                                     result.point, exact_root, du, exact_du);
+  CAPTURE(requested_h);
+  CAPTURE(fit_mode);
+  REQUIRE(result.candidates.size() == 1);
+  CHECK(result.reconstruction_full_rank);
+  CHECK(result.candidates[0].residual < 1e-10);
+  CHECK(result.point.distance(exact_root) < .01 * requested_h);
+  CHECK(std::abs(du[1][1] - exact_du[1][1]) < .01 * Model::diquark_mass_square);
+  REQUIRE(result.hessian.has_value());
+  if (fit_mode >= 2) REQUIRE(result.local_fit != nullptr);
+  if (fit_mode >= 2) {
+    CHECK(result.point.distance(exact_root) < 1e-10);
+    CHECK((*result.hessian - exact_du).norm() < 1e-10);
+    for (const auto order : result.local_fit->orders)
+      CHECK(order == 3);
   }
 }
 
-TEST_CASE("CG2 EoM potential reconstruction refines an off-grid 1D minimum",
-          "[discretization][EoM][potential][cg2][minimum]")
+TEST_CASE("CG2 EoM direct search refines an off-grid 1D minimum", "[discretization][EoM][direct][cg2][minimum]")
 {
   DiFfRG::Init();
   constexpr uint dim = 1;
   const Point<dim> expected(0.437);
-  const auto EoM = reconstruct_minimum<dim, CG::Discretization>(parameters_with_minimum(expected), 2);
+  const auto EoM = locate_minimum<dim, CG::Discretization>(parameters_with_minimum(expected), 2);
 
   REQUIRE(distance(EoM, expected) < 1e-10);
 }
 
-TEST_CASE("CG2 EoM potential reconstruction refines multidimensional and constrained minima",
-          "[discretization][EoM][potential][cg2][minimum]")
+TEST_CASE("CG2 EoM direct search refines multidimensional and constrained minima",
+          "[discretization][EoM][direct][cg2][minimum]")
 {
   DiFfRG::Init();
   constexpr uint dim = 2;
@@ -780,7 +592,7 @@ TEST_CASE("CG2 EoM potential reconstruction refines multidimensional and constra
   {
     const Point<dim> expected(0.437, 0.583);
     const ModelAffineEoM<dim> model(expected, {{{4., 1.25}, {1.25, 3.}}});
-    const auto EoM = reconstruct_minimum_with_model<dim, CG::Discretization>(model, 2);
+    const auto EoM = locate_minimum_with_model<dim, CG::Discretization>(model, 2);
 
     REQUIRE(distance(EoM, expected) < 1e-9);
   }
@@ -790,7 +602,7 @@ TEST_CASE("CG2 EoM potential reconstruction refines multidimensional and constra
     const Point<dim> unconstrained_minimum(0.437, -0.2);
     const Point<dim> expected(0.437, 0.);
     const ModelAffineEoM<dim> model(unconstrained_minimum, {{{4., 0.}, {0., 3.}}});
-    const auto EoM = reconstruct_minimum_with_model<dim, CG::Discretization>(model, 2);
+    const auto EoM = locate_minimum_with_model<dim, CG::Discretization>(model, 2);
 
     REQUIRE(distance(EoM, expected) < 1e-9);
   }
@@ -798,14 +610,13 @@ TEST_CASE("CG2 EoM potential reconstruction refines multidimensional and constra
   SECTION("monotonic corner minimum")
   {
     const Point<dim> expected(0., 0.);
-    const auto EoM = reconstruct_minimum<dim, CG::Discretization>(parameters_with_boundary_minimum(), 2);
+    const auto EoM = locate_minimum<dim, CG::Discretization>(parameters_with_boundary_minimum(), 2);
 
     REQUIRE(distance(EoM, expected) < 1e-12);
   }
 }
 
-TEST_CASE("CG2 EoM potential minimum follows a moving off-grid minimum",
-          "[discretization][EoM][potential][cg2][minimum]")
+TEST_CASE("CG2 EoM direct minimum follows a moving off-grid minimum", "[discretization][EoM][direct][cg2][minimum]")
 {
   DiFfRG::Init();
   constexpr uint dim = 1;
@@ -815,787 +626,64 @@ TEST_CASE("CG2 EoM potential minimum follows a moving off-grid minimum",
     const Point<dim> expected(position);
     using Model = Testing::ModelConstant<dim, dim>;
     const Model model(parameters_with_minimum(expected));
-    const auto EoM = reconstruct_minimum_with_model<dim, CG::Discretization>(model, 2, -1., 0, previous_minimum);
+    const auto EoM = locate_minimum_with_model<dim, CG::Discretization>(model, 2, 0, previous_minimum);
     REQUIRE(distance(EoM, expected) < 1e-10);
     REQUIRE(std::isfinite(EoM[0]));
     previous_minimum = EoM;
   }
 }
 
-TEST_CASE("CG2 EoM potential refinement handles indefinite and singular Hessians",
-          "[discretization][EoM][potential][cg2][minimum]")
-{
-  DiFfRG::Init();
-  constexpr uint dim = 2;
-  const std::array<bool, dim> free{{false, false}};
-  Tensor<1, dim> gradient;
-  gradient[0] = 1.;
-  gradient[1] = -1.;
-  Tensor<1, dim> direction;
-
-  Tensor<2, dim> indefinite_hessian;
-  indefinite_hessian[0][0] = 1.;
-  indefinite_hessian[1][1] = -1.;
-  const bool indefinite_direction =
-      DiFfRG::internal::projected_newton_direction<dim>(indefinite_hessian, gradient, free, direction);
-  CHECK_FALSE(indefinite_direction);
-
-  Tensor<2, dim> singular_hessian;
-  singular_hessian[0][0] = 1.;
-  const bool singular_direction =
-      DiFfRG::internal::projected_newton_direction<dim>(singular_hessian, gradient, free, direction);
-  CHECK_FALSE(singular_direction);
-
-  Tensor<2, dim> positive_hessian;
-  positive_hessian[0][0] = 4.;
-  positive_hessian[0][1] = 1.;
-  positive_hessian[1][0] = 1.;
-  positive_hessian[1][1] = 3.;
-  REQUIRE(DiFfRG::internal::projected_newton_direction<dim>(positive_hessian, gradient, free, direction));
-  CHECK(direction[0] == Catch::Approx(-4. / 11.).margin(1e-14));
-  CHECK(direction[1] == Catch::Approx(5. / 11.).margin(1e-14));
-
-  const std::array<bool, dim> second_coordinate_fixed{{false, true}};
-  REQUIRE(DiFfRG::internal::projected_newton_direction<dim>(positive_hessian, gradient, second_coordinate_fixed,
-                                                            direction));
-  CHECK(direction[0] == Catch::Approx(-0.25).margin(1e-14));
-  CHECK(direction[1] == 0.);
-
-  Tensor<2, dim> non_finite_hessian = positive_hessian;
-  non_finite_hessian[0][0] = std::numeric_limits<double>::quiet_NaN();
-  CHECK_FALSE(DiFfRG::internal::projected_newton_direction<dim>(non_finite_hessian, gradient, free, direction));
-
-  using Model = ModelAffineEoM<dim>;
-  using Discretization = CG::Discretization<Model, RectangularMesh<dim>>;
-  const Point<dim> saddle(0.437, 0.583);
-  const Model model(saddle, {{{1., 0.}, {0., -1.}}});
-  auto json = make_json(2);
-  RectangularMesh<dim> mesh{Config::ConfigurationMesh<dim>(json)};
-  Discretization discretization(mesh, json);
-  FE::FlowingVariables initial_condition(discretization);
-  initial_condition.interpolate(model);
-  const auto &mapping = discretization.get_mapping();
-  auto EoM_cell = discretization.get_dof_handler().begin_active();
-  const auto result = get_EoM_point_with_potential(
-      EoM_cell, initial_condition.spatial_data(), discretization.get_dof_handler(), mapping,
-      [&](const auto &p, const auto &values) { return model.EoM(p, values); },
-      [](const auto &p, const auto &) { return p; }, 1e-12, 200);
-  const auto EoM = result.point;
-  for (uint d = 0; d < dim; ++d) {
-    CHECK(std::isfinite(EoM[d]));
-    CHECK(EoM[d] >= 0.);
-    CHECK(EoM[d] <= 1.);
-  }
-
-  const auto &potential = result.potential.value();
-  const QGauss<dim> quadrature(4);
-  FEValues<dim> potential_fe_values(mapping, *potential.finite_element, quadrature, update_values);
-  std::vector<double> quadrature_values(quadrature.size());
-  double sampled_minimum = std::numeric_limits<double>::max();
-  for (const auto &value : potential.values)
-    sampled_minimum = std::min(sampled_minimum, (double)value);
-  for (const auto &cell : potential.dof_handler->active_cell_iterators()) {
-    potential_fe_values.reinit(cell);
-    potential_fe_values.get_function_values(potential.values, quadrature_values);
-    for (const double value : quadrature_values)
-      sampled_minimum = std::min(sampled_minimum, value);
-  }
-
-  auto interior_probe = EoM;
-  for (uint d = 0; d < dim; ++d)
-    interior_probe[d] = std::clamp(interior_probe[d], 1e-10, 1. - 1e-10);
-  const auto minimum_cell =
-      GridTools::find_active_cell_around_point(mapping, *potential.dof_handler, interior_probe).first;
-  const auto minimum_unit_point = mapping.transform_real_to_unit_cell(minimum_cell, EoM);
-  std::vector<types::global_dof_index> local_dof_indices(potential.finite_element->n_dofs_per_cell());
-  minimum_cell->get_dof_indices(local_dof_indices);
-  std::vector<double> local_values(local_dof_indices.size());
-  for (uint i = 0; i < local_dof_indices.size(); ++i)
-    local_values[i] = potential.values[local_dof_indices[i]];
-  const auto refined =
-      DiFfRG::internal::evaluate_local_potential(*potential.finite_element, local_values, minimum_unit_point);
-  CHECK(std::isfinite(refined.value));
-  CHECK(refined.value <= sampled_minimum + 1e-12);
-}
-
-TEST_CASE("A previous CG2 minimum warm-starts the constrained Newton refinement",
-          "[discretization][EoM][potential][cg2][minimum][warm-start]")
-{
-  constexpr uint dim = 2;
-  Triangulation<dim> triangulation;
-  GridGenerator::hyper_cube(triangulation, 0., 1.);
-  MappingQ1<dim> mapping;
-  FE_Q<dim> potential_fe(2);
-  DoFHandler<dim> potential_dof_handler(triangulation);
-  potential_dof_handler.distribute_dofs(potential_fe);
-
-  constexpr double minimum_x = 0.41;
-  constexpr double minimum_y = 0.59;
-  Vector<double> potential(potential_dof_handler.n_dofs());
-  const auto support_points = DoFTools::map_dofs_to_support_points(mapping, potential_dof_handler);
-  for (const auto &[dof, point] : support_points) {
-    const double dx = point[0] - minimum_x;
-    const double dy = point[1] - minimum_y;
-    potential[dof] = dx * dx + dy * dy + 5. * dx * dx * dy * dy;
-  }
-
-  const QGauss<dim> quadrature(4);
-  const auto cell = potential_dof_handler.begin_active();
-  const Config::EoMConfig optimizer_config(1e-14, 1, -1.);
-  const auto cold = DiFfRG::internal::refine_cell_minimum<dim, double>(cell, potential_fe, mapping, potential,
-                                                                       quadrature, optimizer_config);
-  const auto warm = DiFfRG::internal::refine_cell_minimum<dim, double>(
-      cell, potential_fe, mapping, potential, quadrature, optimizer_config, Point<dim>(0.412, 0.588));
-  const Point<dim> expected(minimum_x, minimum_y);
-
-  CHECK(warm.value < cold.value);
-  CHECK(distance(warm.point, expected) < distance(cold.point, expected));
-  CHECK(distance(warm.point, expected) < 1e-5);
-}
-
-TEST_CASE("CG2 warm starts preserve global minimum changes",
-          "[discretization][EoM][potential][cg2][minimum][warm-start]")
-{
-  constexpr uint dim = 1;
-  Triangulation<dim> triangulation;
-  GridGenerator::subdivided_hyper_cube(triangulation, 4, 0., 1.);
-  MappingQ1<dim> mapping;
-  FE_Q<dim> potential_fe(2);
-  DoFHandler<dim> potential_dof_handler(triangulation);
-  potential_dof_handler.distribute_dofs(potential_fe);
-
-  Vector<double> potential(potential_dof_handler.n_dofs());
-  const auto support_points = DoFTools::map_dofs_to_support_points(mapping, potential_dof_handler);
-  for (const auto &[dof, point] : support_points) {
-    const double old_well = -1. + 40. * std::pow(point[0] - 0.125, 2);
-    const double new_well = -2. + 40. * std::pow(point[0] - 0.875, 2);
-    potential[dof] = std::min(old_well, new_well);
-  }
-
-  const QGauss<dim> quadrature(4);
-  const Config::EoMConfig optimizer_config(1e-12, 100, -1.);
-  const auto minimum =
-      DiFfRG::internal::find_potential_minimum(potential_dof_handler, potential_fe, mapping, potential, quadrature,
-                                               optimizer_config, std::optional<Point<dim>>(Point<dim>(0.125)));
-
-  CHECK(minimum.point[0] == Catch::Approx(0.875).margin(1e-10));
-  CHECK(minimum.value == Catch::Approx(-2.).margin(1e-10));
-}
-
-TEST_CASE("CG2 warm starts handle boundaries interfaces adaptation and invalid points",
-          "[discretization][EoM][potential][cg2][minimum][warm-start]")
-{
-  constexpr uint dim = 1;
-  Triangulation<dim> triangulation;
-  GridGenerator::subdivided_hyper_cube(triangulation, 2, 0., 1.);
-  triangulation.begin_active()->set_refine_flag();
-  triangulation.execute_coarsening_and_refinement();
-
-  MappingQ1<dim> mapping;
-  FE_Q<dim> potential_fe(2);
-  DoFHandler<dim> potential_dof_handler(triangulation);
-  potential_dof_handler.distribute_dofs(potential_fe);
-  Vector<double> potential(potential_dof_handler.n_dofs());
-  constexpr double expected = 0.73;
-  const auto support_points = DoFTools::map_dofs_to_support_points(mapping, potential_dof_handler);
-  for (const auto &[dof, point] : support_points)
-    potential[dof] = std::pow(point[0] - expected, 2);
-
-  const QGauss<dim> quadrature(4);
-  const Config::EoMConfig optimizer_config(1e-12, 100, -1.);
-  const auto find = [&](const std::optional<Point<dim>> &initial_guess) {
-    return DiFfRG::internal::find_potential_minimum(potential_dof_handler, potential_fe, mapping, potential, quadrature,
-                                                    optimizer_config, initial_guess);
-  };
-
-  const auto no_seed = find(std::nullopt);
-  const auto boundary_seed = find(Point<dim>(0.));
-  const auto interface_seed = find(Point<dim>(0.5));
-  const auto outside_seed = find(Point<dim>(-1.));
-  const auto non_finite_seed = find(Point<dim>(std::numeric_limits<double>::quiet_NaN()));
-  for (const auto &minimum : {no_seed, boundary_seed, interface_seed, outside_seed, non_finite_seed}) {
-    CHECK(std::isfinite(minimum.value));
-    CHECK(minimum.point[0] == Catch::Approx(expected).margin(1e-10));
-  }
-}
-
-TEST_CASE("CG2 EoM potential refinement checks the sampled winner's active neighbors",
-          "[discretization][EoM][potential][cg2][minimum][neighbor]")
-{
-  constexpr uint dim = 1;
-  Triangulation<dim> triangulation;
-  GridGenerator::subdivided_hyper_cube(triangulation, 2, 0., 1.);
-  MappingQ1<dim> mapping;
-  FE_Q<dim> potential_fe(2);
-  DoFHandler<dim> potential_dof_handler(triangulation);
-  potential_dof_handler.distribute_dofs(potential_fe);
-
-  Vector<double> potential(potential_dof_handler.n_dofs());
-  const auto support_points = DoFTools::map_dofs_to_support_points(mapping, potential_dof_handler);
-  constexpr double neighbor_minimum = 0.7925;
-  constexpr double neighbor_curvature = 60.;
-  const double shared_value = -1.1 + neighbor_curvature * std::pow(0.5 - neighbor_minimum, 2);
-  const double winner_curvature = (shared_value + 1.) / std::pow(0.25, 2);
-  for (const auto &[dof, point] : support_points) {
-    if (point[0] <= 0.5)
-      potential[dof] = -1. + winner_curvature * std::pow(point[0] - 0.25, 2);
-    else
-      potential[dof] = -1.1 + neighbor_curvature * std::pow(point[0] - neighbor_minimum, 2);
-  }
-
-  const QGauss<dim> quadrature(4);
-  const Config::EoMConfig optimizer_config(1e-12, 100, -1.);
-  const auto minimum = DiFfRG::internal::find_potential_minimum(potential_dof_handler, potential_fe, mapping, potential,
-                                                                quadrature, optimizer_config);
-
-  REQUIRE(minimum.point[0] == Catch::Approx(neighbor_minimum).margin(1e-10));
-  REQUIRE(minimum.value == Catch::Approx(-1.1).margin(1e-10));
-}
-
-TEST_CASE("CG EoM potential reconstruction handles a 1D stitched polynomial minimum",
-          "[discretization][EoM][cg][stitched][1d]")
+TEST_CASE("CG EoM direct search handles a 1D stitched polynomial minimum", "[discretization][EoM][cg][stitched][1d]")
 {
   DiFfRG::Init();
   constexpr uint dim = 1;
   const int fe_order = GENERATE(1, 2, 3, 4);
   const Point<dim> expected(0.4);
   const ModelStitchedPolynomial<dim> model(expected);
-  const auto EoM = reconstruct_minimum_with_model<dim, CG::Discretization>(model, fe_order);
+  const auto EoM = locate_minimum_with_model<dim, CG::Discretization>(model, fe_order);
 
   REQUIRE(distance(EoM, expected) < 6e-2);
 }
 
-TEST_CASE("CG EoM potential reconstruction handles a 2D stitched polynomial minimum",
-          "[discretization][EoM][cg][stitched][2d]")
+TEST_CASE("CG EoM direct search handles a 2D stitched polynomial minimum", "[discretization][EoM][cg][stitched][2d]")
 {
   DiFfRG::Init();
   constexpr uint dim = 2;
   const int fe_order = GENERATE(1, 2, 3);
   const Point<dim> expected(0.4, 0.6);
   const ModelStitchedPolynomial<dim> model(expected);
-  const auto EoM = reconstruct_minimum_with_model<dim, CG::Discretization>(model, fe_order);
+  const auto EoM = locate_minimum_with_model<dim, CG::Discretization>(model, fe_order);
 
   REQUIRE(distance(EoM, expected) < 8e-2);
 }
 
-TEST_CASE("CG2 EoM potential reconstruction supports DG0 sources", "[discretization][EoM][dg][p0]")
+TEST_CASE("CG2 EoM direct search supports DG0 sources", "[discretization][EoM][dg][p0]")
 {
   DiFfRG::Init();
   constexpr uint dim = 1;
   const Point<dim> expected(0.4);
-  const auto EoM = reconstruct_minimum<dim, DG::Discretization>(parameters_with_minimum(expected), 0);
+  const auto EoM = locate_minimum<dim, DG::Discretization>(parameters_with_minimum(expected), 0);
 
   REQUIRE(distance(EoM, expected) < 1.6e-1);
 }
 
-TEST_CASE("EoM smoothing length resolves automatic disabled explicit and invalid policies",
-          "[discretization][EoM][potential][smoothing][configuration]")
-{
-  constexpr uint dim = 2;
-  Triangulation<dim> triangulation;
-  GridGenerator::subdivided_hyper_cube(triangulation, 4, 0., 1.);
-  FE_Q<dim> fe(1);
-  DoFHandler<dim> dof_handler(triangulation);
-  dof_handler.distribute_dofs(fe);
-
-  CHECK(DiFfRG::internal::minimum_face_normal_cell_width(dof_handler) == Catch::Approx(0.25));
-  CHECK(DiFfRG::internal::resolve_potential_smoothing_length(dof_handler, -1.) == Catch::Approx(0.5));
-  CHECK(DiFfRG::internal::resolve_potential_smoothing_length(dof_handler, 0.) == 0.);
-  CHECK(DiFfRG::internal::resolve_potential_smoothing_length(dof_handler, 0.125) == Catch::Approx(0.125));
-  CHECK_THROWS_AS(DiFfRG::internal::resolve_potential_smoothing_length(dof_handler, -0.5), std::invalid_argument);
-  CHECK_THROWS_AS(DiFfRG::internal::resolve_potential_smoothing_length(dof_handler, -1.01), std::invalid_argument);
-  CHECK_THROWS_AS(
-      DiFfRG::internal::resolve_potential_smoothing_length(dof_handler, std::numeric_limits<double>::quiet_NaN()),
-      std::invalid_argument);
-}
-
-TEST_CASE("EoM configuration provides validated typed defaults", "[discretization][EoM][configuration]")
-{
-  const Config::EoMConfig defaults;
-  CHECK(defaults.abs_tol == Config::EoMConfig::default_abs_tol);
-  CHECK(defaults.max_iter == Config::EoMConfig::default_max_iter);
-  CHECK(defaults.smoothing_length == Config::EoMConfig::default_smoothing_length);
-  CHECK(defaults.bound_tolerance == Config::EoMConfig::default_bound_tolerance);
-  CHECK(defaults.armijo_coefficient == Config::EoMConfig::default_armijo_coefficient);
-  CHECK(defaults.max_backtracks == Config::EoMConfig::default_max_backtracks);
-  CHECK(defaults.raw_potential_order == Config::EoMConfig::default_raw_potential_order);
-  CHECK(defaults.raw_potential_recover_mass_hessian == Config::EoMConfig::default_raw_potential_recover_mass_hessian);
-  CHECK(defaults.raw_potential_mass_hessian_jump_threshold ==
-        Config::EoMConfig::default_raw_potential_mass_hessian_jump_threshold);
-
-  const ConfigTree empty_json = json::value({});
-  const Config::EoMConfig from_empty_json(empty_json);
-  CHECK(from_empty_json.abs_tol == defaults.abs_tol);
-  CHECK(from_empty_json.max_iter == defaults.max_iter);
-  CHECK(from_empty_json.smoothing_length == defaults.smoothing_length);
-  CHECK(from_empty_json.bound_tolerance == defaults.bound_tolerance);
-  CHECK(from_empty_json.armijo_coefficient == defaults.armijo_coefficient);
-  CHECK(from_empty_json.max_backtracks == defaults.max_backtracks);
-  CHECK(from_empty_json.raw_potential_order == defaults.raw_potential_order);
-  CHECK(from_empty_json.raw_potential_recover_mass_hessian == defaults.raw_potential_recover_mass_hessian);
-  CHECK(from_empty_json.raw_potential_mass_hessian_jump_threshold ==
-        defaults.raw_potential_mass_hessian_jump_threshold);
-
-  const auto parsed_defaults = json::parse(Config::EoMConfig::get_defaults());
-  const Config::EoMConfig from_default_json(parsed_defaults);
-  CHECK(from_default_json.abs_tol == defaults.abs_tol);
-  CHECK(from_default_json.max_iter == defaults.max_iter);
-  CHECK(from_default_json.smoothing_length == defaults.smoothing_length);
-  CHECK(from_default_json.bound_tolerance == defaults.bound_tolerance);
-  CHECK(from_default_json.armijo_coefficient == defaults.armijo_coefficient);
-  CHECK(from_default_json.max_backtracks == defaults.max_backtracks);
-  CHECK(from_default_json.raw_potential_order == defaults.raw_potential_order);
-  CHECK(from_default_json.raw_potential_recover_mass_hessian == defaults.raw_potential_recover_mass_hessian);
-  CHECK(from_default_json.raw_potential_mass_hessian_jump_threshold ==
-        defaults.raw_potential_mass_hessian_jump_threshold);
-
-  const ConfigTree custom_json = json::value({{"discretization",
-                                               {{"EoM_abs_tol", 1e-9},
-                                                {"EoM_max_iter", 17},
-                                                {"EoM_smoothing_length", 0.25},
-                                                {"EoM_bound_tolerance", 1e-10},
-                                                {"EoM_armijo_coefficient", 1e-3},
-                                                {"EoM_max_backtracks", 12},
-                                                {"raw_potential_order", 3},
-                                                {"raw_potential_recover_mass_hessian", true},
-                                                {"raw_potential_mass_hessian_jump_threshold", 0.6}}}});
-  const Config::EoMConfig from_custom_json(custom_json);
-  CHECK(from_custom_json.abs_tol == 1e-9);
-  CHECK(from_custom_json.max_iter == 17);
-  CHECK(from_custom_json.smoothing_length == 0.25);
-  CHECK(from_custom_json.bound_tolerance == 1e-10);
-  CHECK(from_custom_json.armijo_coefficient == 1e-3);
-  CHECK(from_custom_json.max_backtracks == 12);
-  CHECK(from_custom_json.raw_potential_order == 3);
-  CHECK(from_custom_json.raw_potential_recover_mass_hessian);
-  CHECK(from_custom_json.raw_potential_mass_hessian_jump_threshold == 0.6);
-
-  const Config::EoMConfig explicit_config(1e-9, 17, 0.25, 1e-10, 1e-3, 12);
-  CHECK(explicit_config.abs_tol == 1e-9);
-  CHECK(explicit_config.max_iter == 17);
-  CHECK(explicit_config.smoothing_length == 0.25);
-  CHECK(explicit_config.bound_tolerance == 1e-10);
-  CHECK(explicit_config.armijo_coefficient == 1e-3);
-  CHECK(explicit_config.max_backtracks == 12);
-
-  CHECK_THROWS_AS(Config::EoMConfig(-1e-9, 100, -1.), std::invalid_argument);
-  CHECK_THROWS_AS(Config::EoMConfig(std::numeric_limits<double>::quiet_NaN(), 100, -1.), std::invalid_argument);
-  CHECK_THROWS_AS(Config::EoMConfig(1e-12, 100, -0.5), std::invalid_argument);
-  CHECK_THROWS_AS(Config::EoMConfig(1e-12, 100, std::numeric_limits<double>::infinity()), std::invalid_argument);
-  CHECK_THROWS_AS(Config::EoMConfig(1e-12, 100, -1., -1e-12), std::invalid_argument);
-  CHECK_THROWS_AS(Config::EoMConfig(1e-12, 100, -1., 1e-12, 0.), std::invalid_argument);
-  CHECK_THROWS_AS(Config::EoMConfig(1e-12, 100, -1., 1e-12, 1.), std::invalid_argument);
-  CHECK_THROWS_AS(Config::EoMConfig(1e-12, 100, -1., 1e-12, 1e-4, 0), std::invalid_argument);
-
-  auto invalid_raw_config = defaults;
-  invalid_raw_config.raw_potential_order = 1;
-  CHECK_THROWS_AS(invalid_raw_config.validate(), std::invalid_argument);
-  invalid_raw_config = defaults;
-  invalid_raw_config.raw_potential_mass_hessian_jump_threshold = -0.5;
-  CHECK_THROWS_AS(invalid_raw_config.validate(), std::invalid_argument);
-}
-
-TEST_CASE("Raw-potential mass-Hessian recovery damps FV face resets without changing the potential Hessian",
-          "[discretization][EoM][raw-potential][hessian][fv]")
-{
-  DiFfRG::Init();
-  constexpr uint dim = 1;
-  using Model = CubicGradientModel;
-  using Discretization = FV::Discretization<Model, RectangularMesh<dim>>;
-
-  setup_logger();
-  auto json = make_json(0);
-  RectangularMesh<dim> mesh{Config::ConfigurationMesh<dim>(json)};
-  Discretization discretization(mesh, json);
-  FE::FlowingVariables state(discretization);
-  state.interpolate(Model{});
-
-  const auto gradient = [](const auto &, const auto &values) { return std::array<double, 1>{{values[0]}}; };
-  Config::EoMConfig default_config;
-  default_config.smoothing_length = 0.2;
-  const auto default_potential = reconstruct_raw_potential(state.spatial_data(), discretization.get_dof_handler(),
-                                                           discretization.get_mapping(), gradient, default_config);
-
-  auto regularized_config = default_config;
-  regularized_config.raw_potential_recover_mass_hessian = true;
-  regularized_config.raw_potential_mass_hessian_jump_threshold = 0.35;
-  regularized_config.validate();
-  const auto regularized_potential =
-      reconstruct_raw_potential(state.spatial_data(), discretization.get_dof_handler(), discretization.get_mapping(),
-                                gradient, regularized_config);
-
-  auto continuous_config = regularized_config;
-  continuous_config.raw_potential_mass_hessian_jump_threshold = -1.;
-  const auto continuous_potential =
-      reconstruct_raw_potential(state.spatial_data(), discretization.get_dof_handler(), discretization.get_mapping(),
-                                gradient, continuous_config);
-
-  REQUIRE(default_potential.finite_element->degree == 2);
-  REQUIRE(regularized_potential.finite_element->degree == 2);
-
-  constexpr double epsilon = 1e-7;
-  double max_default_jump = 0.;
-  double max_regularized_jump = 0.;
-  double max_continuous_jump = 0.;
-  double max_potential_hessian_change = 0.;
-  for (uint face = 1; face < 10; ++face) {
-    const double x = 0.1 * face;
-    const auto default_left =
-        evaluate_raw_potential(default_potential, discretization.get_mapping(), Point<dim>(x - epsilon));
-    const auto default_right =
-        evaluate_raw_potential(default_potential, discretization.get_mapping(), Point<dim>(x + epsilon));
-    const auto regularized_left =
-        evaluate_raw_potential(regularized_potential, discretization.get_mapping(), Point<dim>(x - epsilon));
-    const auto regularized_right =
-        evaluate_raw_potential(regularized_potential, discretization.get_mapping(), Point<dim>(x + epsilon));
-    const auto continuous_left =
-        evaluate_raw_potential(continuous_potential, discretization.get_mapping(), Point<dim>(x - epsilon));
-    const auto continuous_right =
-        evaluate_raw_potential(continuous_potential, discretization.get_mapping(), Point<dim>(x + epsilon));
-    max_default_jump =
-        std::max(max_default_jump, std::abs(default_right.mass_hessian[0][0] - default_left.mass_hessian[0][0]));
-    max_regularized_jump = std::max(
-        max_regularized_jump, std::abs(regularized_right.mass_hessian[0][0] - regularized_left.mass_hessian[0][0]));
-    max_continuous_jump = std::max(max_continuous_jump,
-                                   std::abs(continuous_right.mass_hessian[0][0] - continuous_left.mass_hessian[0][0]));
-    max_potential_hessian_change =
-        std::max(max_potential_hessian_change,
-                 std::abs(regularized_right.potential_hessian[0][0] - default_right.potential_hessian[0][0]));
-  }
-
-  CAPTURE(max_default_jump, max_regularized_jump, max_continuous_jump, max_potential_hessian_change);
-  CHECK(max_default_jump > 1e-3);
-  CHECK(max_regularized_jump < max_default_jump);
-  CHECK(max_continuous_jump < 1e-4);
-  CHECK(max_potential_hessian_change < 1e-12);
-}
-
-TEST_CASE("Analytical two-field Hessian-jump potential benchmarks masses beyond the non-analytic surface",
-          "[discretization][EoM][raw-potential][hessian][fv][accuracy][multifield][nonanalytic]")
-{
-  DiFfRG::Init();
-  constexpr uint dim = 2;
-  constexpr double angle = 0.35;
-  using Model = KinkedRadialPotentialGradientModel;
-  using Discretization = FV::Discretization<Model, RectangularMesh<dim>>;
-
-  setup_logger();
-  const auto gradient = [](const auto &, const auto &values) {
-    return std::array<double, dim>{{values[0], values[1]}};
-  };
-  const auto eigenmasses = [](const Tensor<2, dim> &hessian) {
-    const double discriminant = std::sqrt((hessian[0][0] - hessian[1][1]) * (hessian[0][0] - hessian[1][1]) +
-                                          4. * hessian[0][1] * hessian[0][1]);
-    return std::array<double, 2>{
-        {0.5 * (hessian[0][0] + hessian[1][1] - discriminant), 0.5 * (hessian[0][0] + hessian[1][1] + discriminant)}};
-  };
-
-  Tensor<1, dim> analytical_normal;
-  analytical_normal[0] = std::cos(angle);
-  analytical_normal[1] = std::sin(angle);
-  Tensor<2, dim> inner_hessian;
-  Tensor<2, dim> outer_hessian;
-  const double kink_mass = Model::transverse_mass_square(Model::kink_radius * Model::kink_radius);
-  for (uint d = 0; d < dim; ++d)
-    for (uint e = 0; e < dim; ++e) {
-      const double identity = d == e ? kink_mass : 0.;
-      const double position_product =
-          Model::kink_radius * Model::kink_radius * analytical_normal[d] * analytical_normal[e];
-      inner_hessian[d][e] = identity + Model::inner_slope * position_product;
-      outer_hessian[d][e] = identity + Model::outer_slope * position_product;
-    }
-  Tensor<1, dim> unit_scale;
-  for (uint d = 0; d < dim; ++d)
-    unit_scale[d] = 1.;
-  const auto analytical_compatibility =
-      DiFfRG::internal::hessian_jump_compatibility(inner_hessian, outer_hessian, unit_scale);
-  const double normal_alignment = std::abs(analytical_compatibility.normal * analytical_normal);
-
-  auto full_rank_outer_hessian = outer_hessian;
-  full_rank_outer_hessian[0][0] += 0.4;
-  full_rank_outer_hessian[1][1] -= 0.4;
-  const auto full_rank_compatibility =
-      DiFfRG::internal::hessian_jump_compatibility(inner_hessian, full_rank_outer_hessian, unit_scale);
-
-  std::array<AccuracyMetrics, 2> cg2_radial_metrics;
-  std::array<AccuracyMetrics, 2> unbiased_radial_metrics;
-  std::array<AccuracyMetrics, 2> eom_side_radial_metrics;
-  std::array<AccuracyMetrics, 2> gradient_transverse_metrics;
-  std::array<AccuracyMetrics, 2> cg2_transverse_metrics;
-  std::array<AccuracyMetrics, 2> unbiased_transverse_metrics;
-  std::array<AccuracyMetrics, 2> eom_side_transverse_metrics;
-  std::array<AccuracyMetrics, 2> near_cg2_radial_metrics;
-  std::array<AccuracyMetrics, 2> near_unbiased_radial_metrics;
-  std::array<AccuracyMetrics, 2> near_eom_side_radial_metrics;
-
-  constexpr uint near_samples = 46;
-  for (uint refinement = 0; refinement <= 1; ++refinement) {
-    auto json = make_json(0);
-    RectangularMesh<dim> mesh{Config::ConfigurationMesh<dim>(json)};
-    mesh.get_triangulation().refine_global(refinement);
-    Discretization discretization(mesh, json);
-    FE::FlowingVariables state(discretization);
-    state.interpolate(Model{});
-
-    Config::EoMConfig cg2_config;
-    const auto cg2 = reconstruct_raw_potential(state.spatial_data(), discretization.get_dof_handler(),
-                                               discretization.get_mapping(), gradient, cg2_config);
-    auto unbiased_config = cg2_config;
-    unbiased_config.raw_potential_recover_mass_hessian = true;
-    unbiased_config.raw_potential_mass_hessian_jump_threshold = -1.;
-    const auto unbiased = reconstruct_raw_potential(state.spatial_data(), discretization.get_dof_handler(),
-                                                    discretization.get_mapping(), gradient, unbiased_config);
-    auto eom_side_config = unbiased_config;
-    eom_side_config.raw_potential_mass_hessian_jump_threshold = 0.35;
-    const auto eom_side = reconstruct_raw_potential(state.spatial_data(), discretization.get_dof_handler(),
-                                                    discretization.get_mapping(), gradient, eom_side_config);
-
-    std::vector<double> exact_radial;
-    std::vector<double> exact_transverse;
-    std::vector<double> cg2_radial;
-    std::vector<double> unbiased_radial;
-    std::vector<double> eom_side_radial;
-    std::vector<double> gradient_transverse;
-    std::vector<double> cg2_transverse;
-    std::vector<double> unbiased_transverse;
-    std::vector<double> eom_side_transverse;
-    for (uint sample = 0; sample <= 200; ++sample) {
-      // This point is the exact EoM of U(phi) - J(phi_EoM) . phi, with
-      // J(phi_EoM) chosen parallel to phi_EoM. The source does not alter either mass.
-      const double radius = Model::kink_radius + 0.01 + 0.002 * sample;
-      const Point<dim> point(radius * std::cos(angle), radius * std::sin(angle));
-      const double radius_square = radius * radius;
-      exact_radial.push_back(Model::radial_mass_square(radius_square));
-      exact_transverse.push_back(Model::transverse_mass_square(radius_square));
-
-      const auto cg2_value = evaluate_raw_potential(cg2, discretization.get_mapping(), point);
-      const auto unbiased_value = evaluate_raw_potential(unbiased, discretization.get_mapping(), point);
-      const auto eom_side_value = evaluate_raw_potential(eom_side, discretization.get_mapping(), point);
-      const auto cg2_masses = eigenmasses(cg2_value.mass_hessian);
-      const auto unbiased_masses = eigenmasses(unbiased_value.mass_hessian);
-      const auto eom_side_masses = eigenmasses(eom_side_value.mass_hessian);
-      cg2_transverse.push_back(cg2_masses[0]);
-      cg2_radial.push_back(cg2_masses[1]);
-      unbiased_transverse.push_back(unbiased_masses[0]);
-      unbiased_radial.push_back(unbiased_masses[1]);
-      eom_side_transverse.push_back(eom_side_masses[0]);
-      eom_side_radial.push_back(eom_side_masses[1]);
-      gradient_transverse.push_back(cg2_value.gradient[0] / point[0]);
-    }
-
-    cg2_radial_metrics[refinement] = accuracy_metrics(cg2_radial, exact_radial);
-    unbiased_radial_metrics[refinement] = accuracy_metrics(unbiased_radial, exact_radial);
-    eom_side_radial_metrics[refinement] = accuracy_metrics(eom_side_radial, exact_radial);
-    gradient_transverse_metrics[refinement] = accuracy_metrics(gradient_transverse, exact_transverse);
-    cg2_transverse_metrics[refinement] = accuracy_metrics(cg2_transverse, exact_transverse);
-    unbiased_transverse_metrics[refinement] = accuracy_metrics(unbiased_transverse, exact_transverse);
-    eom_side_transverse_metrics[refinement] = accuracy_metrics(eom_side_transverse, exact_transverse);
-
-    const auto near_end = [&](const std::vector<double> &values) {
-      return std::vector<double>(values.begin(), values.begin() + near_samples);
-    };
-    const auto near_exact_radial = near_end(exact_radial);
-    near_cg2_radial_metrics[refinement] = accuracy_metrics(near_end(cg2_radial), near_exact_radial);
-    near_unbiased_radial_metrics[refinement] = accuracy_metrics(near_end(unbiased_radial), near_exact_radial);
-    near_eom_side_radial_metrics[refinement] = accuracy_metrics(near_end(eom_side_radial), near_exact_radial);
-
-    print_accuracy("2D post-kink radial", refinement, "CG2 eigenmass", cg2_radial_metrics[refinement]);
-    print_accuracy("2D post-kink radial", refinement, "continuous unbiased eigenmass",
-                   unbiased_radial_metrics[refinement]);
-    print_accuracy("2D post-kink radial", refinement, "EoM-side eigenmass", eom_side_radial_metrics[refinement]);
-    print_accuracy("2D near-kink radial", refinement, "CG2 eigenmass", near_cg2_radial_metrics[refinement]);
-    print_accuracy("2D near-kink radial", refinement, "continuous unbiased eigenmass",
-                   near_unbiased_radial_metrics[refinement]);
-    print_accuracy("2D near-kink radial", refinement, "EoM-side eigenmass", near_eom_side_radial_metrics[refinement]);
-    print_accuracy("2D post-kink transverse", refinement, "gradient/sigma", gradient_transverse_metrics[refinement]);
-    print_accuracy("2D post-kink transverse", refinement, "CG2 eigenmass", cg2_transverse_metrics[refinement]);
-    print_accuracy("2D post-kink transverse", refinement, "continuous unbiased eigenmass",
-                   unbiased_transverse_metrics[refinement]);
-    print_accuracy("2D post-kink transverse", refinement, "EoM-side eigenmass",
-                   eom_side_transverse_metrics[refinement]);
-  }
-
-  const double radial_jump = Model::radial_mass_square(Model::kink_radius * Model::kink_radius + 1e-10) -
-                             Model::radial_mass_square(Model::kink_radius * Model::kink_radius - 1e-10);
-  CAPTURE(radial_jump, analytical_compatibility.relative_jump, analytical_compatibility.rank_one_confidence,
-          normal_alignment, cg2_radial_metrics[0].rms, unbiased_radial_metrics[0].rms, eom_side_radial_metrics[0].rms,
-          near_cg2_radial_metrics[0].rms, near_unbiased_radial_metrics[0].rms, near_eom_side_radial_metrics[0].rms,
-          gradient_transverse_metrics[1].rms, cg2_transverse_metrics[1].rms, unbiased_transverse_metrics[1].rms,
-          eom_side_transverse_metrics[1].rms);
-  CHECK(radial_jump > 0.2);
-  CHECK(analytical_compatibility.is_rank_one);
-  CHECK_FALSE(full_rank_compatibility.is_rank_one);
-  CHECK(analytical_compatibility.rank_one_confidence > 1. - 1e-12);
-  CHECK(normal_alignment > 1. - 1e-12);
-  // The one-sided recovery needs the interface to be resolved: on the coarse mesh the unbiased field can be better.
-  // Require convergence and compare methods only on the refined mesh instead of hiding this resolution limit.
-  CHECK(cg2_radial_metrics[1].rms < cg2_radial_metrics[0].rms);
-  CHECK(unbiased_radial_metrics[1].rms < unbiased_radial_metrics[0].rms);
-  CHECK(eom_side_radial_metrics[1].rms < eom_side_radial_metrics[0].rms);
-  CHECK(unbiased_radial_metrics[1].rms < cg2_radial_metrics[1].rms);
-  CHECK(eom_side_radial_metrics[1].rms < unbiased_radial_metrics[1].rms);
-  CHECK(unbiased_radial_metrics[1].roughness_rms < cg2_radial_metrics[1].roughness_rms);
-  CHECK(eom_side_radial_metrics[1].roughness_rms < cg2_radial_metrics[1].roughness_rms);
-  CHECK(near_eom_side_radial_metrics[1].rms < near_cg2_radial_metrics[1].rms);
-  CHECK(near_eom_side_radial_metrics[1].rms < near_unbiased_radial_metrics[1].rms);
-  CHECK(gradient_transverse_metrics[1].rms < gradient_transverse_metrics[0].rms);
-  CHECK(eom_side_transverse_metrics[1].rms < 1.01 * unbiased_transverse_metrics[1].rms);
-}
-
-TEST_CASE("DG0 gradient recovery gives FV sources off-support moving minima with either smoothing policy",
-          "[discretization][EoM][potential][smoothing][fv]")
-{
-  DiFfRG::Init();
-  constexpr uint dim = 1;
-  const std::array<double, 4> positions{{0.413, 0.427, 0.441, 0.468}};
-  for (const double position : positions) {
-    const Point<dim> expected(position);
-    const auto model = ModelAffineEoM<dim>(expected, {{{3.}}});
-    const auto undamped = reconstruct_minimum_with_model<dim, FV::Discretization>(model, 0, 0.);
-    const auto smoothed = reconstruct_minimum_with_model<dim, FV::Discretization>(model, 0, -1.);
-    const double closest_support_point = std::round(smoothed[0] / 0.05) * 0.05;
-
-    CAPTURE(position, undamped[0], smoothed[0]);
-    CHECK(std::abs(undamped[0] - position) < 1e-9);
-    CHECK(std::abs(smoothed[0] - position) < 1e-9);
-    CHECK(std::abs(smoothed[0] - closest_support_point) > 1e-6);
-    CHECK(std::abs(smoothed[0] - position) < 2e-2);
-  }
-}
-
-TEST_CASE("Physical gradient-jump smoothing preserves smooth affine CG minima",
-          "[discretization][EoM][potential][smoothing][cg]")
-{
-  DiFfRG::Init();
-  constexpr uint dim = 2;
-  const Point<dim> expected(0.437, 0.583);
-  const ModelAffineEoM<dim> model(expected, {{{4., 1.25}, {1.25, 3.}}});
-  const auto undamped = reconstruct_minimum_with_model<dim, CG::Discretization>(model, 2, 0.);
-  const auto smoothed = reconstruct_minimum_with_model<dim, CG::Discretization>(model, 2, -1.);
-
-  CHECK(distance(undamped, expected) < 1e-9);
-  CHECK(distance(smoothed, expected) < 1e-9);
-  CHECK(distance(smoothed, undamped) < 1e-9);
-}
-
-TEST_CASE("Physical gradient-jump smoothing gives a rotated FV source an interior minimum",
-          "[discretization][EoM][potential][smoothing][fv][2d]")
-{
-  DiFfRG::Init();
-  constexpr uint dim = 2;
-  const Point<dim> expected(0.437, 0.583);
-  const ModelAffineEoM<dim> model(expected, {{{4., 1.25}, {1.25, 3.}}});
-  const auto smoothed = reconstruct_minimum_with_model<dim, FV::Discretization>(model, 0, -1.);
-
-  CAPTURE(smoothed[0], smoothed[1]);
-  CHECK(distance(smoothed, expected) < 3e-2);
-  for (uint d = 0; d < dim; ++d) {
-    const double closest_support_point = std::round(smoothed[d] / 0.05) * 0.05;
-    CHECK(std::abs(smoothed[d] - closest_support_point) > 1e-6);
-  }
-}
-
-TEST_CASE("A fixed physical EoM smoothing length is stable under uniform refinement",
-          "[discretization][EoM][potential][smoothing][fv][refinement]")
-{
-  DiFfRG::Init();
-  constexpr uint dim = 1;
-  constexpr double smoothing_length = 0.2;
-  const Point<dim> expected(0.437);
-  const ModelAffineEoM<dim> model(expected, {{{3.}}});
-  const auto coarse =
-      reconstruct_minimum_with_model<dim, FV::Discretization>(model, 0, smoothing_length, /*refinement=*/0);
-  const auto fine =
-      reconstruct_minimum_with_model<dim, FV::Discretization>(model, 0, smoothing_length, /*refinement=*/1);
-
-  CAPTURE(coarse[0], fine[0]);
-  CHECK(distance(coarse, expected) < 2e-2);
-  CHECK(distance(fine, expected) < 2e-2);
-  CHECK(distance(coarse, fine) < 1e-2);
-}
-
-TEST_CASE("EoM gradient-jump damping is symmetric positive semidefinite on adaptive interfaces",
-          "[discretization][EoM][potential][smoothing][adaptive]")
-{
-  constexpr uint dim = 2;
-  Triangulation<dim> triangulation;
-  GridGenerator::subdivided_hyper_cube(triangulation, 2, 0., 1.);
-  triangulation.begin_active()->set_refine_flag();
-  triangulation.execute_coarsening_and_refinement();
-
-  FE_DGQ<dim> solution_fe(0);
-  FE_Q<dim> potential_fe(2);
-  DoFHandler<dim> solution_dof_handler(triangulation);
-  DoFHandler<dim> potential_dof_handler(triangulation);
-  solution_dof_handler.distribute_dofs(solution_fe);
-  potential_dof_handler.distribute_dofs(potential_fe);
-  Vector<double> solution(solution_dof_handler.n_dofs());
-  MappingQ1<dim> mapping;
-  QGauss<dim> quadrature(4);
-  QGauss<dim - 1> face_quadrature(4);
-
-  AffineConstraints<double> constraints;
-  DoFTools::make_hanging_node_constraints(potential_dof_handler, constraints);
-  constraints.close();
-  DynamicSparsityPattern dsp(potential_dof_handler.n_dofs());
-  DoFTools::make_flux_sparsity_pattern(potential_dof_handler, dsp, constraints,
-                                       /*keep_constrained_dofs=*/true);
-  SparsityPattern sparsity;
-  sparsity.copy_from(dsp);
-  SparseMatrix<double> undamped(sparsity);
-  SparseMatrix<double> damped(sparsity);
-  Vector<double> undamped_rhs(potential_dof_handler.n_dofs());
-  Vector<double> damped_rhs(potential_dof_handler.n_dofs());
-  const auto zero_eom = [](const auto &, const auto &) { return std::array<double, dim>{{0., 0.}}; };
-
-  DiFfRG::internal::PotentialAssemblyData<dim, double> assembly(potential_dof_handler, constraints, mapping,
-                                                                solution_fe, potential_fe, quadrature, face_quadrature);
-  DiFfRG::internal::assemble_potential_system(solution, solution_dof_handler, potential_fe, mapping, zero_eom,
-                                              constraints, assembly, undamped, undamped_rhs, 0.,
-                                              /*assemble_matrix = */ true);
-  DiFfRG::internal::assemble_potential_system(solution, solution_dof_handler, potential_fe, mapping, zero_eom,
-                                              constraints, assembly, damped, damped_rhs, 0.25,
-                                              /*assemble_matrix = */ true);
-
-  double penalty_norm = 0.;
-  double symmetry_error = 0.;
-  double quadratic_form = 0.;
-  for (uint i = 0; i < potential_dof_handler.n_dofs(); ++i) {
-    const double x_i = std::sin(0.37 * (i + 1.));
-    for (uint j = 0; j < potential_dof_handler.n_dofs(); ++j) {
-      const double penalty_ij = damped.el(i, j) - undamped.el(i, j);
-      const double penalty_ji = damped.el(j, i) - undamped.el(j, i);
-      const double x_j = std::sin(0.37 * (j + 1.));
-      penalty_norm = std::max(penalty_norm, std::abs(penalty_ij));
-      symmetry_error = std::max(symmetry_error, std::abs(penalty_ij - penalty_ji));
-      quadratic_form += x_i * penalty_ij * x_j;
-    }
-  }
-
-  CHECK(penalty_norm > 0.);
-  CHECK(symmetry_error < 1e-12);
-  CHECK(quadratic_form >= -1e-11);
-  CHECK(undamped_rhs.l2_norm() == 0.);
-  CHECK(damped_rhs.l2_norm() == 0.);
-}
-
-TEST_CASE("CG2 EoM potential reconstruction supports higher-order DG sources", "[discretization][EoM][dg]")
+TEST_CASE("CG2 EoM direct search supports higher-order DG sources", "[discretization][EoM][dg]")
 {
   DiFfRG::Init();
   constexpr uint dim = 2;
   const int fe_order = GENERATE(1, 2);
   const Point<dim> expected(0.4, 0.6);
-  const auto EoM = reconstruct_minimum<dim, DG::Discretization>(parameters_with_minimum(expected), fe_order);
+  const auto EoM = locate_minimum<dim, DG::Discretization>(parameters_with_minimum(expected), fe_order);
 
   REQUIRE(distance(EoM, expected) < 1.1e-1);
 }
 
-TEST_CASE("EoM potential reconstruction can return a boundary minimum", "[discretization][EoM][boundary]")
+TEST_CASE("EoM direct search can return a boundary minimum", "[discretization][EoM][boundary]")
 {
   DiFfRG::Init();
   constexpr uint dim = 2;
   const Point<dim> expected(0., 0.);
-  const auto EoM = reconstruct_minimum<dim, CG::Discretization>(parameters_with_boundary_minimum(), 2);
+  const auto EoM = locate_minimum<dim, CG::Discretization>(parameters_with_boundary_minimum(), 2);
 
   REQUIRE(distance(EoM, expected) < 1e-12);
 }
@@ -1617,13 +705,12 @@ TEST_CASE("EoM max-iteration zero keeps the origin bypass", "[discretization][Eo
   initial_condition.interpolate(model);
 
   auto EoM_cell = discretization.get_dof_handler().begin_active();
-  const auto result = get_EoM_point_with_potential(
+  const auto result = get_EoM_result(
       EoM_cell, initial_condition.spatial_data(), discretization.get_dof_handler(), discretization.get_mapping(),
       [&](const auto &p, const auto &values) { return model.EoM(p, values); },
       [&](const auto &p, const auto &) { return p; }, 1e-12, 0);
 
   REQUIRE(distance(result.point, Point<dim>(0., 0.)) < 1e-12);
-  REQUIRE_FALSE(result.potential.has_value());
 }
 
 TEST_CASE("A source-dominated 1D minimum below the first cell centre is the zero of the EoM",
@@ -1639,118 +726,47 @@ TEST_CASE("A source-dominated 1D minimum below the first cell centre is the zero
   const double expected = model.exact_minimum();
   CAPTURE(c, lambda, expected);
 
-  const auto fv = reconstruct_minimum_with_model<dim, FV::Discretization>(model, 0);
-  const auto cg = reconstruct_minimum_with_model<dim, CG::Discretization>(model, 1);
+  const auto fv = locate_minimum_with_model<dim, FV::Discretization>(model, 0);
+  const auto cg = locate_minimum_with_model<dim, CG::Discretization>(model, 1);
   CAPTURE(fv[0], cg[0]);
   CHECK(std::abs(fv[0] - expected) < 1e-12 * std::max(1., expected) + 1e-14);
   CHECK(std::abs(cg[0] - expected) < 1e-12 * std::max(1., expected) + 1e-14);
 }
 
-TEST_CASE("The 1D EoM polish does not move to a higher, metastable minimum", "[discretization][EoM][fv][cg]")
+TEST_CASE("The 1D EoM search does not move to a higher, metastable minimum", "[discretization][EoM][fv][cg]")
 {
   DiFfRG::Init();
   constexpr uint dim = 1;
   const ModelTwoMinima model;
-  const auto fv = reconstruct_minimum_with_model<dim, FV::Discretization>(model, 0);
-  const auto cg = reconstruct_minimum_with_model<dim, CG::Discretization>(model, 1);
+  const auto fv = locate_minimum_with_model<dim, FV::Discretization>(model, 0);
+  const auto cg = locate_minimum_with_model<dim, CG::Discretization>(model, 1);
   CAPTURE(fv[0], cg[0]);
   CHECK(fv[0] < 0.03);
   CHECK(cg[0] < 0.03);
 }
 
-TEST_CASE("EoM and raw potentials of one order share a cached system and match uncached solves",
-          "[discretization][EoM][raw-potential][cache]")
+TEST_CASE("Direct EoM search solves the vector field with curl without a potential solve",
+          "[discretization][EoM][direct]")
 {
   DiFfRG::Init();
-  constexpr int dim = 2;
-  // A DG0 source on a mesh with hanging nodes: covers the DG0 gradient recovery and the cached right-hand side,
-  // which skips the face terms of a continuous potential.
-  Triangulation<dim> triangulation;
-  GridGenerator::subdivided_hyper_rectangle(triangulation, {12u, 12u}, Point<dim>(0., 0.), Point<dim>(1., 1.));
-  triangulation.begin_active()->set_refine_flag();
-  std::next(triangulation.begin_active(), 70)->set_refine_flag();
-  triangulation.execute_coarsening_and_refinement();
-  FESystem<dim> fe(FE_DGQ<dim>(0), dim);
-  DoFHandler<dim> dof_handler(triangulation);
-  dof_handler.distribute_dofs(fe);
-  const MappingQ1<dim> mapping;
-
-  // The gradient of V = (x - 0.4)^2 (x - 0.9)^2 + 2 (y - 0.3)^2 + x y.
-  const auto gradient = [](const Point<dim> &p) {
-    const double x = p[0], y = p[1];
-    return std::array<double, dim>{{2. * (x - 0.4) * (x - 0.9) * (2. * x - 1.3) + y, 4. * (y - 0.3) + x}};
-  };
-  Vector<double> solution(dof_handler.n_dofs());
-  std::vector<dealii::types::global_dof_index> dofs(fe.n_dofs_per_cell());
-  for (const auto &cell : dof_handler.active_cell_iterators()) {
-    cell->get_dof_indices(dofs);
-    const auto value = gradient(cell->center());
-    for (uint i = 0; i < dofs.size(); ++i)
-      solution[dofs[i]] = value[fe.system_to_component_index(i).first];
-  }
-  const auto field = [](const Point<dim> &, const auto &values) {
-    return std::array<double, dim>{{values[0], values[1]}};
-  };
-  const auto identity = [](const auto &p, const auto &) { return p; };
-  const auto max_difference = [](const Vector<double> &a, const Vector<double> &b) {
-    Vector<double> difference = a;
-    difference -= b;
-    return difference.linfty_norm() / a.linfty_norm();
-  };
-
-  Config::EoMConfig config;
-  DiFfRG::internal::PotentialSystemCache<dim, double> cache;
-  const auto raw_uncached = reconstruct_raw_potential(solution, dof_handler, mapping, field, config);
-  const auto raw_first = reconstruct_raw_potential(solution, dof_handler, mapping, field, config, &cache);
-  const auto raw_again = reconstruct_raw_potential(solution, dof_handler, mapping, field, config, &cache);
-  CHECK(max_difference(raw_uncached.values, raw_first.values) == 0.);
-  CHECK(max_difference(raw_first.values, raw_again.values) < 1e-10);
-
-  auto EoM_cell = dof_handler.begin_active();
-  const auto eom_uncached =
-      get_EoM_point_with_potential(EoM_cell, solution, dof_handler, mapping, field, identity, config);
-  const auto eom_cached = get_EoM_point_with_potential(EoM_cell, solution, dof_handler, mapping, field, identity,
-                                                       config, std::optional<Point<dim>>{}, &cache);
-  // Same element, smoothing and mesh: one system for both kinds.
-  CHECK(eom_cached.potential->dof_handler == raw_first.dof_handler);
-  CHECK(max_difference(eom_uncached.potential->values, eom_cached.potential->values) < 1e-10);
-  CHECK(eom_uncached.point.distance(eom_cached.point) < 1e-10);
-
-  // A different raw order gets a system of its own; the EoM potential keeps its quadratic one.
-  auto cubic_config = config;
-  cubic_config.raw_potential_order = 3;
-  const auto cubic_uncached = reconstruct_raw_potential(solution, dof_handler, mapping, field, cubic_config);
-  const auto cubic_cached = reconstruct_raw_potential(solution, dof_handler, mapping, field, cubic_config, &cache);
-  CHECK(cubic_cached.finite_element->degree == 3);
-  CHECK(cubic_cached.dof_handler != raw_first.dof_handler);
-  CHECK(max_difference(cubic_uncached.values, cubic_cached.values) == 0.);
-  const auto eom_after = get_EoM_point_with_potential(EoM_cell, solution, dof_handler, mapping, field, identity,
-                                                      config, std::optional<Point<dim>>{}, &cache);
-  CHECK(eom_after.potential->dof_handler == raw_first.dof_handler);
-  CHECK(max_difference(eom_cached.potential->values, eom_after.potential->values) == 0.);
+  const Point<2> expected(0.373, 0.417);
+  // The symmetric part is positive definite, but this field is not a gradient.
+  const ModelAffineEoM<2> model(expected, {{{4., 3.}, {-2., 3.}}});
+  const auto cg = locate_with_model<2, CG::Discretization>(model, 2, 0, std::nullopt, true);
+  const auto fv = locate_with_model<2, FV::Discretization>(model, 0, 0, std::nullopt, true);
+  CHECK(cg.point.distance(expected) < 1e-9);
+  CHECK(fv.point.distance(expected) < 1e-9);
 }
 
-TEST_CASE("Nested dissection orders every potential DoF exactly once", "[discretization][EoM][potential]")
+TEST_CASE("Direct EoM search checks each physical edge independently", "[discretization][EoM][direct][boundary]")
 {
-  constexpr int dim = 2;
-  Triangulation<dim> triangulation;
-  GridGenerator::subdivided_hyper_rectangle(triangulation, {9u, 7u}, Point<dim>(0., 0.), Point<dim>(1., 2.));
-  triangulation.begin_active()->set_refine_flag();
-  triangulation.execute_coarsening_and_refinement();
-  FE_Q<dim> fe(2);
-  DoFHandler<dim> dof_handler(triangulation);
-  dof_handler.distribute_dofs(fe);
-  DynamicSparsityPattern dsp(dof_handler.n_dofs());
-  DoFTools::make_flux_sparsity_pattern(dof_handler, dsp);
-  SparsityPattern pattern;
-  pattern.copy_from(dsp);
-  std::vector<Point<dim>> points(dof_handler.n_dofs());
-  for (const auto &[dof, point] : DoFTools::map_dofs_to_support_points(MappingQ1<dim>(), dof_handler))
-    points[dof] = point;
-
-  auto order = DiFfRG::internal::nested_dissection_order(pattern, points);
-  REQUIRE(order.size() == dof_handler.n_dofs());
-  std::sort(order.begin(), order.end());
-  for (std::size_t k = 0; k < order.size(); ++k)
-    CHECK(order[k] == static_cast<dealii::types::suitesparse_index>(k));
+  DiFfRG::Init();
+  const bool upper = GENERATE(false, true);
+  const Point<2> unconstrained(0.373, upper ? 1.08 : -0.08);
+  const Point<2> expected(upper ? 0.389 : 0.357, upper ? 1. : 0.);
+  const ModelAffineEoM<2> model(unconstrained, {{{4., .8}, {-.3, 3.}}});
+  const auto cg = locate_minimum_with_model<2, CG::Discretization>(model, 2);
+  const auto fv = locate_minimum_with_model<2, FV::Discretization>(model, 0);
+  CHECK(cg.distance(expected) < 1e-9);
+  CHECK(fv.distance(expected) < 1e-9);
 }

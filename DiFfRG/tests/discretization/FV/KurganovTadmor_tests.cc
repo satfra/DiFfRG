@@ -774,7 +774,7 @@ static typename DoFHandler::active_cell_iterator find_2d_non_corner_boundary_cel
   return typename DoFHandler::active_cell_iterator(dof_handler.end());
 }
 
-TEST_CASE("KT 1D FV readouts use EoM potential reconstruction and write a time series", "[FV][KT][EoM][output]")
+TEST_CASE("KT 1D FV readouts use direct EoM search and write a time series", "[FV][KT][EoM][output]")
 {
   using Model = DiFfRG::Testing::ModelBurgersKT<1>;
   // Serial on purpose: this tests serial linear algebra, and a plain RectangularMesh is partitioned in an MPI build.
@@ -826,35 +826,16 @@ TEST_CASE("KT 1D FV readouts use EoM potential reconstruction and write a time s
   const auto auxiliary_vtu_1 = output_dir / "output" / (output_name + "_auxiliary_000001.vtu");
 
   REQUIRE(std::filesystem::exists(main_pvd));
-  REQUIRE(std::filesystem::exists(potential_pvd));
-  REQUIRE(std::filesystem::exists(potential_vtu_0));
-  REQUIRE(std::filesystem::exists(potential_vtu_1));
-  REQUIRE(std::filesystem::exists(eom_potential_pvd));
-  REQUIRE(std::filesystem::exists(eom_potential_vtu_0));
-  REQUIRE(std::filesystem::exists(eom_potential_vtu_1));
+  REQUIRE_FALSE(std::filesystem::exists(potential_pvd));
+  REQUIRE_FALSE(std::filesystem::exists(potential_vtu_0));
+  REQUIRE_FALSE(std::filesystem::exists(potential_vtu_1));
+  REQUIRE_FALSE(std::filesystem::exists(eom_potential_pvd));
+  REQUIRE_FALSE(std::filesystem::exists(eom_potential_vtu_0));
+  REQUIRE_FALSE(std::filesystem::exists(eom_potential_vtu_1));
   REQUIRE(std::filesystem::exists(auxiliary_pvd));
   REQUIRE(std::filesystem::exists(auxiliary_vtu_0));
   REQUIRE(std::filesystem::exists(auxiliary_vtu_1));
 
-  const auto pvd_contents = read_text_file(potential_pvd);
-  CHECK(pvd_contents.find("timestep=\"0.25\"") != std::string::npos);
-  CHECK(pvd_contents.find("timestep=\"0.5\"") != std::string::npos);
-  CHECK(pvd_contents.find("kt_eom_potential_000000.vtu") != std::string::npos);
-  CHECK(pvd_contents.find("kt_eom_potential_000001.vtu") != std::string::npos);
-  const auto potential_vtu_0_contents = read_text_file(potential_vtu_0);
-  const auto potential_vtu_1_contents = read_text_file(potential_vtu_1);
-  CHECK(potential_vtu_0_contents.find("Name=\"potential\"") != std::string::npos);
-  CHECK(potential_vtu_1_contents.find("Name=\"potential\"") != std::string::npos);
-  CHECK(potential_vtu_0_contents.find("potential_hessian") == std::string::npos);
-  CHECK(potential_vtu_1_contents.find("potential_hessian") == std::string::npos);
-
-  const auto eom_pvd_contents = read_text_file(eom_potential_pvd);
-  CHECK(eom_pvd_contents.find("timestep=\"0.25\"") != std::string::npos);
-  CHECK(eom_pvd_contents.find("timestep=\"0.5\"") != std::string::npos);
-  CHECK(eom_pvd_contents.find("kt_eom_eom_potential_000000.vtu") != std::string::npos);
-  CHECK(eom_pvd_contents.find("kt_eom_eom_potential_000001.vtu") != std::string::npos);
-  CHECK(read_text_file(eom_potential_vtu_0).find("Name=\"eom_potential\"") != std::string::npos);
-  CHECK(read_text_file(eom_potential_vtu_1).find("Name=\"eom_potential\"") != std::string::npos);
   CHECK(read_text_file(auxiliary_vtu_0).find("Name=\"auxiliary_u\"") != std::string::npos);
   CHECK(read_text_file(auxiliary_vtu_1).find("Name=\"auxiliary_u\"") != std::string::npos);
 }
@@ -910,12 +891,11 @@ TEST_CASE("KT HDF5-only output keeps all field series in one file", "[FV][KT][Eo
 
   auto file = DiFfRG::hdf5::File::open(hdf5_path.string(), DiFfRG::hdf5::Access::ReadOnly);
   auto root = file.root();
+  CHECK_FALSE(root.has_group("potential"));
+  CHECK_FALSE(root.has_group("eom_potential"));
   for (const auto &[group_name, field_name, series_name] :
        std::vector<std::tuple<std::string, std::string, std::string>>{
-           {"FE", "u", output_name},
-           {"potential", "potential", output_name + "_potential"},
-           {"eom_potential", "eom_potential", output_name + "_eom_potential"},
-           {"auxiliary", "auxiliary_u", output_name + "_auxiliary"}}) {
+           {"FE", "u", output_name}, {"auxiliary", "auxiliary_u", output_name + "_auxiliary"}}) {
     auto series = root.open_group(group_name);
     for (unsigned int frame = 0; frame < 2; ++frame) {
       auto entry = series.open_group(Utilities::int_to_string(frame, 6));

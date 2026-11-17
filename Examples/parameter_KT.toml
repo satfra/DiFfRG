@@ -18,13 +18,8 @@ overintegration = 0
 output_subdivisions = 1
 EoM_abs_tol = 1e-12
 EoM_max_iter = 100
-EoM_smoothing_length = -1.0
-EoM_bound_tolerance = 1e-12
 EoM_armijo_coefficient = 0.0001
 EoM_max_backtracks = 20
-raw_potential_order = 2
-raw_potential_recover_mass_hessian = false
-raw_potential_mass_hessian_jump_threshold = -1.0
 
 [discretization.grid]
 x_grid = "0:0.1:1"

@@ -27,13 +27,59 @@ commonly used keys at their defaults (`--gen-json` for JSON).
 | `overintegration` | uint | 0 | Extra quadrature points per direction in the assembly. |
 | `output_subdivisions` | uint | 1 | Sub-cells per cell in the VTK output. |
 | `threads` | uint | 0 | CPU threads for assembly and CPU integrators; 0 = automatic. See [CPU threads](mpi.md#cpu-threads) for what overrides it. |
-| `EoM_abs_tol` | double | 1e-12 | Tolerance of the search for the equation of motion (EoM), the minimum of the potential. |
-| `EoM_max_iter` | uint | 100 | Iteration limit of the EoM search within a cell. |
-| `EoM_smoothing_length` | double | -1 | Smoothing of the reconstructed potential used by the EoM search: -1 automatic (twice the smallest initial cell width), 0 off, > 0 a length in field units. |
-| `EoM_bound_tolerance` | double | 1e-12 | When a point counts as lying on a cell boundary in the EoM search. |
+| `EoM_abs_tol` | double | 1e-12 | Componentwise residual tolerance of the direct constrained EoM search. |
+| `EoM_max_iter` | uint | 100 | Newton iterations per search seed; 0 returns the mesh vertex closest to the origin. |
+| `EoM_patch_order` | uint | 0 | Optional FV local polynomial refinement: 0 off, 2 quadratic, 3 cubic. |
+| `EoM_patch_radius` | double | 7 | Radius in local cell widths of the patch around each coarse root; supports cubic upper-side fits with the default buffer away from domain edges. |
+| `EoM_patch_direction` | array | `[]` | Empty selects the upper side in every coordinate. A nonzero vector selects its positive half-plane. An all-zero vector selects a centred patch and requires `EoM_patch_skip_layers = 0`. |
+| `EoM_patch_skip_layers` | uint | 1 | Exclusion buffer in local cell widths: applied separately in every coordinate for the default upper patch, or in the projected direction for an explicit nonzero vector. |
+| `EoM_patch_parity` | array | `[]` | Rows are state components, columns coordinates: -1 odd, +1 even about zero, 0 unrestricted. Apply only known model symmetries. |
 | `EoM_armijo_coefficient` | double | 1e-4 | Sufficient-decrease coefficient of the EoM line search, in (0, 1). |
 | `EoM_max_backtracks` | uint | 20 | Step halvings allowed in the EoM line search. |
-| `raw_potential_order` | uint | 2 | Polynomial order (2 or 3) of the potential reconstructed for output and extractors. |
+
+The direct EoM search supports rectangular field-space meshes. Assemblers obtain the physical search domain
+from the mesh configuration, before any origin-centering extension below zero. Boundary detection uses a fixed
+internal tolerance scaled to the domain width and coordinate roundoff. In the interior it solves all EoM components;
+on an edge it solves the tangential components and checks the normal sign. FV/DG states use a continuous vector
+readout reconstructed from the state components, retaining explicit coordinate-dependent source terms and numerical
+curl. No scalar potential is reconstructed. Multiple candidates are ranked by direct line integrals of the EoM
+from the physical lower corner to each candidate, split at cell interfaces. For a conservative field these are
+potential differences; with curl this is a path convention, not a unique thermodynamic ordering. The sampled
+search is not certified to find every root and throws
+if it finds no locally admissible candidate. Residual tolerance is not an estimate of discretization error.
+
+The optional FV refinement always fits exact polynomial cell averages to the FV values, independently for each
+state component, then solves the same constrained EoM within
+one cell width of the coarse root. It evaluates explicit source terms after fitting. It reduces polynomial degree
+when the patch is underdetermined; an empty/unsupported patch or unsuccessful refinement leaves the coarse result.
+FE data, including ordinary DG0, do not use this cell-average refinement. Assemblers identify FV data automatically.
+Standalone `get_EoM_result` calls identify their source with `EoMDataKind`; the default is FE.
+`EoMResult.local_fit` exposes the polynomial, per-component degrees and fit residuals. `EoMResult.hessian` contains
+the symmetric derivative of the first field-space-dimension state components at `search_point`, from that same fit
+(or the coarse vector readout when no fit is accepted), without a scalar-potential solve. This assumes those
+components represent the potential gradient; model coordinate/source factors and wave-function normalization
+must still be applied. Model extractors and readouts receive the standard FE value and derivative slots;
+these use the assembler's reconstruction rather than the optional root-local fit. No extra potential slots
+or automatic scalar potential output series are provided.
+
+For a fully supported cubic fit, `hessian_fit_difference` compares it with a quadratic fit on the same patch. This
+is a consistency indicator, not a certified error bound. By default, every vertex of a fitting cell must satisfy
+`x[d] >= root[d] + h[d]` in every coordinate, where `h[d]` is the local root-cell width. This selects the upper
+branch with one full cell width of separation in each coordinate. The radius restricts cell centres in the metric
+scaled by these widths. A one-sided patch does not automatically detect arbitrary kinks; explicit directions
+can select another physical branch.
+When the coarse root is displaced from a kink, a positive `EoM_patch_skip_layers` can exclude the mixed cells;
+increase `EoM_patch_radius` if necessary to retain enough independent samples beyond that buffer.
+
+For example, two raw gradient components that are respectively odd/even and even/odd in two coordinates can use:
+
+```json
+"EoM_patch_order": 3,
+"EoM_patch_parity": [[-1, 1], [1, -1]]
+```
+
+These entries belong under `discretization`. The parity is imposed on the raw state, before explicit-breaking
+terms in `Model::EoM`; it does not impose zero curl. Continuous FE evaluation remains native.
 
 ### `/discretization/grid`
 

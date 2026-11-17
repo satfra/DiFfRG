@@ -108,7 +108,7 @@ namespace DiFfRG
   /**
    * @brief Whether @p Model chooses the point at which its extractors are evaluated.
    *
-   * By default, Model::extract is evaluated at the EoM point (get_EoM_point_with_potential). A model that wants
+   * By default, Model::extract is evaluated at the EoM point (get_EoM_result). A model that wants
    * another point implements
    *
    * ```cpp

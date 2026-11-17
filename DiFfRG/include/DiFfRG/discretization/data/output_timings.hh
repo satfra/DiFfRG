@@ -10,12 +10,11 @@ namespace DiFfRG
   namespace internal
   {
     /**
-     * @brief Wall time in seconds of one output frame, by stage. Nested: potential_solves and fe_attach are part of
-     * contributor; only total is the frame's cost.
+     * Wall time in seconds by output stage. FE attachment is included in the contributor callback;
+     * only total is the complete frame cost.
      */
     struct FrameTimings {
-      double contributor = 0.;      ///< the whole user contributor callback (attach + readouts)
-      double potential_solves = 0.; ///< of which: internal::solve_potential
+      double contributor = 0.; ///< the whole user contributor callback (attach + readouts)
       /// of which: FEOutput::attach (copying the fields, waiting for a free buffer)
       double fe_attach = 0.;
       double build_patches = 0.;   ///< DataOut::build_patches
@@ -29,7 +28,6 @@ namespace DiFfRG
       double csv = 0.;   ///< CsvOutput::flush
       double total = 0.; ///< the whole frame, from write_frame entry to flush_frame exit
 
-      std::size_t potential_solve_count = 0;
       std::size_t hdf5_open_count = 0; ///< how many times the .h5 was opened for this frame
 
       /// Add another sink's contribution.

@@ -44,10 +44,6 @@ namespace DiFfRG
         active(MPI::rank(MPI_COMM_WORLD) == 0), run_reporter(output_path, this->settings, active),
         hdf5_writer(this->settings.asynchronous && active ? this->settings.hdf5_queue_depth : 0u),
         fe_out(this->top_folder, this->output_name, this->output_folder, this->settings, active),
-        potential_fe_out(this->top_folder, this->output_name + "_potential", this->output_folder, this->settings,
-                         active),
-        eom_potential_fe_out(this->top_folder, this->output_name + "_eom_potential", this->output_folder,
-                             this->settings, active),
         use_hdf5(this->settings.write_hdf5), filename_h5(this->output_name + ".h5")
   {
     set_Lambda(this->settings.Lambda);
@@ -63,8 +59,6 @@ namespace DiFfRG
       h5.set_writer(&hdf5_writer);
       if constexpr (dim > 0) {
         configure_field_output(fe_out, "FE");
-        configure_field_output(potential_fe_out, "potential");
-        configure_field_output(eom_potential_fe_out, "eom_potential");
       }
     }
   }
@@ -79,34 +73,6 @@ namespace DiFfRG
       finish_impl(/* crashed = */ std::uncaught_exceptions() > 0);
     } catch (...) {
       deferred_error = std::current_exception();
-    }
-  }
-
-  template <uint dim, typename VectorType>
-  void OutputSession_impl<dim, VectorType>::attach_raw_potential(
-      ReconstructedRawPotential<dim, typename VectorType::value_type> potential)
-  {
-    if constexpr (dim > 0) {
-      if (pending_raw_potential)
-        throw std::logic_error("OutputSession::attach_raw_potential: a raw potential is already attached.");
-      if (potential_fe_out.will_discard()) return;
-      potential_fe_out.attach(*potential.dof_handler, potential.values, "potential");
-      pending_raw_potential.emplace(std::move(potential));
-    }
-  }
-
-  template <uint dim, typename VectorType>
-  void OutputSession_impl<dim, VectorType>::attach_eom_potential(EoMResult<dim, typename VectorType::value_type> result)
-  {
-    if constexpr (dim > 0) {
-      if (!result.potential.has_value()) return;
-      if (eom_potential_fe_out.will_discard()) return;
-      auto &potential = result.potential.value();
-      const std::string name = pending_eom_potentials.empty()
-                                   ? "eom_potential"
-                                   : "eom_potential_" + std::to_string(pending_eom_potentials.size());
-      eom_potential_fe_out.attach(*potential.dof_handler, potential.values, name);
-      pending_eom_potentials.push_back(std::move(potential));
     }
   }
 
@@ -128,8 +94,7 @@ namespace DiFfRG
     if (checked.has_parent_path())
       throw std::invalid_argument("OutputSession::field_output: field-series name must be one path component.");
     const std::string series_name = checked.generic_string();
-    if (series_name == "FE" || series_name == "potential" || series_name == "eom_potential" ||
-        series_name == "scalars" || series_name == "maps" || series_name == "coordinates")
+    if (series_name == "FE" || series_name == "scalars" || series_name == "maps" || series_name == "coordinates")
       throw std::invalid_argument("OutputSession::field_output: reserved field-series name '" + series_name + "'.");
 
     auto found = named_fe_outs.find(series_name);
@@ -144,7 +109,8 @@ namespace DiFfRG
     return found->second;
   }
 
-  template <uint dim, typename VectorType> HDF5Output &OutputSession_impl<dim, VectorType>::hdf5(const std::string &name)
+  template <uint dim, typename VectorType>
+  HDF5Output &OutputSession_impl<dim, VectorType>::hdf5(const std::string &name)
   {
     const auto found = h5_files.find(name);
     if (found != h5_files.end()) return found->second;
@@ -172,14 +138,6 @@ namespace DiFfRG
 
     if constexpr (dim > 0) {
       fe_out.flush(time);
-      if (pending_raw_potential) {
-        potential_fe_out.flush(time);
-        pending_raw_potential.reset();
-      }
-      if (!pending_eom_potentials.empty()) {
-        eom_potential_fe_out.flush(time);
-        pending_eom_potentials.clear();
-      }
       for (const auto &name : pending_named_fe_outs)
         named_fe_outs.at(name).flush(time);
     }
@@ -195,8 +153,6 @@ namespace DiFfRG
     // counted twice even though FEOutput already folded in the HDF5Output cost it triggered.
     if constexpr (dim > 0) {
       current_frame += fe_out.take_frame_timings();
-      current_frame += potential_fe_out.take_frame_timings();
-      current_frame += eom_potential_fe_out.take_frame_timings();
       for (const auto &name : pending_named_fe_outs)
         current_frame += named_fe_outs.at(name).take_frame_timings();
       pending_named_fe_outs.clear();
@@ -211,19 +167,17 @@ namespace DiFfRG
 
     if (settings.verbosity < 3) return;
 
-    run_reporter.port().debug("output frame t = {:.6e}: total {:.4f}s (contributor {:.4f}s, of which {} potential "
-                              "solve(s) {:.4f}s; build_patches {:.4f}s, filter {:.4f}s, hdf5 write {:.4f}s, hdf5 "
-                              "open/close {:.4f}s in {} open(s), fe attach {:.4f}s, fe flush {:.4f}s, csv {:.4f}s)",
-                              time, current_frame.total, current_frame.contributor, current_frame.potential_solve_count,
-                              current_frame.potential_solves, current_frame.build_patches, current_frame.data_filter,
-                              current_frame.hdf5_write, current_frame.hdf5_open_close, current_frame.hdf5_open_count,
-                              current_frame.fe_attach, current_frame.fe_flush, current_frame.csv);
+    run_reporter.port().debug("output frame t = {:.6e}: total {:.4f}s (contributor {:.4f}s; build_patches {:.4f}s, "
+                              "filter {:.4f}s, hdf5 write {:.4f}s, hdf5 open/close {:.4f}s in {} open(s), "
+                              "fe attach {:.4f}s, fe flush {:.4f}s, csv {:.4f}s)",
+                              time, current_frame.total, current_frame.contributor, current_frame.build_patches,
+                              current_frame.data_filter, current_frame.hdf5_write, current_frame.hdf5_open_close,
+                              current_frame.hdf5_open_count, current_frame.fe_attach, current_frame.fe_flush,
+                              current_frame.csv);
 
     diagnostics_port.record("output_timings.csv", time,
                             {{"total", current_frame.total},
                              {"contributor", current_frame.contributor},
-                             {"potential_solves", current_frame.potential_solves},
-                             {"potential_solve_count", static_cast<double>(current_frame.potential_solve_count)},
                              {"build_patches", current_frame.build_patches},
                              {"data_filter", current_frame.data_filter},
                              {"hdf5_write", current_frame.hdf5_write},
@@ -236,8 +190,8 @@ namespace DiFfRG
 
   template <uint dim, typename VectorType>
   void OutputSession_impl<dim, VectorType>::dump_to_csv(const std::string &name,
-                                                   const std::vector<std::vector<double>> &values, const bool append,
-                                                   const std::vector<std::string> &header)
+                                                        const std::vector<std::vector<double>> &values,
+                                                        const bool append, const std::vector<std::string> &header)
   {
     const auto path = output_path.resolve(OutputPath::checked_relative(name, "table path"));
     create_folder(path.parent_path().string());
@@ -289,16 +243,6 @@ namespace DiFfRG
     } catch (...) {
       drain_error = std::current_exception();
     }
-    try {
-      potential_fe_out.drain();
-    } catch (...) {
-      if (!drain_error) drain_error = std::current_exception();
-    }
-    try {
-      eom_potential_fe_out.drain();
-    } catch (...) {
-      if (!drain_error) drain_error = std::current_exception();
-    }
     for (auto &[name, output] : named_fe_outs) {
       try {
         output.drain();
@@ -329,16 +273,6 @@ namespace DiFfRG
     if (active) {
       try {
         fe_out.finish();
-      } catch (...) {
-        if (!terminal_error) terminal_error = std::current_exception();
-      }
-      try {
-        potential_fe_out.finish();
-      } catch (...) {
-        if (!terminal_error) terminal_error = std::current_exception();
-      }
-      try {
-        eom_potential_fe_out.finish();
       } catch (...) {
         if (!terminal_error) terminal_error = std::current_exception();
       }

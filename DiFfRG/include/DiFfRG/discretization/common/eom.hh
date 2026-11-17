@@ -1,185 +1,79 @@
 #pragma once
 
-// external libraries
-#include <boost/signals2/connection.hpp>
-
+#include <DiFfRG/common/utils.hh>
+#include <DiFfRG/discretization/common/eom_config.hh>
+#include <DiFfRG/discretization/common/eom_polynomial.hh>
+#include <DiFfRG/discretization/common/serial_mirror.hh>
 #include <Eigen/Eigenvalues>
 #include <Eigen/QR>
-
-#include <deal.II/base/parallel.h>
-#include <deal.II/base/point.h>
+#include <algorithm>
+#include <array>
+#include <boost/signals2/connection.hpp>
+#include <cmath>
 #include <deal.II/base/quadrature_lib.h>
-#include <deal.II/distributed/tria_base.h>
-#include <deal.II/dofs/dof_handler.h>
 #include <deal.II/dofs/dof_tools.h>
-#include <deal.II/fe/fe_dgq.h>
-#include <deal.II/fe/fe_interface_values.h>
 #include <deal.II/fe/fe_q.h>
+#include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_values.h>
+#include <deal.II/fe/mapping_q1.h>
 #include <deal.II/grid/grid_tools.h>
 #include <deal.II/grid/grid_tools_geometry.h>
 #include <deal.II/lac/affine_constraints.h>
 #include <deal.II/lac/dynamic_sparsity_pattern.h>
-#include <deal.II/lac/full_matrix.h>
-#include <deal.II/lac/sparse_direct.h>
 #include <deal.II/lac/sparse_matrix.h>
 #include <deal.II/lac/sparsity_pattern.h>
-#include <deal.II/lac/vector.h>
 #include <deal.II/numerics/fe_field_function.h>
-#include <umfpack.h>
-
-#include <DiFfRG/discretization/common/batched_scatter.hh>
-#include <DiFfRG/discretization/common/cell_geometry.hh>
-#include <DiFfRG/discretization/common/eom_config.hh>
-#include <DiFfRG/discretization/common/serial_mirror.hh>
-#include <DiFfRG/discretization/data/output_timings.hh>
-
-// standard library
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <deque>
 #include <limits>
 #include <map>
 #include <memory>
-#include <mutex>
-#include <numeric>
 #include <optional>
+#include <span>
 #include <stdexcept>
-#include <string>
+#include <tbb/tbb.h>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace DiFfRG
 {
-  namespace internal
-  {
-    /// Number and wall time of potential reconstructions on this thread, for OutputSession's timing report.
-    struct PotentialSolveStats {
-      std::size_t solves = 0;
-      double seconds = 0.;
-    };
+  /// Source discretization determines whether FV cell-average polynomial refinement is applicable.
+  enum class EoMDataKind { finite_element, finite_volume };
 
-    inline PotentialSolveStats &potential_solve_stats()
-    {
-      static thread_local PotentialSolveStats stats;
-      return stats;
-    }
-  } // namespace internal
-
-  /**
-   * @brief The potential \f$V_{\rm EoM}\f$ reconstructed from the model's EoM field during the EoM search (written to
-   * `<run>_eom_potential.pvd` and `/eom_potential` of the HDF5 output).
-   *
-   * It is a continuous, piecewise quadratic (FE_Q(2)) function on a copy of the solution mesh, normalized to zero at
-   * the mesh vertex closest to the origin. Element and DoFHandler are shared, so the object stays valid on its own.
-   */
-  template <int dim, typename NumberType> struct ReconstructedEoMPotential {
-    /// Location of the minimum of the potential (before the 1D refinement onto the EoM zero).
-    dealii::Point<dim> minimum;
-    /// The finite element of the potential.
-    std::shared_ptr<dealii::FiniteElement<dim>> finite_element;
-    /// Its dofs.
-    std::shared_ptr<dealii::DoFHandler<dim>> dof_handler;
-    /// The coefficients.
-    dealii::Vector<NumberType> values;
+  /// A locally admissible solution of the box-constrained EoM, before postprocessing.
+  template <int dim> struct EoMCandidate {
+    dealii::Point<dim> point;
+    /// -1: physical lower bound, +1: physical upper bound, 0: interior.
+    std::array<int, dim> active_bounds{};
+    /// Infinity norm of the EoM components violating constrained stationarity.
+    double residual = 0.;
+    /// Frobenius norm of (J-J^T)/2, in physical field-space coordinates.
+    double jacobian_skew_norm = 0.;
+    /// Accepted local FV refinement, if enabled and supported by the selected patch.
+    std::shared_ptr<const EoMVectorPolynomial<dim>> local_fit;
   };
 
-  /// Continuous Hessian field recovered from FV / DG0 data for the masses; see raw_potential_recover_mass_hessian.
-  template <int dim, typename NumberType> struct RecoveredMassHessian {
-    std::unique_ptr<dealii::FiniteElement<dim>> finite_element;
-    std::unique_ptr<dealii::DoFHandler<dim>> dof_handler;
-    std::array<dealii::Vector<NumberType>, dim * dim> values;
-    std::vector<dealii::Point<dim>> sample_centers;
-    std::vector<dealii::Tensor<2, dim, NumberType>> samples;
-    std::vector<std::vector<uint>> neighbors;
-    std::vector<std::vector<double>> face_weights;
-    std::vector<std::vector<uint>> kink_faces_by_cell;
-    std::vector<dealii::Point<dim>> kink_face_centers;
-    std::vector<dealii::Tensor<1, dim>> kink_face_normals;
-    std::vector<double> kink_face_widths;
-    std::vector<double> kink_face_strengths;
-  };
-
-  /**
-   * @brief The raw potential \f$V\f$: a scalar whose gradient fits the model's raw_potential_gradient (by default the
-   * EoM field without explicit-breaking terms). Reconstructed by reconstruct_raw_potential.
-   *
-   * \f$V\f$ is continuous and piecewise polynomial of order `/discretization/raw_potential_order` (FE_Q), with
-   * \f$V = 0\f$ at the mesh vertex closest to the origin. Differences of \f$V\f$ and all its derivatives do not
-   * depend on this normalization. Evaluate it with evaluate_raw_potential.
-   */
-  template <int dim, typename NumberType> struct ReconstructedRawPotential {
-    /// The finite element of the potential.
-    std::shared_ptr<dealii::FiniteElement<dim>> finite_element;
-    /// Its dofs.
-    std::shared_ptr<dealii::DoFHandler<dim>> dof_handler;
-    /// The coefficients.
-    dealii::Vector<NumberType> values;
-    /// The recovered Hessian field, if `/discretization/raw_potential_recover_mass_hessian` is set; else null.
-    std::unique_ptr<RecoveredMassHessian<dim, NumberType>> recovered_mass_hessian;
-  };
-
-  /// Zero-dimensional field space: no potential.
-  template <typename NumberType> struct ReconstructedRawPotential<0, NumberType> {
-    dealii::Vector<NumberType> values;
-  };
-
-  /**
-   * @brief The raw potential at one point. Models receive `value`, `gradient` and `mass_hessian` in the solution
-   * slots "potential", "potential_gradient" and "potential_hessian" of extract() and the readouts.
-   */
-  template <int dim, typename NumberType> struct RawPotentialEvaluation {
-    /// \f$V(x)\f$.
-    NumberType value{};
-    /// \f$\nabla V(x)\f$.
-    dealii::Tensor<1, dim, NumberType> gradient;
-    /// \f$\partial_i \partial_j V(x)\f$, the exact second derivative of the reconstruction.
-    dealii::Tensor<2, dim, NumberType> potential_hessian;
-    /// The Hessian used for masses: potential_hessian, or the recovered field if mass-Hessian recovery is enabled.
-    dealii::Tensor<2, dim, NumberType> mass_hessian;
-  };
-
-  /**
-   * @brief Placeholder passed in the potential slots of extract() when the model sets `use_potential = false`.
-   *
-   * It has no operations, so reading a potential slot in such a model fails to compile.
-   */
-  struct UnusedPotential {
-  };
-
-  /** @brief Evaluating an unread potential: the same three slots, all inert. */
-  struct UnusedPotentialEvaluation {
-    UnusedPotential value, gradient, mass_hessian;
-  };
-
-  /// Evaluating an UnusedPotential gives an UnusedPotentialEvaluation.
-  template <int dim>
-  UnusedPotentialEvaluation evaluate_raw_potential(const UnusedPotential &, const dealii::Mapping<dim> &,
-                                                   const dealii::Point<dim> &)
-  {
-    return {};
-  }
-
-  /// Zero-dimensional field space: no potential, only the trivial minimum.
-  template <typename NumberType> struct ReconstructedEoMPotential<0, NumberType> {
-    dealii::Point<0> minimum;
-    dealii::Vector<NumberType> values;
-  };
-
-  /// Result of get_EoM_point_with_potential.
+  /// Result of get_EoM_result.
   template <int dim, typename NumberType> struct EoMResult {
     /// The EoM point.
     dealii::Point<dim> point;
-    /// The reconstructed EoM potential; empty if `EoM_max_iter` is 0.
-    std::optional<ReconstructedEoMPotential<dim, NumberType>> potential;
+    /// The selected point before EoM_postprocess, also used as the next search's warm start.
+    dealii::Point<dim> search_point;
+    /// Locally admissible candidates found by the sampled search; not a certified exhaustive isolation.
+    std::vector<EoMCandidate<dim>> candidates;
+    /// False if a FV patch had insufficient independent samples for an affine state reconstruction.
+    bool reconstruction_full_rank = true;
+    /// Fit at search_point; null when disabled, unavailable, or rejected by the constrained root checks.
+    std::shared_ptr<const EoMVectorPolynomial<dim>> local_fit;
+    /// Symmetric derivative of the first dim state components at search_point, from the same fit/vector interpolation.
+    /// Model coordinate/source factors and wave-function normalizations are not applied.
+    std::optional<dealii::Tensor<2, dim>> hessian;
+    /// Absolute maximum entry difference from a quadratic fit on the same patch; a consistency indicator only.
+    std::optional<double> hessian_fit_difference;
   };
 
   namespace internal
   {
     using namespace dealii;
-
     template <int dim>
     dealii::Point<dim> get_origin(const dealii::DoFHandler<dim> &dof_handler,
                                   typename dealii::DoFHandler<dim>::cell_iterator &EoM_cell)
@@ -227,1505 +121,116 @@ namespace DiFfRG
           &target_dof_handler.get_triangulation(), source_cell->level(), source_cell->index(), &target_dof_handler);
     }
 
-    template <int dim> double l1_distance(const dealii::Point<dim> &a, const dealii::Point<dim> &b)
-    {
-      double distance = 0.;
-      for (uint d = 0; d < dim; ++d)
-        distance += std::abs(a[d] - b[d]);
-      return distance;
-    }
-
-    template <int dim>
-    double resolve_potential_smoothing_length(const dealii::DoFHandler<dim> &dof_handler,
-                                              const double configured_length)
-    {
-      if (!std::isfinite(configured_length) || configured_length < -1. ||
-          (configured_length < 0. && configured_length != -1.))
-        throw std::invalid_argument(
-            "EoM_smoothing_length must be -1 (automatic), zero, or a positive physical length.");
-
-      if (configured_length == -1.) return 2. * minimum_face_normal_cell_width(dof_handler);
-      return configured_length;
-    }
-
-    template <int dim>
-    Config::EoMConfig resolve_eom_config(const dealii::DoFHandler<dim> &dof_handler, Config::EoMConfig config)
-    {
-      config.validate();
-      config.smoothing_length = resolve_potential_smoothing_length(dof_handler, config.smoothing_length);
-      return config;
-    }
-
-    template <int dim, typename NumberType>
-    dealii::types::global_dof_index
-    select_gauge_dof(const dealii::AffineConstraints<NumberType> &constraints, const dealii::Point<dim> &origin,
-                     const std::map<dealii::types::global_dof_index, dealii::Point<dim>> &support_points)
-    {
-      dealii::types::global_dof_index best_dof = numbers::invalid_dof_index;
-      double best_distance = std::numeric_limits<double>::max();
-      for (const auto &dof_and_point : support_points) {
-        const auto dof = dof_and_point.first;
-        if (constraints.is_constrained(dof)) continue;
-
-        const double distance = l1_distance(dof_and_point.second, origin);
-        if (distance < best_distance) {
-          best_distance = distance;
-          best_dof = dof;
-        }
-      }
-
-      if (best_dof == numbers::invalid_dof_index)
-        throw std::runtime_error("EoM potential reconstruction could not find an unconstrained gauge DoF.");
-
-      return best_dof;
-    }
-
-    template <int dim> std::unique_ptr<dealii::FiniteElement<dim>> make_eom_potential_fe()
-    {
-      return std::make_unique<FE_Q<dim>>(2);
-    }
-
-    template <int dim> std::unique_ptr<dealii::FiniteElement<dim>> make_raw_potential_fe(const uint order = 2)
-    {
-      return std::make_unique<FE_Q<dim>>(order);
-    }
-
-    /** @brief Which of the two potentials a reconstruction is for; they are cached separately. */
-    enum class PotentialKind : uint { eom = 0, raw = 1 };
-    inline constexpr uint n_potential_kinds = 2;
-
-    template <int dim>
-    std::unique_ptr<dealii::FiniteElement<dim>> make_potential_fe(const PotentialKind kind, const uint raw_order)
-    {
-      return kind == PotentialKind::eom ? make_eom_potential_fe<dim>() : make_raw_potential_fe<dim>(raw_order);
-    }
-
-    /**
-     * @brief A fill-reducing elimination order by geometric nested dissection: split the DoFs at the median of
-     * their support points along the longest extent, take the DoFs of one half that couple to the other as
-     * separator, order both halves recursively, then the separator.
-     *
-     * On the face-coupled potential patterns this halves the fill-in and factorization flops of UMFPACK's own AMD
-     * ordering. Returns the DoF eliminated k-th at position k.
-     */
-    template <int dim>
-    std::vector<dealii::types::suitesparse_index>
-    nested_dissection_order(const dealii::SparsityPattern &pattern, const std::vector<dealii::Point<dim>> &points)
-    {
-      using Index = dealii::types::suitesparse_index;
-      constexpr std::size_t leaf_size = 16;
-      std::vector<Index> order;
-      order.reserve(points.size());
-      std::vector<char> in_left(points.size(), 0);
-
-      const auto dissect = [&](const auto &self, std::vector<Index> &dofs) -> void {
-        if (dofs.size() <= leaf_size) {
-          order.insert(order.end(), dofs.begin(), dofs.end());
-          return;
-        }
-        dealii::Point<dim> lower = points[dofs[0]], upper = points[dofs[0]];
-        for (const Index dof : dofs)
-          for (uint d = 0; d < dim; ++d) {
-            lower[d] = std::min(lower[d], points[dof][d]);
-            upper[d] = std::max(upper[d], points[dof][d]);
-          }
-        uint axis = 0;
-        for (uint d = 1; d < dim; ++d)
-          if (upper[d] - lower[d] > upper[axis] - lower[axis]) axis = d;
-
-        std::vector<double> coordinates(dofs.size());
-        for (std::size_t k = 0; k < dofs.size(); ++k)
-          coordinates[k] = points[dofs[k]][axis];
-        const auto median = coordinates.begin() + coordinates.size() / 2;
-        std::nth_element(coordinates.begin(), median, coordinates.end());
-        const double split = *median;
-
-        for (const Index dof : dofs)
-          in_left[dof] = points[dof][axis] < split;
-        std::vector<Index> left, right, separator;
-        for (const Index dof : dofs) {
-          if (in_left[dof]) {
-            left.push_back(dof);
-            continue;
-          }
-          bool couples_left = false;
-          for (auto entry = pattern.begin(dof); entry != pattern.end(dof) && !couples_left; ++entry)
-            couples_left = in_left[entry->column()];
-          (couples_left ? separator : right).push_back(dof);
-        }
-        for (const Index dof : left)
-          in_left[dof] = 0;
-        // Points that cannot be split (all on the median) stay together.
-        if (left.empty()) {
-          order.insert(order.end(), dofs.begin(), dofs.end());
-          return;
-        }
-        dofs = {};
-        self(self, left);
-        self(self, right);
-        order.insert(order.end(), separator.begin(), separator.end());
-      };
-
-      std::vector<Index> all(points.size());
-      std::iota(all.begin(), all.end(), Index(0));
-      dissect(dissect, all);
-      return order;
-    }
-
-    /**
-     * @brief The sparse LU factorization (UMFPACK) of the symmetric positive definite potential matrix.
-     *
-     * Differs from dealii::SparseDirectUMFPACK in two choices: the elimination order is nested_dissection_order
-     * with UMFPACK's symmetric strategy, and the solve does no iterative refinement -- an SPD matrix factorized with
-     * diagonal pivots needs none, and the refinement would cost two more back-substitutions and a matrix product.
-     */
-    class PotentialFactorization
-    {
-    public:
-      PotentialFactorization() { umfpack_dl_defaults(control.data()); }
-      PotentialFactorization(const PotentialFactorization &) = delete;
-      PotentialFactorization &operator=(const PotentialFactorization &) = delete;
-      ~PotentialFactorization() { clear(); }
-
-      void clear()
-      {
-        if (numeric != nullptr) umfpack_dl_free_numeric(&numeric);
-        numeric = nullptr;
-      }
-
-      /// Factorize @p matrix, ordering its unknowns by nested dissection of @p support_points.
-      template <int dim, typename NumberType>
-      void initialize(const dealii::SparseMatrix<NumberType> &matrix,
-                      const std::vector<dealii::Point<dim>> &support_points)
-      {
-        clear();
-        // UMFPACK wants compressed columns with sorted indices; the rows of the (symmetric) matrix serve, sorted.
-        const std::size_t n = matrix.m();
-        Ap.assign(n + 1, 0);
-        Ai.resize(matrix.n_nonzero_elements());
-        Ax.resize(matrix.n_nonzero_elements());
-        for (std::size_t row = 0; row < n; ++row)
-          Ap[row + 1] = Ap[row] + matrix.get_row_length(row);
-        dealii::parallel::apply_to_subranges(
-            std::size_t(0), n,
-            [&](const std::size_t begin, const std::size_t end) {
-              for (std::size_t row = begin; row < end; ++row) {
-                auto index = Ap[row];
-                for (auto entry = matrix.begin(row); entry != matrix.end(row); ++entry, ++index) {
-                  Ai[index] = entry->column();
-                  Ax[index] = entry->value();
-                }
-                // deal.II stores the diagonal first; move it into place.
-                for (auto k = Ap[row]; k + 1 < Ap[row + 1] && Ai[k] > Ai[k + 1]; ++k) {
-                  std::swap(Ai[k], Ai[k + 1]);
-                  std::swap(Ax[k], Ax[k + 1]);
-                }
-              }
-            },
-            1024);
-
-        const auto order = nested_dissection_order(matrix.get_sparsity_pattern(), support_points);
-        control[UMFPACK_STRATEGY] = UMFPACK_STRATEGY_SYMMETRIC;
-#ifdef UMFPACK_ORDERING
-        // Older UMFPACK (e.g. deal.II's bundled 5.1) has no ordering control: its qsymbolic always uses the given
-        // column ordering.
-        control[UMFPACK_ORDERING] = UMFPACK_ORDERING_GIVEN;
-#endif
-        control[UMFPACK_IRSTEP] = 0;
-        void *symbolic = nullptr;
-        int status = umfpack_dl_qsymbolic(n, n, Ap.data(), Ai.data(), Ax.data(), order.data(), &symbolic,
-                                          control.data(), nullptr);
-        if (status != UMFPACK_OK)
-          throw std::runtime_error("PotentialFactorization: umfpack_dl_qsymbolic failed with status " +
-                                   std::to_string(status));
-        status = umfpack_dl_numeric(Ap.data(), Ai.data(), Ax.data(), symbolic, &numeric, control.data(), nullptr);
-        umfpack_dl_free_symbolic(&symbolic);
-        if (status != UMFPACK_OK) {
-          clear();
-          throw std::runtime_error("PotentialFactorization: umfpack_dl_numeric failed with status " +
-                                   std::to_string(status));
-        }
-      }
-
-      /// Solve for @p solution with the factorized matrix and @p rhs.
-      template <typename NumberType>
-      void solve(dealii::Vector<NumberType> &solution, const dealii::Vector<NumberType> &rhs) const
-      {
-        const auto solve_double = [&](double *x, const double *b) {
-          // The rows were handed over as columns: solve with the transpose (the same matrix).
-          const int status = umfpack_dl_solve(UMFPACK_At, Ap.data(), Ai.data(), Ax.data(), x, b, numeric,
-                                              control.data(), nullptr);
-          if (status != UMFPACK_OK)
-            throw std::runtime_error("PotentialFactorization: umfpack_dl_solve failed with status " +
-                                     std::to_string(status));
-        };
-        if constexpr (std::is_same_v<NumberType, double>)
-          solve_double(solution.data(), rhs.data());
-        else {
-          dealii::Vector<double> x(solution.size()), b(rhs);
-          solve_double(x.data(), b.data());
-          solution = x;
-        }
-      }
-
-    private:
-      std::vector<dealii::types::suitesparse_index> Ap, Ai;
-      std::vector<double> Ax;
-      void *numeric = nullptr;
-      std::array<double, UMFPACK_CONTROL> control;
+    template <int dim, typename NumberType> struct ContinuousEoMGeometry;
+    /// Per-assembler vector interpolation geometry. Contains no scalar field or factorization.
+    template <int dim, typename NumberType> struct EoMStateCache {
+      std::shared_ptr<ContinuousEoMGeometry<dim, NumberType>> eom_geometry;
     };
-
-    template <int dim, typename NumberType> struct PotentialAssemblyData;
-
-    /**
-     * @brief The mesh-dependent part of solve_potential (dofs, matrix and its factorization), kept across calls.
-     *
-     * The matrix depends only on the mesh, the element and the smoothing length, so a reconstruction on an unchanged
-     * mesh costs one right-hand side assembly and a back-substitution. The EoM and the raw potential differ only in
-     * the right-hand side, so they share one entry whenever their elements have the same degree. Owned by an
-     * assembler; not thread-safe.
-     */
-    template <int dim, typename NumberType> class PotentialSystemCache
-    {
-      static constexpr int face_dim = dim > 0 ? dim - 1 : 0;
-
-    public:
-      struct Entry {
-        std::shared_ptr<dealii::FiniteElement<dim>> finite_element;
-        std::shared_ptr<dealii::DoFHandler<dim>> dof_handler;
-        dealii::AffineConstraints<NumberType> constraints;
-        dealii::SparsityPattern sparsity_pattern;
-        dealii::SparseMatrix<NumberType> matrix;
-        PotentialFactorization factorization;
-        dealii::Quadrature<dim> quadrature;
-        dealii::Quadrature<face_dim> face_quadrature;
-        /// Where each potential DoF sits; needed by the gauge choice and by every minimum search.
-        std::map<dealii::types::global_dof_index, dealii::Point<dim>> support_points;
-        /// What the right-hand side assembly reuses: its cells, faces and per-thread FE scratch.
-        std::unique_ptr<PotentialAssemblyData<dim, NumberType>> assembly;
-        /// The smoothing length the matrix was assembled with, resolved from the configured one.
-        double smoothing_length = 0.;
-
-        /// The last solve of each kind: a right-hand side equal to one of these reuses its solution.
-        struct Solve {
-          dealii::Vector<NumberType> rhs, solution;
-        };
-        std::array<Solve, n_potential_kinds> last_solves;
-
-        /**
-         * @brief Whether this entry still describes the system that would be built now.
-         *
-         * `stale` is set from the triangulation's change signal, which also covers the refinement that
-         * leaves the cell count untouched; the counters catch a mesh that was swapped wholesale. A
-         * disconnected signal means the triangulation this entry was built for is gone -- destroying one
-         * disconnects its slots -- so the address may now belong to a different mesh entirely.
-         */
-        bool describes(const dealii::Triangulation<dim> &tria, const dealii::DoFHandler<dim> &solution_dof_handler,
-                       const double configured_smoothing, const uint potential_fe_degree) const
-        {
-          return !stale && connection.connected() && triangulation == &tria && solution_dofs == &solution_dof_handler &&
-                 n_active_cells == tria.n_active_cells() && n_levels == tria.n_levels() &&
-                 n_vertices == tria.n_vertices() && solution_fe_degree == solution_dof_handler.get_fe().degree &&
-                 configured_smoothing_length == configured_smoothing && finite_element != nullptr &&
-                 finite_element->degree == potential_fe_degree;
-        }
-
-        void note_built_for(const dealii::Triangulation<dim> &tria, const dealii::DoFHandler<dim> &solution_dof_handler,
-                            const double configured_smoothing)
-        {
-          triangulation = &tria;
-          solution_dofs = &solution_dof_handler;
-          n_active_cells = tria.n_active_cells();
-          n_levels = tria.n_levels();
-          n_vertices = tria.n_vertices();
-          solution_fe_degree = solution_dof_handler.get_fe().degree;
-          configured_smoothing_length = configured_smoothing;
-          connection = tria.signals.any_change.connect([this]() { stale = true; });
-          stale = false;
-        }
-
-      private:
-        const void *triangulation = nullptr;
-        const void *solution_dofs = nullptr;
-        std::size_t n_active_cells = 0;
-        uint n_levels = 0;
-        std::size_t n_vertices = 0;
-        uint solution_fe_degree = 0;
-        double configured_smoothing_length = 0.;
-        boost::signals2::scoped_connection connection;
-        bool stale = true;
-      };
-
-      /**
-       * @brief The entry for potentials of element degree @p degree, created empty on first use.
-       *
-       * Held indirectly because a SparseMatrix points at its own SparsityPattern: the entries must not move
-       * once a matrix has been attached to one.
-       */
-      Entry &entry(const uint degree)
-      {
-        auto &slot = entries[degree];
-        if (!slot) slot = std::make_unique<Entry>();
-        return *slot;
-      }
-
-    private:
-      std::map<uint, std::unique_ptr<Entry>> entries;
-    };
-
-    template <int dim, typename EoMValue> dealii::Tensor<1, dim> eom_to_tensor(const EoMValue &eom)
-    {
-      dealii::Tensor<1, dim> out;
-      for (uint d = 0; d < dim; ++d)
-        out[d] = eom[d];
-      return out;
-    }
-
-    template <int dim, typename NumberType> struct DG0GradientModel {
-      dealii::Point<dim> center;
-      dealii::Tensor<1, dim, NumberType> value;
-      dealii::Tensor<2, dim, NumberType> jacobian;
-    };
-
-    /**
-     * @brief The mesh-dependent part of recover_dg0_gradient_models: every cell's centre, its patch (the cell and its
-     * active neighbours, layer by layer until there are 2 (dim + 1) of them), and the least-squares map from the
-     * patch samples to the slope of their linear fit; empty where the fit is underdetermined.
-     */
-    template <int dim> struct DG0GradientPatches {
-      DG0GradientPatches(const dealii::DoFHandler<dim> &solution_dof_handler, const dealii::Mapping<dim> &mapping)
-      {
-        const uint n_cells = solution_dof_handler.get_triangulation().n_active_cells();
-        cells.resize(n_cells);
-        centers.resize(n_cells);
-        patches.resize(n_cells);
-        slope_maps.resize(n_cells);
-
-        for (const auto &cell : solution_dof_handler.active_cell_iterators())
-          cells[cell->active_cell_index()] = cell;
-        const dealii::QMidpoint<dim> midpoint;
-        tbb::enumerable_thread_specific<std::unique_ptr<dealii::FEValues<dim>>> values_per_thread([&]() {
-          return std::make_unique<dealii::FEValues<dim>>(mapping, solution_dof_handler.get_fe(), midpoint,
-                                                         dealii::update_quadrature_points);
-        });
-        tbb::parallel_for(tbb::blocked_range<uint>(0, n_cells), [&](const auto &range) {
-          auto &values = *values_per_thread.local();
-          for (uint index = range.begin(); index != range.end(); ++index) {
-            values.reinit(cells[index]);
-            centers[index] = values.quadrature_point(0);
-          }
-        });
-
-        const uint target_patch_size = std::min<uint>(n_cells, 2 * (dim + 1));
-        tbb::parallel_for(tbb::blocked_range<uint>(0, n_cells), [&](const auto &range) {
-          for (uint cell_index = range.begin(); cell_index != range.end(); ++cell_index)
-            build_patch(cell_index, target_patch_size);
-        });
-      }
-
-      std::vector<typename dealii::DoFHandler<dim>::active_cell_iterator> cells;
-      std::vector<dealii::Point<dim>> centers;
-      std::vector<std::vector<uint>> patches;
-      /// Per cell, the dim x patch-size matrix taking the patch samples to the slope of their fit.
-      std::vector<Eigen::MatrixXd> slope_maps;
-
-    private:
-      /// The patch of one cell and its slope map.
-      void build_patch(const uint cell_index, const uint target_patch_size)
-      {
-        using Iterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
-        auto &patch = patches[cell_index];
-        patch = {cell_index};
-        std::vector<uint> frontier{cell_index};
-        while (patch.size() < target_patch_size && !frontier.empty()) {
-          std::vector<uint> next_frontier;
-          for (const uint index : frontier) {
-            std::vector<Iterator> neighbors;
-            dealii::GridTools::get_active_neighbors<dealii::DoFHandler<dim>>(cells[index], neighbors);
-            for (const auto &neighbor : neighbors) {
-              const uint neighbor_index = neighbor->active_cell_index();
-              if (std::find(patch.begin(), patch.end(), neighbor_index) != patch.end()) continue;
-              patch.push_back(neighbor_index);
-              next_frontier.push_back(neighbor_index);
-            }
-          }
-          frontier = std::move(next_frontier);
-        }
-
-        if (patch.size() < dim + 1) return;
-        const double scale = std::max(cells[cell_index]->diameter(), std::numeric_limits<double>::epsilon());
-        Eigen::MatrixXd design(patch.size(), dim + 1);
-        for (uint row = 0; row < patch.size(); ++row) {
-          design(row, 0) = 1.;
-          for (uint d = 0; d < dim; ++d)
-            design(row, d + 1) = (centers[patch[row]][d] - centers[cell_index][d]) / scale;
-        }
-        Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr(design);
-        if (qr.rank() < dim + 1) return;
-        // Column by column: Eigen's solve with a matrix right-hand side calls host-only code from functions nvcc
-        // sees as __host__ __device__, which it warns about in every CUDA translation unit.
-        auto &slope_map = slope_maps[cell_index];
-        slope_map.resize(dim, patch.size());
-        for (uint column = 0; column < patch.size(); ++column) {
-          const Eigen::VectorXd fit = qr.solve(Eigen::VectorXd::Unit(patch.size(), column));
-          slope_map.col(column) = fit.tail(dim) / scale;
-        }
-      }
-    };
-
-    template <int dim, typename VectorType, typename GradientFUN>
-    std::vector<DG0GradientModel<dim, typename VectorType::value_type>>
-    recover_dg0_gradient_models(const VectorType &sol, const dealii::DoFHandler<dim> &solution_dof_handler,
-                                const dealii::Mapping<dim> &mapping, const GradientFUN &get_gradient,
-                                const DG0GradientPatches<dim> &patches)
-    {
-      using NumberType = typename VectorType::value_type;
-      const uint n_cells = patches.cells.size();
-      std::vector<DG0GradientModel<dim, NumberType>> models(n_cells);
-
-      const dealii::QMidpoint<dim> midpoint;
-      tbb::enumerable_thread_specific<std::unique_ptr<dealii::FEValues<dim>>> values_per_thread([&]() {
-        return std::make_unique<dealii::FEValues<dim>>(mapping, solution_dof_handler.get_fe(), midpoint,
-                                                       dealii::update_values);
-      });
-      tbb::parallel_for(tbb::blocked_range<uint>(0, n_cells), [&](const auto &range) {
-        auto &values = *values_per_thread.local();
-        std::vector<dealii::Vector<NumberType>> solution_values(
-            1, dealii::Vector<NumberType>(solution_dof_handler.get_fe().n_components()));
-        for (uint index = range.begin(); index != range.end(); ++index) {
-          values.reinit(patches.cells[index]);
-          values.get_function_values(sol, solution_values);
-          models[index].center = patches.centers[index];
-          models[index].value = eom_to_tensor<dim>(get_gradient(models[index].center, solution_values[0]));
-        }
-      });
-
-      tbb::parallel_for(tbb::blocked_range<uint>(0, n_cells), [&](const auto &range) {
-        for (uint cell_index = range.begin(); cell_index != range.end(); ++cell_index) {
-          const auto &slope_map = patches.slope_maps[cell_index];
-          if (slope_map.size() == 0) continue;
-          const auto &patch = patches.patches[cell_index];
-          for (uint component = 0; component < dim; ++component)
-            for (uint d = 0; d < dim; ++d) {
-              NumberType slope = 0.;
-              for (uint row = 0; row < patch.size(); ++row)
-                slope += slope_map(d, row) * models[patch[row]].value[component];
-              models[cell_index].jacobian[component][d] = slope;
-            }
-        }
-      });
-      return models;
-    }
-
-    template <int dim, typename VectorType, typename GradientFUN>
-    std::vector<DG0GradientModel<dim, typename VectorType::value_type>>
-    recover_dg0_gradient_models(const VectorType &sol, const dealii::DoFHandler<dim> &solution_dof_handler,
-                                const dealii::Mapping<dim> &mapping, const GradientFUN &get_gradient)
-    {
-      return recover_dg0_gradient_models(sol, solution_dof_handler, mapping, get_gradient,
-                                         DG0GradientPatches<dim>(solution_dof_handler, mapping));
-    }
-
-    template <int dim, typename NumberType>
-    dealii::Tensor<1, dim, NumberType> evaluate_dg0_gradient_model(const DG0GradientModel<dim, NumberType> &model,
-                                                                   const dealii::Point<dim> &point)
-    {
-      auto value = model.value;
-      for (uint component = 0; component < dim; ++component)
-        for (uint d = 0; d < dim; ++d)
-          value[component] += model.jacobian[component][d] * (point[d] - model.center[d]);
-      return value;
-    }
-
-    template <int dim, typename NumberType>
-    dealii::Tensor<2, dim, NumberType> symmetric_jacobian(const DG0GradientModel<dim, NumberType> &model)
-    {
-      dealii::Tensor<2, dim, NumberType> hessian;
-      for (uint d = 0; d < dim; ++d)
-        for (uint e = 0; e < dim; ++e)
-          hessian[d][e] = 0.5 * (model.jacobian[d][e] + model.jacobian[e][d]);
-      return hessian;
-    }
-
-    template <int dim> struct HessianJumpCompatibility {
-      double relative_jump = 0.;
-      double rank_one_confidence = 0.;
-      bool is_rank_one = false;
-      dealii::Tensor<1, dim> normal;
-    };
-
-    inline constexpr double minimum_rank_one_confidence = 0.5;
-
-    /** Measure whether a Hessian jump is compatible with a C1 scalar potential across a smooth interface. */
-    template <int dim, typename NumberType>
-    HessianJumpCompatibility<dim> hessian_jump_compatibility(const dealii::Tensor<2, dim, NumberType> &left,
-                                                             const dealii::Tensor<2, dim, NumberType> &right,
-                                                             const dealii::Tensor<1, dim> &coordinate_scale)
-    {
-      Eigen::Matrix<double, dim, dim> jump;
-      Eigen::Matrix<double, dim, dim> average;
-      for (uint d = 0; d < dim; ++d)
-        for (uint e = 0; e < dim; ++e) {
-          jump(d, e) = coordinate_scale[d] * static_cast<double>(right[d][e] - left[d][e]) * coordinate_scale[e];
-          average(d, e) =
-              0.5 * coordinate_scale[d] * static_cast<double>(right[d][e] + left[d][e]) * coordinate_scale[e];
-        }
-
-      Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, dim, dim>> eigensolver(jump);
-      if (eigensolver.info() != Eigen::Success) return {};
-
-      uint leading = 0;
-      double leading_value = 0.;
-      double remainder_square = 0.;
-      for (uint i = 0; i < dim; ++i) {
-        const double value = std::abs(eigensolver.eigenvalues()[i]);
-        if (value > leading_value) {
-          remainder_square += leading_value * leading_value;
-          leading_value = value;
-          leading = i;
-        } else {
-          remainder_square += value * value;
-        }
-      }
-
-      HessianJumpCompatibility<dim> result;
-      const double epsilon = std::numeric_limits<double>::epsilon();
-      result.relative_jump = jump.norm() / std::max(average.norm(), epsilon);
-      result.rank_one_confidence =
-          std::clamp(1. - std::sqrt(remainder_square) / std::max(leading_value, epsilon), 0., 1.);
-      result.is_rank_one = leading_value > epsilon && result.rank_one_confidence >= minimum_rank_one_confidence;
-      for (uint d = 0; d < dim; ++d)
-        result.normal[d] = eigensolver.eigenvectors()(d, leading) / std::max(coordinate_scale[d], epsilon);
-      const double normal_norm = result.normal.norm();
-      if (normal_norm > 0.) result.normal /= normal_norm;
-      return result;
-    }
-
-    template <int dim, typename NumberType>
-    void prepare_eom_side_hessian_recovery(ReconstructedRawPotential<dim, NumberType> &potential,
-                                           const std::vector<DG0GradientModel<dim, NumberType>> &models,
-                                           const dealii::DoFHandler<dim> &solution_dof_handler,
-                                           const double jump_threshold)
-    {
-      using Iterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
-      const uint n_cells = models.size();
-      std::vector<Iterator> cells(n_cells);
-      std::vector<dealii::Tensor<1, dim>> coordinate_scales(n_cells);
-      auto &recovery = *potential.recovered_mass_hessian;
-
-      recovery.sample_centers.resize(n_cells);
-      recovery.samples.resize(n_cells);
-      recovery.neighbors.resize(n_cells);
-      recovery.face_weights.resize(n_cells);
-      recovery.kink_faces_by_cell.resize(n_cells);
-
-      for (const auto &cell : solution_dof_handler.active_cell_iterators()) {
-        const uint index = cell->active_cell_index();
-        cells[index] = cell;
-        recovery.sample_centers[index] = models[index].center;
-        recovery.samples[index] = symmetric_jacobian(models[index]);
-        for (uint d = 0; d < dim; ++d) {
-          double lower = std::numeric_limits<double>::max();
-          double upper = -std::numeric_limits<double>::max();
-          for (uint vertex = 0; vertex < cell->n_vertices(); ++vertex) {
-            lower = std::min(lower, cell->vertex(vertex)[d]);
-            upper = std::max(upper, cell->vertex(vertex)[d]);
-          }
-          coordinate_scales[index][d] = std::max(upper - lower, std::numeric_limits<double>::epsilon());
-        }
-      }
-
-      for (uint index = 0; index < n_cells; ++index) {
-        std::vector<Iterator> neighbors;
-        dealii::GridTools::get_active_neighbors<dealii::DoFHandler<dim>>(cells[index], neighbors);
-        for (const auto &neighbor : neighbors) {
-          const uint neighbor_index = neighbor->active_cell_index();
-          dealii::Tensor<1, dim> scale;
-          for (uint d = 0; d < dim; ++d)
-            scale[d] = 0.5 * (coordinate_scales[index][d] + coordinate_scales[neighbor_index][d]);
-          const auto compatibility =
-              hessian_jump_compatibility(recovery.samples[index], recovery.samples[neighbor_index], scale);
-          const double strength =
-              compatibility.is_rank_one ? compatibility.relative_jump * compatibility.rank_one_confidence : 0.;
-          const double ratio = strength / std::max(jump_threshold, std::numeric_limits<double>::epsilon());
-          const double face_weight = jump_threshold <= 0. ? (strength > 0. ? 0. : 1.) : 1. / (1. + std::pow(ratio, 6.));
-          recovery.neighbors[index].push_back(neighbor_index);
-          recovery.face_weights[index].push_back(face_weight);
-          if (index < neighbor_index && face_weight < 1. - 1e-8) {
-            const auto separation = recovery.sample_centers[neighbor_index] - recovery.sample_centers[index];
-            const double width = separation.norm();
-            if (width > 0.) {
-              const uint face_index = recovery.kink_face_centers.size();
-              recovery.kink_face_centers.push_back(
-                  0.5 * (recovery.sample_centers[index] + recovery.sample_centers[neighbor_index]));
-              recovery.kink_face_normals.push_back(compatibility.normal);
-              recovery.kink_face_widths.push_back(width);
-              recovery.kink_face_strengths.push_back(1. - face_weight);
-              recovery.kink_faces_by_cell[index].push_back(face_index);
-              recovery.kink_faces_by_cell[neighbor_index].push_back(face_index);
-            }
-          }
-        }
-      }
-    }
-
-    template <int dim> struct EoMSideHessianBlend {
-      double weight = 0.;
-      dealii::Tensor<1, dim> normal;
-    };
-
-    /** Smoothly localize the one-sided recovery to the detected non-analytic faces. */
-    template <int dim, typename NumberType>
-    EoMSideHessianBlend<dim> eom_side_hessian_blend(const ReconstructedRawPotential<dim, NumberType> &potential,
-                                                    const uint root_cell, const dealii::Point<dim> &point)
-    {
-      EoMSideHessianBlend<dim> result;
-      if (!potential.recovered_mass_hessian) return result;
-      const auto &recovery = *potential.recovered_mass_hessian;
-      if (root_cell >= recovery.kink_faces_by_cell.size()) return result;
-      for (const uint face : recovery.kink_faces_by_cell[root_cell]) {
-        const double width = recovery.kink_face_widths[face];
-        const double distance = point.distance(recovery.kink_face_centers[face]);
-        const double radius = 1.5 * width;
-        const double weight =
-            recovery.kink_face_strengths[face] * std::exp(-0.5 * distance * distance / (radius * radius));
-        if (weight > result.weight) {
-          result.weight = weight;
-          result.normal = recovery.kink_face_normals[face];
-        }
-      }
-      result.weight = std::clamp(result.weight, 0., 1.);
-      return result;
-    }
-
-    /**
-     * Recover the cellwise FV Hessians into a continuous Q1 tensor field.
-     *
-     * Each vertex receives the unbiased mean of all incident-cell Hessians. This removes
-     * cell-face resets without introducing a preferred coordinate direction.
-     */
-    template <int dim, typename NumberType>
-    void recover_continuous_hessian_field(ReconstructedRawPotential<dim, NumberType> &potential,
-                                          const std::vector<DG0GradientModel<dim, NumberType>> &models,
-                                          const dealii::DoFHandler<dim> &solution_dof_handler)
-    {
-      potential.recovered_mass_hessian = std::make_unique<RecoveredMassHessian<dim, NumberType>>();
-      auto &recovery = *potential.recovered_mass_hessian;
-      recovery.finite_element = std::make_unique<dealii::FE_Q<dim>>(1);
-      recovery.dof_handler = std::make_unique<dealii::DoFHandler<dim>>(solution_dof_handler.get_triangulation());
-      recovery.dof_handler->distribute_dofs(*recovery.finite_element);
-
-      const auto n_dofs = recovery.dof_handler->n_dofs();
-      std::vector<std::vector<uint>> incident_cells(n_dofs);
-      std::vector<dealii::types::global_dof_index> local_dof_indices(recovery.finite_element->n_dofs_per_cell());
-      for (const auto &cell : recovery.dof_handler->active_cell_iterators()) {
-        cell->get_dof_indices(local_dof_indices);
-        for (const auto dof : local_dof_indices)
-          incident_cells[dof].push_back(cell->active_cell_index());
-      }
-
-      for (auto &values : recovery.values)
-        values.reinit(n_dofs);
-
-      for (dealii::types::global_dof_index dof = 0; dof < n_dofs; ++dof) {
-        const auto &cells = incident_cells[dof];
-        if (cells.empty()) continue;
-
-        for (uint derivative_direction = 0; derivative_direction < dim; ++derivative_direction) {
-          dealii::Tensor<1, dim, NumberType> mean_trace;
-
-          for (const auto cell_index : cells) {
-            const auto hessian = symmetric_jacobian(models[cell_index]);
-            dealii::Tensor<1, dim, NumberType> trace;
-            for (uint component = 0; component < dim; ++component)
-              trace[component] = hessian[component][derivative_direction];
-            mean_trace += trace;
-          }
-          mean_trace /= static_cast<double>(cells.size());
-          for (uint component = 0; component < dim; ++component)
-            recovery.values[component * dim + derivative_direction][dof] = mean_trace[component];
-        }
-      }
-
-      dealii::AffineConstraints<NumberType> constraints;
-      dealii::DoFTools::make_hanging_node_constraints(*recovery.dof_handler, constraints);
-      constraints.close();
-      for (auto &values : recovery.values)
-        constraints.distribute(values);
-    }
-
-    /** Average a symmetric Hessian over the face-connected smooth component containing the evaluation point. */
-    template <int dim, typename NumberType>
-    std::optional<dealii::Tensor<2, dim, NumberType>>
-    evaluate_eom_side_hessian(const ReconstructedRawPotential<dim, NumberType> &potential, const uint root_cell,
-                              const dealii::Point<dim> &point)
-    {
-      if (!potential.recovered_mass_hessian) return std::nullopt;
-      const auto &recovery = *potential.recovered_mass_hessian;
-      if (root_cell >= recovery.neighbors.size()) return std::nullopt;
-
-      struct ConnectedCell {
-        uint index;
-        uint depth;
-        double connectivity;
-      };
-      std::vector<ConnectedCell> connected_cells{{root_cell, 0, 1.}};
-      std::deque<uint> frontier{0};
-      constexpr uint max_depth = 3;
-      while (!frontier.empty()) {
-        const uint connected_index = frontier.front();
-        frontier.pop_front();
-        const auto current = connected_cells[connected_index];
-        if (current.depth == max_depth) continue;
-        for (uint edge = 0; edge < recovery.neighbors[current.index].size(); ++edge) {
-          const uint neighbor = recovery.neighbors[current.index][edge];
-          const double candidate = current.connectivity * recovery.face_weights[current.index][edge];
-          const auto existing = std::find_if(connected_cells.begin(), connected_cells.end(),
-                                             [neighbor](const auto &cell) { return cell.index == neighbor; });
-          if (existing != connected_cells.end()) {
-            if (candidate <= existing->connectivity + 1e-12) continue;
-            existing->depth = current.depth + 1;
-            existing->connectivity = candidate;
-            frontier.push_back(std::distance(connected_cells.begin(), existing));
-          } else if (candidate >= 1e-6) {
-            connected_cells.push_back({neighbor, current.depth + 1, candidate});
-            frontier.push_back(connected_cells.size() - 1);
-          }
-        }
-      }
-
-      double nearest_distance = std::numeric_limits<double>::max();
-      for (const uint neighbor : recovery.neighbors[root_cell])
-        nearest_distance =
-            std::min(nearest_distance, recovery.sample_centers[root_cell].distance(recovery.sample_centers[neighbor]));
-      if (!std::isfinite(nearest_distance)) return std::nullopt;
-      const double fit_radius = 1.5 * nearest_distance;
-      dealii::Tensor<2, dim, NumberType> hessian;
-      double weight_sum = 0.;
-      for (const auto &cell : connected_cells) {
-        const double distance = point.distance(recovery.sample_centers[cell.index]);
-        const double spatial_weight = std::exp(-0.5 * distance * distance / (fit_radius * fit_radius));
-        const double weight = cell.connectivity * spatial_weight;
-        if (weight < 1e-8) continue;
-        hessian += weight * recovery.samples[cell.index];
-        weight_sum += weight;
-      }
-      if (!(weight_sum > 0.)) return std::nullopt;
-      hessian /= weight_sum;
-      return hessian;
-    }
-
-    template <int dim, typename NumberType> struct PotentialAssemblyScratch {
-      PotentialAssemblyScratch(const dealii::Mapping<dim> &mapping, const dealii::FiniteElement<dim> &solution_fe,
-                               const dealii::FiniteElement<dim> &potential_fe,
-                               const dealii::Quadrature<dim> &quadrature,
-                               const dealii::Quadrature<dim - 1> &face_quadrature)
-          : solution_fe_values(mapping, solution_fe, quadrature, update_values | update_quadrature_points),
-            potential_fe_values(mapping, potential_fe, quadrature,
-                                update_gradients | update_JxW_values | update_quadrature_points),
-            solution_fe_interface_values(mapping, solution_fe, face_quadrature,
-                                         update_values | update_quadrature_points),
-            potential_fe_interface_values(mapping, potential_fe, face_quadrature,
-                                          update_values | update_gradients | update_JxW_values |
-                                              update_quadrature_points | update_normal_vectors)
-      {
-        solution_values.resize(quadrature.size(), Vector<NumberType>(solution_fe.n_components()));
-        solution_interface_values[0].resize(face_quadrature.size(), Vector<NumberType>(solution_fe.n_components()));
-        solution_interface_values[1].resize(face_quadrature.size(), Vector<NumberType>(solution_fe.n_components()));
-      }
-
-      PotentialAssemblyScratch(const PotentialAssemblyScratch &scratch)
-          : solution_fe_values(scratch.solution_fe_values.get_mapping(), scratch.solution_fe_values.get_fe(),
-                               scratch.solution_fe_values.get_quadrature(),
-                               scratch.solution_fe_values.get_update_flags()),
-            potential_fe_values(scratch.potential_fe_values.get_mapping(), scratch.potential_fe_values.get_fe(),
-                                scratch.potential_fe_values.get_quadrature(),
-                                scratch.potential_fe_values.get_update_flags()),
-            solution_fe_interface_values(scratch.solution_fe_interface_values.get_mapping(),
-                                         scratch.solution_fe_interface_values.get_fe(),
-                                         scratch.solution_fe_interface_values.get_quadrature(),
-                                         scratch.solution_fe_interface_values.get_update_flags()),
-            potential_fe_interface_values(scratch.potential_fe_interface_values.get_mapping(),
-                                          scratch.potential_fe_interface_values.get_fe(),
-                                          scratch.potential_fe_interface_values.get_quadrature(),
-                                          scratch.potential_fe_interface_values.get_update_flags())
-      {
-        const uint n_components = scratch.solution_fe_values.get_fe().n_components();
-        solution_values.resize(scratch.solution_fe_values.get_quadrature().size(), Vector<NumberType>(n_components));
-        solution_interface_values[0].resize(scratch.solution_fe_interface_values.get_quadrature().size(),
-                                            Vector<NumberType>(n_components));
-        solution_interface_values[1].resize(scratch.solution_fe_interface_values.get_quadrature().size(),
-                                            Vector<NumberType>(n_components));
-      }
-
-      FEValues<dim> solution_fe_values;
-      FEValues<dim> potential_fe_values;
-      FEInterfaceValues<dim> solution_fe_interface_values;
-      FEInterfaceValues<dim> potential_fe_interface_values;
-      std::vector<Vector<NumberType>> solution_values;
-      std::array<std::vector<Vector<NumberType>>, 2> solution_interface_values;
-    };
-
-    /// The local system of one cell or one interior face of the potential reconstruction.
-    template <typename NumberType> struct PotentialLocalSystem {
-      void reinit(const uint n_dofs)
-      {
-        matrix.reinit(n_dofs, n_dofs);
-        rhs.reinit(n_dofs);
-        dof_indices.resize(n_dofs);
-      }
-
-      FullMatrix<NumberType> matrix;
-      Vector<NumberType> rhs;
-      std::vector<types::global_dof_index> dof_indices;
-    };
-
-    /**
-     * @brief The mesh-dependent part of assemble_potential_system, kept with the cached system: the cells and
-     * interior faces it visits, their local systems, and every thread's FE scratch, whose construction costs more
-     * than assembling a small system.
-     */
-    template <int dim, typename NumberType> struct PotentialAssemblyData {
-      PotentialAssemblyData(const dealii::DoFHandler<dim> &potential_dof_handler,
-                            const dealii::AffineConstraints<NumberType> &constraints,
-                            const dealii::Mapping<dim> &mapping, const dealii::FiniteElement<dim> &solution_fe,
-                            const dealii::FiniteElement<dim> &potential_fe, const dealii::Quadrature<dim> &quadrature,
-                            const dealii::Quadrature<dim - 1> &face_quadrature)
-          : scratches(PotentialAssemblyScratch<dim, NumberType>(mapping, solution_fe, potential_fe, quadrature,
-                                                                face_quadrature))
-      {
-        cells.reinit(potential_dof_handler, constraints);
-        topology.reinit(cells);
-        cell_systems.resize(cells.size());
-        face_systems.resize(topology.faces.size());
-      }
-
-      /// The cells; their coloring goes unused, FaceTopology is built from them.
-      ColoredCells<dim> cells;
-      FaceTopology<dim> topology;
-      tbb::enumerable_thread_specific<PotentialAssemblyScratch<dim, NumberType>> scratches;
-      std::vector<PotentialLocalSystem<NumberType>> cell_systems, face_systems;
-      /// For a DG0 source: the patches of its gradient recovery, built on first use.
-      std::unique_ptr<DG0GradientPatches<dim>> dg0_patches;
-    };
-
-    template <int dim, typename VectorType, typename EoMFUN>
-    void assemble_potential_system(const VectorType &sol, const dealii::DoFHandler<dim> &solution_dof_handler,
-                                   const dealii::FiniteElement<dim> &potential_fe, const dealii::Mapping<dim> &mapping,
-                                   const EoMFUN &get_EoM,
-                                   const dealii::AffineConstraints<typename VectorType::value_type> &constraints,
-                                   PotentialAssemblyData<dim, typename VectorType::value_type> &data,
-                                   dealii::SparseMatrix<typename VectorType::value_type> &matrix,
-                                   dealii::Vector<typename VectorType::value_type> &rhs, const double smoothing_length,
-                                   const bool assemble_matrix)
-    {
-      using NumberType = typename VectorType::value_type;
-      using Iterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
-      using Scratch = PotentialAssemblyScratch<dim, NumberType>;
-      using LocalSystem = PotentialLocalSystem<NumberType>;
-
-      const bool recover_dg0_gradient = solution_dof_handler.get_fe().degree == 0;
-      if (recover_dg0_gradient && !data.dg0_patches)
-        data.dg0_patches = std::make_unique<DG0GradientPatches<dim>>(solution_dof_handler, mapping);
-      const auto dg0_gradient_models =
-          recover_dg0_gradient
-              ? recover_dg0_gradient_models(sol, solution_dof_handler, mapping, get_EoM, *data.dg0_patches)
-              : std::vector<DG0GradientModel<dim, NumberType>>{};
-
-      const auto evaluate_gradient = [&](const Iterator &cell, const dealii::Point<dim> &point,
-                                         const dealii::Vector<NumberType> &values) {
-        if (recover_dg0_gradient)
-          return evaluate_dg0_gradient_model(dg0_gradient_models[cell->active_cell_index()], point);
-        return eom_to_tensor<dim>(get_EoM(point, values));
-      };
-
-      const auto assemble_cell = [&](const Iterator &potential_cell, Scratch &scratch, LocalSystem &local) {
-        const auto solution_cell = matching_dof_cell(solution_dof_handler, potential_cell);
-        const uint dofs_per_cell = potential_fe.n_dofs_per_cell();
-
-        scratch.solution_fe_values.reinit(solution_cell);
-        scratch.potential_fe_values.reinit(potential_cell);
-        scratch.solution_fe_values.get_function_values(sol, scratch.solution_values);
-
-        local.reinit(dofs_per_cell);
-        potential_cell->get_dof_indices(local.dof_indices);
-
-        for (const auto q : scratch.potential_fe_values.quadrature_point_indices()) {
-          const auto eom = evaluate_gradient(solution_cell, scratch.potential_fe_values.quadrature_point(q),
-                                             scratch.solution_values[q]);
-
-          for (uint i = 0; i < dofs_per_cell; ++i) {
-            const auto grad_i = scratch.potential_fe_values.shape_grad(i, q);
-            local.rhs(i) += scratch.potential_fe_values.JxW(q) * scalar_product(eom, grad_i);
-
-            if (!assemble_matrix) continue;
-            for (uint j = 0; j < dofs_per_cell; ++j)
-              local.matrix(i, j) += scratch.potential_fe_values.JxW(q) *
-                                    scalar_product(scratch.potential_fe_values.shape_grad(j, q), grad_i);
-          }
-        }
-      };
-      // Every constraint on the potential is homogeneous -- hanging nodes, plus the gauge DoF pinned to
-      // zero -- so distributing the right-hand side alone needs no local matrix to carry an inhomogeneity.
-      const auto insert = [&](const FullMatrix<NumberType> &local_matrix, const Vector<NumberType> &local_rhs,
-                              const std::vector<types::global_dof_index> &dofs) {
-        if (assemble_matrix)
-          constraints.distribute_local_to_global(local_matrix, local_rhs, dofs, matrix, rhs);
-        else
-          constraints.distribute_local_to_global(local_rhs, dofs, rhs);
-      };
-      const auto assemble_face = [&](const Iterator &potential_cell, const uint face_no, const uint subface_no,
-                                     const Iterator &potential_neighbor, const uint neighbor_face_no,
-                                     const uint neighbor_subface_no, Scratch &scratch, LocalSystem &local) {
-        const auto solution_cell = matching_dof_cell(solution_dof_handler, potential_cell);
-        const auto solution_neighbor = matching_dof_cell(solution_dof_handler, potential_neighbor);
-
-        scratch.solution_fe_interface_values.reinit(solution_cell, face_no, subface_no, solution_neighbor,
-                                                    neighbor_face_no, neighbor_subface_no);
-        scratch.potential_fe_interface_values.reinit(potential_cell, face_no, subface_no, potential_neighbor,
-                                                     neighbor_face_no, neighbor_subface_no);
-
-        const auto &solution_fe_interface_values = scratch.solution_fe_interface_values;
-        const auto &potential_fe_interface_values = scratch.potential_fe_interface_values;
-
-        // The potential is scalar, so the plain shape functions serve; FEValues views (operator[]) are built lazily
-        // through a deal.II task the caller waits for, which deadlocks when every TBB worker does it at once.
-        const uint n_interface_dofs = potential_fe_interface_values.n_current_interface_dofs();
-        local.reinit(n_interface_dofs);
-        local.dof_indices = potential_fe_interface_values.get_interface_dof_indices();
-        const auto &solution_fe_values_s = solution_fe_interface_values.get_fe_face_values(0);
-        const auto &solution_fe_values_n = solution_fe_interface_values.get_fe_face_values(1);
-        const auto &q_points = potential_fe_interface_values.get_quadrature_points();
-
-        auto &solution_values_s = scratch.solution_interface_values[0];
-        auto &solution_values_n = scratch.solution_interface_values[1];
-        solution_fe_values_s.get_function_values(sol, solution_values_s);
-        solution_fe_values_n.get_function_values(sol, solution_values_n);
-
-        const double h_face = std::min(solution_cell->diameter(), solution_neighbor->diameter());
-        const double h_normal = std::min(face_normal_cell_width(solution_cell, face_no),
-                                         face_normal_cell_width(solution_neighbor, neighbor_face_no));
-        const uint degree = potential_fe.degree;
-        const double tau = 10. * (degree + 1.) * (degree + 1.) / h_face;
-        const double gradient_jump_weight = smoothing_length * smoothing_length / h_normal;
-
-        for (const auto q : potential_fe_interface_values.quadrature_point_indices()) {
-          const auto normal = potential_fe_interface_values.normal_vector(q);
-          const auto eom_s = evaluate_gradient(solution_cell, q_points[q], solution_values_s[q]);
-          const auto eom_n = evaluate_gradient(solution_neighbor, q_points[q], solution_values_n[q]);
-          const auto average_eom = 0.5 * (eom_s + eom_n);
-          const double rhs_flux = scalar_product(average_eom, normal);
-
-          for (uint i = 0; i < n_interface_dofs; ++i) {
-            const double jump_i = potential_fe_interface_values.jump_in_shape_values(i, q);
-            const Tensor<1, dim> average_grad_i = potential_fe_interface_values.average_of_shape_gradients(i, q);
-            const double normal_gradient_jump_i =
-                scalar_product(potential_fe_interface_values.jump_in_shape_gradients(i, q), normal);
-
-            local.rhs(i) += -potential_fe_interface_values.JxW(q) * rhs_flux * jump_i;
-
-            if (!assemble_matrix) continue;
-            for (uint j = 0; j < n_interface_dofs; ++j) {
-              const double jump_j = potential_fe_interface_values.jump_in_shape_values(j, q);
-              const Tensor<1, dim> average_grad_j = potential_fe_interface_values.average_of_shape_gradients(j, q);
-              const double normal_gradient_jump_j =
-                  scalar_product(potential_fe_interface_values.jump_in_shape_gradients(j, q), normal);
-
-              local.matrix(i, j) +=
-                  potential_fe_interface_values.JxW(q) *
-                  (-scalar_product(average_grad_j, normal) * jump_i - scalar_product(average_grad_i, normal) * jump_j +
-                   tau * jump_j * jump_i + gradient_jump_weight * normal_gradient_jump_i * normal_gradient_jump_j);
-            }
-          }
-        }
-      };
-
-      // Driven by the POTENTIAL DoFHandler, not the solution one: solve_potential gives the potential its own
-      // serial copy of the mesh, so every rank visits every cell and every face, and the traversal is the same on
-      // every rank and in the serial case. The cells and the interior faces (each once, as FaceTopology lists them)
-      // are assembled in parallel into their own local systems, then inserted in a fixed order.
-      const auto &cells = data.cells;
-      const auto &topology = data.topology;
-      auto &scratches = data.scratches;
-      auto &cell_systems = data.cell_systems;
-      auto &face_systems = data.face_systems;
-      tbb::parallel_for(tbb::blocked_range<size_t>(0, cells.size()), [&](const auto &r) {
-        for (size_t k = r.begin(); k != r.end(); ++k)
-          assemble_cell(cells[k], scratches.local(), cell_systems[k]);
-      });
-      // The faces add to the right-hand side only through jumps of the test functions, which vanish (up to
-      // roundoff) for a continuous potential; without the matrix they are skipped then.
-      const bool assemble_faces = assemble_matrix || !potential_fe.conforms(FiniteElementData<dim>::H1);
-      if (assemble_faces)
-        tbb::parallel_for(tbb::blocked_range<size_t>(0, topology.faces.size()), [&](const auto &r) {
-          for (size_t f = r.begin(); f != r.end(); ++f) {
-            const auto &face = topology.faces[f];
-            assemble_face(Iterator(face.cell[0]), face.face_no[0], face.subface_no[0], Iterator(face.cell[1]),
-                          face.face_no[1], face.subface_no[1], scratches.local(), face_systems[f]);
-          }
-        });
-      for (const auto &local : cell_systems)
-        insert(local.matrix, local.rhs, local.dof_indices);
-      if (assemble_faces)
-        for (const auto &local : face_systems)
-          insert(local.matrix, local.rhs, local.dof_indices);
-    }
-
-    template <int dim, typename NumberType> struct PotentialMinimum {
-      dealii::Point<dim> point;
-      double value = std::numeric_limits<double>::max();
-    };
-
-    template <int dim> struct LocalPotentialEvaluation {
-      double value = 0.;
-      dealii::Tensor<1, dim> gradient;
-      dealii::Tensor<2, dim> hessian;
-    };
-
-    template <int dim>
-    LocalPotentialEvaluation<dim> evaluate_local_potential(const dealii::FiniteElement<dim> &potential_fe,
-                                                           const std::vector<double> &local_values,
-                                                           const dealii::Point<dim> &point)
-    {
-      LocalPotentialEvaluation<dim> evaluation;
-      for (uint i = 0; i < potential_fe.n_dofs_per_cell(); ++i) {
-        evaluation.value += local_values[i] * potential_fe.shape_value(i, point);
-        evaluation.gradient += local_values[i] * potential_fe.shape_grad(i, point);
-        evaluation.hessian += local_values[i] * potential_fe.shape_grad_grad(i, point);
-      }
-      return evaluation;
-    }
-
-    template <int dim>
-    bool projected_newton_direction(const dealii::Tensor<2, dim> &hessian,
-                                    const dealii::Tensor<1, dim> &projected_gradient,
-                                    const std::array<bool, dim> &fixed, dealii::Tensor<1, dim> &direction)
-    {
-      std::array<uint, dim> free_indices{};
-      uint n_free = 0;
-      for (uint d = 0; d < dim; ++d)
-        if (!fixed[d]) free_indices[n_free++] = d;
-
-      if (n_free == 0) return false;
-
-      Eigen::MatrixXd reduced_hessian(n_free, n_free);
-      Eigen::VectorXd reduced_gradient(n_free);
-      double hessian_norm = 0.;
-      for (uint i = 0; i < n_free; ++i) {
-        reduced_gradient[i] = projected_gradient[free_indices[i]];
-        for (uint j = 0; j < n_free; ++j) {
-          reduced_hessian(i, j) = hessian[free_indices[i]][free_indices[j]];
-          hessian_norm = std::max(hessian_norm, std::abs(reduced_hessian(i, j)));
-        }
-      }
-      if (!reduced_hessian.allFinite() || !reduced_gradient.allFinite()) return false;
-
-      const double positivity_threshold = 100. * std::numeric_limits<double>::epsilon() * std::max(1., hessian_norm);
-      Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(reduced_hessian);
-      if (solver.info() != Eigen::Success || !solver.eigenvalues().allFinite() ||
-          !(solver.eigenvalues().minCoeff() > positivity_threshold))
-        return false;
-
-      const Eigen::VectorXd reduced_direction =
-          -solver.eigenvectors() *
-          (solver.eigenvectors().transpose() * reduced_gradient).cwiseQuotient(solver.eigenvalues());
-      if (!reduced_direction.allFinite()) return false;
-
-      direction = {};
-      for (uint i = 0; i < n_free; ++i)
-        direction[free_indices[i]] = reduced_direction[i];
-      return true;
-    }
-
-    template <int dim, typename NumberType>
-    PotentialMinimum<dim, NumberType>
-    refine_cell_minimum(const typename dealii::DoFHandler<dim>::active_cell_iterator &cell,
-                        const dealii::FiniteElement<dim> &potential_fe, const dealii::Mapping<dim> &mapping,
-                        const dealii::Vector<NumberType> &potential, const dealii::Quadrature<dim> &quadrature,
-                        const Config::EoMConfig &config,
-                        const std::optional<dealii::Point<dim>> &initial_unit_point = std::nullopt)
-    {
-      std::vector<dealii::types::global_dof_index> local_dof_indices(potential_fe.n_dofs_per_cell());
-      cell->get_dof_indices(local_dof_indices);
-
-      std::vector<double> local_values(potential_fe.n_dofs_per_cell());
-      for (uint i = 0; i < potential_fe.n_dofs_per_cell(); ++i)
-        local_values[i] = (double)potential[local_dof_indices[i]];
-
-      dealii::Point<dim> sampled_point = quadrature.point(0);
-      auto sampled_evaluation = evaluate_local_potential(potential_fe, local_values, sampled_point);
-      const auto consider_seed = [&](const dealii::Point<dim> &candidate) {
-        const auto candidate_evaluation = evaluate_local_potential(potential_fe, local_values, candidate);
-        if (candidate_evaluation.value < sampled_evaluation.value) {
-          sampled_point = candidate;
-          sampled_evaluation = candidate_evaluation;
-        }
-      };
-
-      for (const auto &support_point : potential_fe.get_unit_support_points())
-        consider_seed(support_point);
-      for (const auto &quadrature_point : quadrature.get_points())
-        consider_seed(quadrature_point);
-
-      const double gradient_tolerance = std::max(config.abs_tol, 100. * std::numeric_limits<double>::epsilon());
-
-      const auto refine_from_seed = [&](dealii::Point<dim> point) {
-        auto evaluation = evaluate_local_potential(potential_fe, local_values, point);
-        for (uint iteration = 0; iteration < config.max_iter; ++iteration) {
-          std::array<bool, dim> fixed{};
-          dealii::Tensor<1, dim> projected_gradient;
-          double projected_gradient_norm = 0.;
-          for (uint d = 0; d < dim; ++d) {
-            const bool fixed_at_lower = point[d] <= config.bound_tolerance && evaluation.gradient[d] > 0.;
-            const bool fixed_at_upper = point[d] >= 1. - config.bound_tolerance && evaluation.gradient[d] < 0.;
-            fixed[d] = fixed_at_lower || fixed_at_upper;
-            projected_gradient[d] = fixed[d] ? 0. : evaluation.gradient[d];
-            const double extent = std::max(cell->extent_in_direction(d), std::numeric_limits<double>::epsilon());
-            projected_gradient_norm = std::max(projected_gradient_norm, std::abs(projected_gradient[d]) / extent);
-          }
-          if (projected_gradient_norm <= gradient_tolerance) break;
-
-          dealii::Tensor<1, dim> direction;
-          bool used_newton = projected_newton_direction<dim>(evaluation.hessian, projected_gradient, fixed, direction);
-          double directional_derivative = dealii::scalar_product(evaluation.gradient, direction);
-          if (!used_newton || !(directional_derivative < 0.) || !std::isfinite(directional_derivative)) {
-            direction = -projected_gradient;
-            directional_derivative = dealii::scalar_product(evaluation.gradient, direction);
-            used_newton = false;
-          }
-          if (!(directional_derivative < 0.) || !std::isfinite(directional_derivative)) break;
-
-          const auto try_step = [&](const dealii::Tensor<1, dim> &search_direction, const double search_derivative,
-                                    dealii::Point<dim> &accepted_point,
-                                    LocalPotentialEvaluation<dim> &accepted_evaluation) {
-            double alpha = 1.;
-            for (uint d = 0; d < dim; ++d) {
-              if (search_direction[d] > 0.)
-                alpha = std::min(alpha, (1. - point[d]) / search_direction[d]);
-              else if (search_direction[d] < 0.)
-                alpha = std::min(alpha, -point[d] / search_direction[d]);
-            }
-            if (!(alpha > 0.) || !std::isfinite(alpha)) return false;
-
-            for (uint backtrack = 0; backtrack < config.max_backtracks; ++backtrack) {
-              auto candidate = point;
-              for (uint d = 0; d < dim; ++d)
-                candidate[d] = std::clamp(point[d] + alpha * search_direction[d], 0., 1.);
-              const auto candidate_evaluation = evaluate_local_potential(potential_fe, local_values, candidate);
-              if (candidate_evaluation.value <=
-                  evaluation.value + config.armijo_coefficient * alpha * search_derivative) {
-                accepted_point = candidate;
-                accepted_evaluation = candidate_evaluation;
-                return true;
-              }
-              alpha *= 0.5;
-            }
-            return false;
-          };
-
-          dealii::Point<dim> next_point;
-          LocalPotentialEvaluation<dim> next_evaluation;
-          bool accepted = try_step(direction, directional_derivative, next_point, next_evaluation);
-          if (!accepted && used_newton) {
-            direction = -projected_gradient;
-            directional_derivative = dealii::scalar_product(evaluation.gradient, direction);
-            if (directional_derivative < 0.)
-              accepted = try_step(direction, directional_derivative, next_point, next_evaluation);
-          }
-          if (!accepted || !(next_evaluation.value < evaluation.value)) break;
-
-          point = next_point;
-          evaluation = next_evaluation;
-        }
-        return std::pair{point, evaluation};
-      };
-
-      auto [point, evaluation] = refine_from_seed(sampled_point);
-      if (initial_unit_point) {
-        auto warm_start = *initial_unit_point;
-        bool valid = true;
-        for (uint d = 0; d < dim; ++d) {
-          valid = valid && std::isfinite(warm_start[d]) && warm_start[d] >= -config.bound_tolerance &&
-                  warm_start[d] <= 1. + config.bound_tolerance;
-          warm_start[d] = std::clamp(warm_start[d], 0., 1.);
-        }
-        if (valid) {
-          auto [warm_point, warm_evaluation] = refine_from_seed(warm_start);
-          if (warm_evaluation.value < evaluation.value) {
-            point = warm_point;
-            evaluation = warm_evaluation;
-          }
-        }
-      }
-
-      return {.point = mapping.transform_unit_to_real_cell(cell, point), .value = evaluation.value};
-    }
-
-    template <int dim, typename NumberType>
-    PotentialMinimum<dim, NumberType> find_potential_minimum(
-        const dealii::DoFHandler<dim> &potential_dof_handler, const dealii::FiniteElement<dim> &potential_fe,
-        const dealii::Mapping<dim> &mapping, const dealii::Vector<NumberType> &potential,
-        const dealii::Quadrature<dim> &quadrature, const Config::EoMConfig &config,
-        const std::optional<dealii::Point<dim>> &initial_guess = std::nullopt,
-        const std::map<dealii::types::global_dof_index, dealii::Point<dim>> *cached_support_points = nullptr)
-    {
-      PotentialMinimum<dim, NumberType> minimum;
-
-      const auto own_support_points = cached_support_points != nullptr
-                                          ? std::map<dealii::types::global_dof_index, dealii::Point<dim>>{}
-                                          : DoFTools::map_dofs_to_support_points(mapping, potential_dof_handler);
-      const auto &support_points = cached_support_points != nullptr ? *cached_support_points : own_support_points;
-      for (const auto &dof_and_point : support_points) {
-        const auto dof = dof_and_point.first;
-        if ((double)potential[dof] < minimum.value) {
-          minimum.value = (double)potential[dof];
-          minimum.point = dof_and_point.second;
-        }
-      }
-
-      // Each cell's first lowest quadrature sample in parallel, then the first lowest cell in cell order: the
-      // same sample a serial scan would keep.
-      using CellIterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
-      std::vector<CellIterator> cells;
-      cells.reserve(potential_dof_handler.get_triangulation().n_active_cells());
-      for (const auto &cell : potential_dof_handler.active_cell_iterators())
-        cells.push_back(cell);
-      std::vector<PotentialMinimum<dim, NumberType>> cell_minima(cells.size());
-      tbb::enumerable_thread_specific<std::unique_ptr<FEValues<dim>>> fe_values_per_thread([&]() {
-        return std::make_unique<FEValues<dim>>(mapping, potential_fe, quadrature,
-                                               update_values | update_quadrature_points);
-      });
-      tbb::parallel_for(tbb::blocked_range<size_t>(0, cells.size()), [&](const auto &range) {
-        auto &fe_values = *fe_values_per_thread.local();
-        std::vector<NumberType> values(quadrature.size());
-        for (size_t k = range.begin(); k != range.end(); ++k) {
-          fe_values.reinit(cells[k]);
-          fe_values.get_function_values(potential, values);
-          for (const auto q : fe_values.quadrature_point_indices())
-            if ((double)values[q] < cell_minima[k].value) {
-              cell_minima[k].value = (double)values[q];
-              cell_minima[k].point = fe_values.quadrature_point(q);
-            }
-        }
-      });
-      for (const auto &cell_minimum : cell_minima)
-        if (cell_minimum.value < minimum.value) minimum = cell_minimum;
-
-      const auto minimum_cell =
-          GridTools::find_active_cell_around_point(mapping, potential_dof_handler, minimum.point).first;
-      struct CandidateCell {
-        CellIterator cell;
-        std::optional<dealii::Point<dim>> initial_unit_point;
-      };
-      std::vector<CandidateCell> candidate_cells;
-      const auto add_candidate = [&](const CellIterator &cell,
-                                     const std::optional<dealii::Point<dim>> &initial_unit_point = std::nullopt) {
-        const auto candidate = std::find_if(candidate_cells.begin(), candidate_cells.end(),
-                                            [&](const auto &entry) { return entry.cell == cell; });
-        if (candidate == candidate_cells.end())
-          candidate_cells.push_back({cell, initial_unit_point});
-        else if (initial_unit_point)
-          candidate->initial_unit_point = initial_unit_point;
-      };
-      const auto add_cell_and_neighbors = [&](const CellIterator &cell) {
-        add_candidate(cell);
-        std::vector<CellIterator> active_neighbors;
-        GridTools::get_active_neighbors<dealii::DoFHandler<dim>>(cell, active_neighbors);
-        for (const auto &neighbor : active_neighbors)
-          add_candidate(neighbor);
-      };
-
-      add_cell_and_neighbors(minimum_cell);
-      if (initial_guess) {
-        bool finite = true;
-        for (uint d = 0; d < dim; ++d)
-          finite = finite && std::isfinite((*initial_guess)[d]);
-        const auto bounding_box = GridTools::compute_bounding_box(potential_dof_handler.get_triangulation());
-        if (finite && bounding_box.point_inside(*initial_guess)) {
-          try {
-            const auto initial_cell =
-                GridTools::find_active_cell_around_point(mapping, potential_dof_handler, *initial_guess).first;
-            if (initial_cell != potential_dof_handler.end()) {
-              add_cell_and_neighbors(initial_cell);
-              add_candidate(initial_cell, mapping.transform_real_to_unit_cell(initial_cell, *initial_guess));
-            }
-          } catch (const dealii::ExceptionBase &) {
-          }
-        }
-      }
-
-      for (const auto &candidate : candidate_cells) {
-        const auto &cell = candidate.cell;
-        const auto refined = refine_cell_minimum<dim, NumberType>(cell, potential_fe, mapping, potential, quadrature,
-                                                                  config, candidate.initial_unit_point);
-        if (refined.value < minimum.value) minimum = refined;
-      }
-
-      return minimum;
-    }
-
-    template <int dim, typename VectorType, typename GradientFUN>
-    ReconstructedRawPotential<dim, typename VectorType::value_type>
-    solve_potential(const VectorType &sol, const dealii::DoFHandler<dim> &solution_dof_handler,
-                    const dealii::Mapping<dim> &mapping, const GradientFUN &get_gradient,
-                    const Config::EoMConfig &config, const PotentialKind kind,
-                    PotentialSystemCache<dim, typename VectorType::value_type> *cache)
-    {
-      using NumberType = typename VectorType::value_type;
-
-      auto &solve_stats = potential_solve_stats();
-      ++solve_stats.solves;
-      ScopedTimer solve_timer(solve_stats.seconds);
-
-      // The potential gets its own SERIAL mesh whenever the solution lives on a partitioned one.
-      //
-      // Two things force this, and either alone is fatal:
-      //  * distribute_dofs() on a parallel triangulation is collective (MPI_Allgather inside
-      //    ParallelShared::distribute_dofs), while this call chain may run on rank 0 alone: the
-      //    readouts reconstruct the raw potential only where it is written
-      //    (OutputFrame::writes_raw_potential). Rank 0 would enter a collective nobody else
-      //    reaches, and the run hangs with no diagnostic.
-      //  * even if it did not hang, the assembly over a partitioned mesh visits only the calling
-      //    rank's (owned) cells, so the potential system would be assembled with entire rows left
-      //    at zero -- a singular matrix handed to UMFPACK, or silently wrong readouts.
-      //
-      // The mesh is replicated at this rung and the solution is a full replica, so a serial copy is
-      // complete and every rank would compute the identical potential from it.
-      const auto &potential_triangulation = serial_mirror(solution_dof_handler.get_triangulation());
-
-      // Callers that pass no cache get one that lives for this call only, which is the behaviour this
-      // function had throughout: build everything, factorize, solve, throw it all away.
-      PotentialSystemCache<dim, NumberType> uncached;
-
-      // The eom potential is always quadratic; the raw potential's order is a config choice. The system
-      // depends on the kind only through this order, so both kinds of the same order share one entry.
-      const uint potential_order = kind == PotentialKind::eom ? 2 : config.raw_potential_order;
-      auto &system = (cache != nullptr ? *cache : uncached).entry(potential_order);
-      const bool rebuild =
-          !system.describes(potential_triangulation, solution_dof_handler, config.smoothing_length, potential_order);
-      if (rebuild) {
-        auto origin_cell = solution_dof_handler.begin_active();
-        const auto origin = get_origin(solution_dof_handler, origin_cell);
-        system.smoothing_length = resolve_potential_smoothing_length(solution_dof_handler, config.smoothing_length);
-
-        // The old assembly data refers to the FE and DoF handler replaced below.
-        system.assembly.reset();
-        system.last_solves = {};
-        system.finite_element = make_potential_fe<dim>(kind, potential_order);
-        system.dof_handler = std::make_shared<DoFHandler<dim>>(potential_triangulation);
-        system.dof_handler->distribute_dofs(*system.finite_element);
-
-        system.support_points = DoFTools::map_dofs_to_support_points(mapping, *system.dof_handler);
-
-        system.constraints.clear();
-        DoFTools::make_hanging_node_constraints(*system.dof_handler, system.constraints);
-        const auto gauge_dof = select_gauge_dof(system.constraints, origin, system.support_points);
-        system.constraints.add_line(gauge_dof);
-        system.constraints.set_inhomogeneity(gauge_dof, 0.);
-        system.constraints.close();
-
-        DynamicSparsityPattern dsp(system.dof_handler->n_dofs());
-        DoFTools::make_flux_sparsity_pattern(*system.dof_handler, dsp, system.constraints,
-                                             /*keep_constrained_dofs = */ true);
-        system.matrix.clear();
-        system.sparsity_pattern.copy_from(dsp);
-        system.matrix.reinit(system.sparsity_pattern);
-
-        const uint quadrature_order =
-            std::max<uint>(std::max<uint>(solution_dof_handler.get_fe().degree, system.finite_element->degree) + 2, 2);
-        system.quadrature = QGauss<dim>(quadrature_order);
-        system.face_quadrature = QGauss<dim - 1>(quadrature_order);
-        system.assembly = std::make_unique<PotentialAssemblyData<dim, NumberType>>(
-            *system.dof_handler, system.constraints, mapping, solution_dof_handler.get_fe(), *system.finite_element,
-            system.quadrature, system.face_quadrature);
-      }
-
-      Vector<NumberType> rhs(system.dof_handler->n_dofs());
-      assemble_potential_system(sol, solution_dof_handler, *system.finite_element, mapping, get_gradient,
-                                system.constraints, *system.assembly, system.matrix, rhs, system.smoothing_length,
-                                /*assemble_matrix = */ rebuild);
-
-      if (rebuild) {
-        std::vector<Point<dim>> support_points(system.dof_handler->n_dofs());
-        for (const auto &[dof, point] : system.support_points)
-          support_points[dof] = point;
-        system.factorization.initialize(system.matrix, support_points);
-        system.note_built_for(potential_triangulation, solution_dof_handler, config.smoothing_length);
-      }
-
-      // The same right-hand side again -- the same solution seen by a residual and its jacobian, or EoM and
-      // raw gradient coinciding -- needs no back-substitution.
-      const auto previous =
-          std::find_if(system.last_solves.begin(), system.last_solves.end(),
-                       [&](const auto &solve) { return solve.rhs.size() == rhs.size() && solve.rhs == rhs; });
-      Vector<NumberType> potential;
-      if (previous != system.last_solves.end())
-        potential = previous->solution;
-      else {
-        potential.reinit(system.dof_handler->n_dofs());
-        system.factorization.solve(potential, rhs);
-        system.constraints.distribute(potential);
-      }
-      auto &last_solve = system.last_solves[static_cast<uint>(kind)];
-      last_solve.rhs = std::move(rhs);
-      last_solve.solution = potential;
-
-      return {
-          .finite_element = system.finite_element, .dof_handler = system.dof_handler, .values = std::move(potential)};
-    }
-
-    template <int dim, typename VectorType, typename EoMFUN>
-    ReconstructedEoMPotential<dim, typename VectorType::value_type>
-    reconstruct_potential(typename dealii::DoFHandler<dim>::cell_iterator &EoM_cell, const VectorType &sol,
-                          const dealii::DoFHandler<dim> &solution_dof_handler, const dealii::Mapping<dim> &mapping,
-                          const EoMFUN &get_EoM, const Config::EoMConfig &config,
-                          const std::optional<dealii::Point<dim>> &initial_guess = std::nullopt,
-                          PotentialSystemCache<dim, typename VectorType::value_type> *cache = nullptr)
-    {
-      auto potential = solve_potential(sol, solution_dof_handler, mapping, get_EoM, config, PotentialKind::eom, cache);
-
-      // The minimum search wants the same quadrature the system was assembled with, and the same support
-      // points the gauge choice used. Both come from the cache when there is one: deal.II builds Gauss
-      // points by Newton iteration in long double, and the support point map is one node per DoF.
-      const uint quadrature_order =
-          std::max<uint>(std::max<uint>(solution_dof_handler.get_fe().degree, potential.finite_element->degree) + 2, 2);
-      const std::optional<QGauss<dim>> own_quadrature =
-          cache != nullptr ? std::nullopt : std::optional<QGauss<dim>>(quadrature_order);
-      const auto *system = cache != nullptr ? &cache->entry(potential.finite_element->degree) : nullptr;
-
-      const auto minimum =
-          find_potential_minimum(*potential.dof_handler, *potential.finite_element, mapping, potential.values,
-                                 system != nullptr ? system->quadrature : *own_quadrature, config, initial_guess,
-                                 system != nullptr ? &system->support_points : nullptr);
-      EoM_cell = GridTools::find_active_cell_around_point(solution_dof_handler, minimum.point);
-      return {.minimum = minimum.point,
-              .finite_element = std::move(potential.finite_element),
-              .dof_handler = std::move(potential.dof_handler),
-              .values = std::move(potential.values)};
-    }
-
-    /**
-     * @brief The solution on one cell, as a function of the point: the FE solution itself, or for a DG0 source its
-     * least-squares linear reconstruction from the centres of the cell and its neighbours, out to at most two layers
-     * and until there are 2 (dim + 1) of them (the patch of recover_dg0_gradient_models on a regular mesh).
-     */
     template <int dim, typename VectorType> class LocalSolution
     {
     public:
       using NumberType = typename VectorType::value_type;
       using Iterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
 
+      struct NativeReadoutScratch {
+        std::vector<dealii::types::global_dof_index> indices;
+        std::vector<NumberType> native_values, tensor_values;
+      };
+
+      /// Element-only tables shared by all cell searches in one call.
+      struct TensorReadoutData {
+        bool supported = false, power = false, standard_power = false;
+        std::vector<double> nodes;
+        std::vector<std::array<uint, dim>> node_indices;
+        std::vector<std::pair<uint, uint>> system_indices;
+        std::array<std::array<double, 3>, 3> power_basis{};
+
+        TensorReadoutData(const dealii::FiniteElement<dim> &fe, const dealii::Mapping<dim> &mapping)
+        {
+          if (!fe.is_primitive() || fe.n_base_elements() != 1 || fe.degree == 0 || fe.degree > 5 ||
+              dynamic_cast<const dealii::FE_Q<dim> *>(&fe.base_element(0)) == nullptr ||
+              dynamic_cast<const dealii::MappingQ1<dim> *>(&mapping) == nullptr)
+            return;
+          const auto &support = fe.base_element(0).get_unit_support_points();
+          nodes.reserve(fe.degree + 1);
+          for (const auto &p : support)
+            if (std::find(nodes.begin(), nodes.end(), p[0]) == nodes.end()) nodes.push_back(p[0]);
+          std::sort(nodes.begin(), nodes.end());
+          node_indices.resize(support.size());
+          std::vector<uint> lexicographic(support.size());
+          for (uint i = 0; i < support.size(); ++i) {
+            uint stride = 1;
+            for (uint d = 0; d < dim; ++d, stride *= nodes.size()) {
+              node_indices[i][d] = std::find(nodes.begin(), nodes.end(), support[i][d]) - nodes.begin();
+              lexicographic[i] += stride * node_indices[i][d];
+            }
+          }
+          power = fe.degree <= 2;
+          standard_power = power && nodes.front() == 0. && nodes.back() == 1. && (nodes.size() == 2 || nodes[1] == .5);
+          for (uint i = 0; i < fe.n_dofs_per_cell(); ++i) {
+            auto [component, node] = fe.system_to_component_index(i);
+            system_indices.emplace_back(component, power ? lexicographic[node] : node);
+          }
+          if (power)
+            for (uint i = 0; i < nodes.size(); ++i) {
+              power_basis[i][0] = 1.;
+              uint degree = 0;
+              for (uint j = 0; j < nodes.size(); ++j) {
+                if (i == j) continue;
+                const double inverse_distance = 1. / (nodes[i] - nodes[j]);
+                ++degree;
+                for (uint k = degree; k > 0; --k)
+                  power_basis[i][k] = (power_basis[i][k - 1] - nodes[j] * power_basis[i][k]) * inverse_distance;
+                power_basis[i][0] *= -nodes[j] * inverse_distance;
+              }
+            }
+          supported = true;
+        }
+      };
+
       LocalSolution(const VectorType &sol, const dealii::DoFHandler<dim> &dof_handler,
-                    const dealii::Mapping<dim> &mapping, const Iterator &cell)
-          : n_components(dof_handler.get_fe().n_components()), centre_values(n_components),
-            slopes(n_components), fe_function(dof_handler, sol, mapping)
+                    const dealii::Mapping<dim> &mapping, const Iterator &cell,
+                    const TensorReadoutData *readout = nullptr, NativeReadoutScratch *scratch = nullptr)
+          : native_data(scratch ? *scratch : owned_native_data), native_values(native_data.native_values),
+            tensor_values(native_data.tensor_values), n_components(dof_handler.get_fe().n_components()),
+            native_cell(cell), native_mapping(mapping), native_fe(dof_handler.get_fe()), tensor_element(readout)
       {
         if (dof_handler.get_fe().degree != 0) {
-          fe_function.set_active_cell(cell);
+          if (native_fe.is_primitive()) {
+            auto &indices = native_data.indices;
+            indices.resize(native_fe.n_dofs_per_cell());
+            cell->get_dof_indices(indices);
+            if (prepare_tensor_readout(cell)) {
+              tensor_values.resize(indices.size());
+              for (uint i = 0; i < indices.size(); ++i) {
+                const auto [component, node] = tensor_element->system_indices[i];
+                tensor_values[node * n_components + component] = sol[indices[i]];
+              }
+              if (tensor_element->standard_power) {
+                if (tensor_element->nodes.size() == 2)
+                  prepare_standard_power<2>();
+                else
+                  prepare_standard_power<3>();
+              } else if (tensor_element->power)
+                prepare_power_readout();
+            } else {
+              native_values.clear();
+              native_values.reserve(indices.size());
+              for (const auto index : indices)
+                native_values.push_back(sol[index]);
+            }
+          } else {
+            fe_function =
+                std::make_unique<dealii::Functions::FEFieldFunction<dim, VectorType>>(dof_handler, sol, mapping);
+            fe_function->set_active_cell(cell);
+          }
           dg0 = false;
           return;
         }
         dg0 = true;
+        full_rank = false;
+        centre_values.reinit(n_components);
+        slopes.resize(n_components);
 
         std::vector<Iterator> patch{cell};
         for (uint layer = 0; layer < 2 && patch.size() < 2 * (dim + 1); ++layer) {
@@ -1763,6 +268,7 @@ namespace DiFfRG
         }
         Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr(design);
         if (qr.rank() < dim + 1) return;
+        full_rank = true;
         for (uint c = 0; c < n_components; ++c) {
           Eigen::VectorXd samples(patch.size());
           for (uint row = 0; row < patch.size(); ++row)
@@ -1778,210 +284,829 @@ namespace DiFfRG
       dealii::Vector<NumberType> operator()(const dealii::Point<dim> &point) const
       {
         dealii::Vector<NumberType> out(n_components);
+        vector_value(point, out);
+        return out;
+      }
+
+      void vector_value(const dealii::Point<dim> &point, dealii::Vector<NumberType> &out) const
+      {
+        out = 0.;
         if (!dg0) {
-          fe_function.vector_value(point, out);
-          return out;
+          const auto *element = tensor_element;
+          if (tensor_power_readout) {
+            // Q1/Q2 coefficients in tensor power order: Horner avoids rebuilding Lagrange weights on every trial.
+            if (element->nodes.size() == 2)
+              evaluate_power<2>(point, out);
+            else
+              evaluate_power<3>(point, out);
+          } else if (tensor_readout) {
+            // The same FE_Q tensor polynomial, evaluated without virtual shape calls or an inverse mapping
+            // for each finite-difference/Newton trial. Only Cartesian MappingQ1 cells use this path.
+            std::array<std::array<double, 6>, dim> basis{};
+            for (uint d = 0; d < dim; ++d) {
+              const double x = (point[d] - tensor_origin[d]) * tensor_inverse_width[d];
+              for (uint i = 0; i < element->nodes.size(); ++i) {
+                basis[d][i] = 1.;
+                for (uint j = 0; j < element->nodes.size(); ++j)
+                  if (i != j) basis[d][i] *= (x - element->nodes[j]) / (element->nodes[i] - element->nodes[j]);
+              }
+            }
+            for (uint node = 0; node < element->node_indices.size(); ++node) {
+              double weight = 1.;
+              for (uint d = 0; d < dim; ++d)
+                weight *= basis[d][element->node_indices[node][d]];
+              for (uint c = 0; c < n_components; ++c)
+                out[c] += weight * tensor_values[node * n_components + c];
+            }
+          } else if (native_values.empty()) {
+            fe_function->vector_value(point, out);
+          } else {
+            const auto unit_point = native_mapping.transform_real_to_unit_cell(native_cell, point);
+            for (uint i = 0; i < native_values.size(); ++i)
+              out[native_fe.system_to_component_index(i).first] +=
+                  native_values[i] * native_fe.shape_value(i, unit_point);
+          }
+          return;
         }
         for (uint c = 0; c < n_components; ++c) {
           out[c] = centre_values[c];
           for (uint d = 0; d < dim; ++d)
             out[c] += slopes[c][d] * (point[d] - centre[d]);
         }
-        return out;
       }
 
+      bool has_full_rank() const { return full_rank; }
+
     private:
+      template <uint count> void evaluate_power(const dealii::Point<dim> &point, dealii::Vector<NumberType> &out) const
+      {
+        constexpr uint capacity = [] {
+          uint n = 1;
+          for (uint d = 0; d < dim; ++d)
+            n *= count;
+          return n;
+        }();
+        std::array<NumberType, capacity> work;
+        for (uint c = 0; c < n_components; ++c) {
+          uint remaining = capacity;
+          for (uint i = 0; i < capacity; ++i)
+            work[i] = tensor_values[i * n_components + c];
+          for (uint d = 0; d < dim; ++d) {
+            const double x = (point[d] - tensor_origin[d]) * tensor_inverse_width[d];
+            remaining /= count;
+            for (uint i = 0; i < remaining; ++i) {
+              NumberType value = work[(i + 1) * count - 1];
+              for (uint k = count - 1; k > 0; --k)
+                value = work[i * count + k - 1] + x * value;
+              work[i] = value;
+            }
+          }
+          out[c] = work[0];
+        }
+      }
+
+      bool prepare_tensor_readout(const Iterator &cell)
+      {
+        if (!tensor_element) {
+          owned_tensor_element = std::make_unique<TensorReadoutData>(native_fe, native_mapping);
+          tensor_element = owned_tensor_element.get();
+        }
+        if (!tensor_element->supported) return false;
+        tensor_origin = cell->vertex(0);
+        for (uint d = 0; d < dim; ++d) {
+          const double width = cell->vertex(1u << d)[d] - tensor_origin[d];
+          if (!(width > 0.)) return false;
+          tensor_inverse_width[d] = 1. / width;
+        }
+        for (uint v = 0; v < dealii::GeometryInfo<dim>::vertices_per_cell; ++v)
+          for (uint d = 0; d < dim; ++d) {
+            const double expected = (v & (1u << d)) ? cell->vertex(1u << d)[d] : tensor_origin[d];
+            if (cell->vertex(v)[d] != expected) return false;
+          }
+        tensor_readout = true;
+        return true;
+      }
+
+      void prepare_power_readout()
+      {
+        const uint count = tensor_element->nodes.size();
+        const auto &basis = tensor_element->power_basis;
+        const uint nodes = tensor_element->node_indices.size();
+        for (uint d = 0, stride = 1; d < dim; ++d, stride *= count)
+          for (uint block = 0; block < nodes; block += stride * count)
+            for (uint offset = 0; offset < stride; ++offset)
+              for (uint c = 0; c < n_components; ++c) {
+                std::array<NumberType, 3> values{};
+                for (uint i = 0; i < count; ++i)
+                  values[i] = tensor_values[(block + offset + i * stride) * n_components + c];
+                for (uint k = 0; k < count; ++k) {
+                  NumberType coefficient = 0.;
+                  for (uint i = 0; i < count; ++i)
+                    coefficient += basis[i][k] * values[i];
+                  tensor_values[(block + offset + k * stride) * n_components + c] = coefficient;
+                }
+              }
+        tensor_power_readout = true;
+      }
+
+      template <uint count> void prepare_standard_power()
+      {
+        constexpr uint nodes = [] {
+          uint n = 1;
+          for (uint d = 0; d < dim; ++d)
+            n *= count;
+          return n;
+        }();
+        for (uint d = 0, stride = 1; d < dim; ++d, stride *= count)
+          for (uint block = 0; block < nodes; block += stride * count)
+            for (uint offset = 0; offset < stride; ++offset)
+              for (uint c = 0; c < n_components; ++c) {
+                const uint i = (block + offset) * n_components + c;
+                const uint step = stride * n_components;
+                const auto first = tensor_values[i + step] - tensor_values[i];
+                if constexpr (count == 2)
+                  tensor_values[i + step] = first;
+                else {
+                  const auto last = tensor_values[i + 2 * step] - tensor_values[i];
+                  tensor_values[i + step] = 4. * first - last;
+                  tensor_values[i + 2 * step] = 2. * (last - 2. * first);
+                }
+              }
+        tensor_power_readout = true;
+      }
+
+      NativeReadoutScratch owned_native_data;
+      NativeReadoutScratch &native_data;
+      std::vector<NumberType> &native_values, &tensor_values;
       uint n_components;
       bool dg0 = false;
+      bool full_rank = true;
       dealii::Point<dim> centre;
       dealii::Vector<NumberType> centre_values;
       std::vector<dealii::Tensor<1, dim>> slopes;
-      mutable dealii::Functions::FEFieldFunction<dim, VectorType> fe_function;
+      std::unique_ptr<dealii::Functions::FEFieldFunction<dim, VectorType>> fe_function;
+      Iterator native_cell;
+      const dealii::Mapping<dim> &native_mapping;
+      const dealii::FiniteElement<dim> &native_fe;
+      bool tensor_readout = false;
+      bool tensor_power_readout = false;
+      dealii::Point<dim> tensor_origin;
+      dealii::Tensor<1, dim> tensor_inverse_width;
+      const TensorReadoutData *tensor_element;
+      std::unique_ptr<TensorReadoutData> owned_tensor_element;
     };
 
+    /// Continuous vector readout of a discontinuous state. No scalar-gradient projection or global solve.
+    template <int dim, typename NumberType> struct ContinuousEoMState {
+      std::shared_ptr<dealii::FiniteElement<dim>> finite_element;
+      std::shared_ptr<dealii::DoFHandler<dim>> dof_handler;
+      dealii::Vector<NumberType> values;
+      bool full_rank = true;
+    };
+
+    /** Mesh-only map from FV cell values to the averaged continuous Q1 readout. Its weights include the
+     * least-squares intercept and slopes, exactly as LocalSolution. Columns refer to cells/components, so
+     * renumbering source DoFs does not invalidate the map. No solution or EoM callback is cached.
+     */
+    template <int dim, typename NumberType> struct ContinuousEoMGeometry {
+      using Iterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
+      std::shared_ptr<dealii::FiniteElement<dim>> finite_element;
+      std::shared_ptr<dealii::DoFHandler<dim>> dof_handler;
+      dealii::AffineConstraints<NumberType> constraints;
+      dealii::SparsityPattern sparsity;
+      dealii::SparseMatrix<NumberType> interpolation;
+      std::vector<Iterator> cells;
+      bool full_rank = true;
+
+      ContinuousEoMGeometry(const dealii::DoFHandler<dim> &source, const dealii::Mapping<dim> &mapping)
+          : source_address(&source), triangulation_address(&source.get_triangulation()), mapping_address(&mapping),
+            source_fe(source.get_fe().get_name())
+      {
+        const uint components = source.get_fe().n_components();
+        const dealii::FE_Q<dim> scalar_fe(1);
+        finite_element = std::make_shared<dealii::FESystem<dim>>(scalar_fe, components);
+        dof_handler = std::make_shared<dealii::DoFHandler<dim>>(serial_mirror(source.get_triangulation()));
+        dof_handler->distribute_dofs(*finite_element);
+        cells.resize(source.get_triangulation().n_active_cells());
+        std::vector<dealii::Point<dim>> centres(cells.size());
+        const dealii::QMidpoint<dim> midpoint;
+        dealii::FEValues<dim> values(mapping, source.get_fe(), midpoint, dealii::update_quadrature_points);
+        for (const auto &cell : source.active_cell_iterators()) {
+          const uint index = cell->active_cell_index();
+          cells[index] = cell;
+          values.reinit(cell);
+          centres[index] = values.quadrature_point(0);
+        }
+        std::vector<std::map<uint, double>> rows(dof_handler->n_dofs());
+        std::vector<uint> contributions(rows.size(), 0);
+        std::vector<dealii::types::global_dof_index> target_dofs(finite_element->n_dofs_per_cell());
+        for (const auto &cell : cells) {
+          std::vector<Iterator> patch{cell};
+          for (uint layer = 0; layer < 2 && patch.size() < 2 * (dim + 1); ++layer) {
+            const auto frontier = patch;
+            for (const auto &member : frontier) {
+              std::vector<Iterator> neighbors;
+              dealii::GridTools::get_active_neighbors<dealii::DoFHandler<dim>>(member, neighbors);
+              for (const auto &neighbor : neighbors)
+                if (std::find(patch.begin(), patch.end(), neighbor) == patch.end()) patch.push_back(neighbor);
+            }
+          }
+          const auto centre = centres[cell->active_cell_index()];
+          const double scale = std::max(cell->diameter(), std::numeric_limits<double>::epsilon());
+          Eigen::MatrixXd design(patch.size(), dim + 1);
+          for (uint row = 0; row < patch.size(); ++row) {
+            design(row, 0) = 1.;
+            for (uint d = 0; d < dim; ++d)
+              design(row, d + 1) = (centres[patch[row]->active_cell_index()][d] - centre[d]) / scale;
+          }
+          const Eigen::ColPivHouseholderQR<Eigen::MatrixXd> qr(design);
+          const bool fitted = patch.size() >= dim + 1 && qr.rank() == dim + 1;
+          full_rank = full_rank && fitted;
+          Eigen::MatrixXd fit_map;
+          if (fitted) {
+            fit_map.resize(dim + 1, patch.size());
+            for (uint column = 0; column < patch.size(); ++column)
+              fit_map.col(column) = qr.solve(Eigen::VectorXd::Unit(patch.size(), column));
+          }
+          matching_dof_cell(*dof_handler, cell)->get_dof_indices(target_dofs);
+          for (uint node = 0; node < scalar_fe.n_dofs_per_cell(); ++node) {
+            const auto point = mapping.transform_unit_to_real_cell(cell, scalar_fe.get_unit_support_points()[node]);
+            for (uint sample = 0; sample < (fitted ? patch.size() : 1); ++sample) {
+              double weight = 1.;
+              if (fitted) {
+                weight = fit_map(0, sample);
+                for (uint d = 0; d < dim; ++d)
+                  weight += (point[d] - centre[d]) / scale * fit_map(d + 1, sample);
+              }
+              for (uint c = 0; c < components; ++c) {
+                const auto row = target_dofs[finite_element->component_to_system_index(c, node)];
+                rows[row][patch[sample]->active_cell_index() * components + c] += weight;
+              }
+            }
+            for (uint c = 0; c < components; ++c)
+              ++contributions[target_dofs[finite_element->component_to_system_index(c, node)]];
+          }
+        }
+        dealii::DynamicSparsityPattern dsp(rows.size(), cells.size() * components);
+        for (uint row = 0; row < rows.size(); ++row)
+          for (const auto &[column, weight] : rows[row])
+            dsp.add(row, column);
+        sparsity.copy_from(dsp);
+        interpolation.reinit(sparsity);
+        for (uint row = 0; row < rows.size(); ++row)
+          for (const auto &[column, weight] : rows[row])
+            interpolation.set(row, column, weight / contributions[row]);
+        dealii::DoFTools::make_hanging_node_constraints(*dof_handler, constraints);
+        constraints.close();
+        connection = source.get_triangulation().signals.any_change.connect([this]() { stale = true; });
+      }
+
+      bool describes(const dealii::DoFHandler<dim> &source, const dealii::Mapping<dim> &mapping) const
+      {
+        return !stale && connection.connected() && source_address == &source && mapping_address == &mapping &&
+               triangulation_address == &source.get_triangulation() &&
+               cells.size() == source.get_triangulation().n_active_cells() && source_fe == source.get_fe().get_name();
+      }
+
+      template <typename VectorType> ContinuousEoMState<dim, NumberType> apply(const VectorType &state) const
+      {
+        const auto &source_fe = cells.front()->get_dof_handler().get_fe();
+        const uint components = source_fe.n_components();
+        dealii::Vector<NumberType> samples(cells.size() * components);
+        std::vector<dealii::types::global_dof_index> indices(source_fe.n_dofs_per_cell());
+        for (uint cell = 0; cell < cells.size(); ++cell) {
+          cells[cell]->get_dof_indices(indices);
+          for (uint i = 0; i < indices.size(); ++i)
+            samples[cell * components + source_fe.system_to_component_index(i).first] = state[indices[i]];
+        }
+        ContinuousEoMState<dim, NumberType> result{finite_element, dof_handler};
+        result.full_rank = full_rank;
+        result.values.reinit(dof_handler->n_dofs());
+        interpolation.vmult(result.values, samples);
+        constraints.distribute(result.values);
+        return result;
+      }
+
+    private:
+      const void *source_address;
+      const void *triangulation_address;
+      const void *mapping_address;
+      std::string source_fe;
+      bool stale = false;
+      boost::signals2::scoped_connection connection;
+    };
+
+    template <int dim, typename VectorType>
+    ContinuousEoMState<dim, typename VectorType::value_type>
+    reconstruct_eom_state(const VectorType &sol, const dealii::DoFHandler<dim> &source,
+                          const dealii::Mapping<dim> &mapping,
+                          EoMStateCache<dim, typename VectorType::value_type> *cache = nullptr)
+    {
+      using NumberType = typename VectorType::value_type;
+      if (cache != nullptr && source.get_fe().degree == 0 && source.get_fe().is_primitive() &&
+          dynamic_cast<const dealii::MappingQ1<dim> *>(&mapping) != nullptr) {
+        if (!cache->eom_geometry || !cache->eom_geometry->describes(source, mapping))
+          cache->eom_geometry = std::make_shared<ContinuousEoMGeometry<dim, NumberType>>(source, mapping);
+        return cache->eom_geometry->apply(sol);
+      }
+      ContinuousEoMState<dim, NumberType> state;
+      const uint components = source.get_fe().n_components();
+      const dealii::FE_Q<dim> scalar_fe(std::max(1u, source.get_fe().degree));
+      state.finite_element = std::make_unique<dealii::FESystem<dim>>(scalar_fe, components);
+      // Never distribute new DoFs on a parallel mesh: this search can run on rank zero alone.
+      state.dof_handler = std::make_unique<dealii::DoFHandler<dim>>(serial_mirror(source.get_triangulation()));
+      state.dof_handler->distribute_dofs(*state.finite_element);
+      state.values.reinit(state.dof_handler->n_dofs());
+      std::vector<uint> contributions(state.values.size(), 0);
+      std::vector<dealii::types::global_dof_index> dofs(state.finite_element->n_dofs_per_cell());
+      for (const auto &cell : source.active_cell_iterators()) {
+        LocalSolution<dim, VectorType> local(sol, source, mapping, cell);
+        state.full_rank = state.full_rank && local.has_full_rank();
+        std::vector<dealii::Vector<NumberType>> samples;
+        for (const auto &p : scalar_fe.get_unit_support_points())
+          samples.push_back(local(mapping.transform_unit_to_real_cell(cell, p)));
+        const auto target_cell = matching_dof_cell(*state.dof_handler, cell);
+        target_cell->get_dof_indices(dofs);
+        for (uint i = 0; i < dofs.size(); ++i) {
+          const auto [component, node] = state.finite_element->system_to_component_index(i);
+          state.values[dofs[i]] += samples[node][component];
+          ++contributions[dofs[i]];
+        }
+      }
+      for (uint i = 0; i < state.values.size(); ++i)
+        state.values[i] /= contributions[i];
+      dealii::AffineConstraints<NumberType> constraints;
+      dealii::DoFTools::make_hanging_node_constraints(*state.dof_handler, constraints);
+      constraints.close();
+      constraints.distribute(state.values);
+      return state;
+    }
+
+    template <int dim> using EoMSearchBox = std::pair<dealii::Point<dim>, dealii::Point<dim>>;
+
+    /// Fixed geometric tolerance: relative to domain width, with a guard for coordinate roundoff.
+    inline double eom_boundary_distance_tolerance(const double lower, const double upper)
+    {
+      return std::max(1e-12 * (upper - lower),
+                      16. * std::numeric_limits<double>::epsilon() * std::max(std::abs(lower), std::abs(upper)));
+    }
+
+    template <int dim>
+    EoMSearchBox<dim> eom_search_box(const dealii::DoFHandler<dim> &dof_handler,
+                                     const EoMSearchBox<dim> *physical_bounds)
+    {
+      const auto mesh_bounds =
+          dealii::GridTools::compute_bounding_box(dof_handler.get_triangulation()).get_boundary_points();
+      auto [lower, upper] = physical_bounds ? *physical_bounds : mesh_bounds;
+      for (uint d = 0; d < dim; ++d) {
+        const double tolerance = eom_boundary_distance_tolerance(mesh_bounds.first[d], mesh_bounds.second[d]);
+        if (!std::isfinite(lower[d]) || !std::isfinite(upper[d]) || !(lower[d] < upper[d]) ||
+            lower[d] < mesh_bounds.first[d] - tolerance || upper[d] > mesh_bounds.second[d] + tolerance)
+          throw std::invalid_argument("The physical EoM search box must lie inside the mesh and have positive widths.");
+        // Mesh generation and saved coordinates can differ by a few ulps at configured end points.
+        lower[d] = std::max(lower[d], mesh_bounds.first[d]);
+        upper[d] = std::min(upper[d], mesh_bounds.second[d]);
+        if (!(lower[d] < upper[d]))
+          throw std::invalid_argument("The physical EoM search box must intersect the mesh with positive widths.");
+      }
+      return {lower, upper};
+    }
+
+    /// Physical rectangular bounds of a cell, clipped to the physical search domain.
+    template <int dim, typename Cell>
+    std::pair<dealii::Point<dim>, dealii::Point<dim>> eom_cell_box(const Cell &cell, const dealii::Point<dim> &lower,
+                                                                   const dealii::Point<dim> &upper)
+    {
+      auto lo = cell->vertex(0), hi = lo;
+      for (const auto v : cell->vertex_indices())
+        for (uint d = 0; d < dim; ++d) {
+          lo[d] = std::min(lo[d], cell->vertex(v)[d]);
+          hi[d] = std::max(hi[d], cell->vertex(v)[d]);
+        }
+      for (uint d = 0; d < dim; ++d) {
+        lo[d] = std::max(lo[d], lower[d]);
+        hi[d] = std::min(hi[d], upper[d]);
+      }
+      return {lo, hi};
+    }
+
+    template <int dim, typename Field>
+    bool eom_jacobian(const Field &field, const dealii::Point<dim> &point, const dealii::Point<dim> &lo,
+                      const dealii::Point<dim> &hi, Eigen::Matrix<double, dim, dim> &jacobian)
+    {
+      for (uint d = 0; d < dim; ++d) {
+        double h = std::cbrt(std::numeric_limits<double>::epsilon()) * (hi[d] - lo[d]);
+        const double interior_distance = std::min(point[d] - lo[d], hi[d] - point[d]);
+        if (interior_distance > 16. * std::numeric_limits<double>::epsilon() * std::abs(point[d]))
+          h = std::min(h, 0.25 * interior_distance);
+        auto a = point, b = point;
+        a[d] = std::max(lo[d], point[d] - h);
+        b[d] = std::min(hi[d], point[d] + h);
+        if (!(b[d] > a[d])) return false;
+        const auto fa = field(a), fb = field(b);
+        for (uint i = 0; i < dim; ++i)
+          jacobian(i, d) = (fb[i] - fa[i]) / (b[d] - a[d]);
+      }
+      return jacobian.allFinite();
+    }
+
+    template <int dim>
+    bool eom_locally_admissible(const Eigen::Matrix<double, dim, dim> &jacobian,
+                                const Eigen::Matrix<double, dim, 1> &value, const std::array<int, dim> &active,
+                                const double tolerance)
+    {
+      std::vector<uint> critical;
+      for (uint d = 0; d < dim; ++d)
+        if (active[d] == 0 || std::abs(value[d]) <= tolerance) critical.push_back(d);
+      if (critical.empty()) return true; // Strict complementarity at a corner.
+      Eigen::MatrixXd symmetric(critical.size(), critical.size());
+      for (uint i = 0; i < critical.size(); ++i)
+        for (uint j = 0; j < critical.size(); ++j)
+          symmetric(i, j) = 0.5 * (jacobian(critical[i], critical[j]) + jacobian(critical[j], critical[i]));
+      const double curvature_tolerance = 100. * std::numeric_limits<double>::epsilon() * std::max(1., symmetric.norm());
+      if constexpr (dim == 2) {
+        if (critical.size() == 2 && active[0] != 0 && active[1] != 0) {
+          // Exact copositivity check on the one-sided critical cone at a weak corner.
+          const double a = symmetric(0, 0), b = symmetric(1, 1);
+          return a >= -curvature_tolerance && b >= -curvature_tolerance &&
+                 active[0] * active[1] * symmetric(0, 1) + std::sqrt(std::max(0., a) * std::max(0., b)) >=
+                     -curvature_tolerance;
+        }
+      }
+      // PSD on the full critical subspace is sufficient. For 3D weak corners this is conservative.
+      Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eigen(symmetric);
+      return eigen.info() == Eigen::Success && eigen.eigenvalues().minCoeff() >= -curvature_tolerance;
+    }
+
+    template <int dim, typename Field>
+    std::optional<EoMCandidate<dim>>
+    refine_direct_eom_candidate(const Field &field, dealii::Point<dim> point, const dealii::Point<dim> &lo,
+                                const dealii::Point<dim> &hi, const dealii::Point<dim> &lower,
+                                const dealii::Point<dim> &upper, const std::array<int, dim> &fixed,
+                                const Config::EoMConfig &config)
+    {
+      using Matrix = Eigen::Matrix<double, dim, dim>;
+      using Value = Eigen::Matrix<double, dim, 1>;
+      const double tolerance = std::max(config.abs_tol, 100. * std::numeric_limits<double>::epsilon());
+      std::array<unsigned int, dim> free_storage{};
+      unsigned int n_free = 0;
+      for (unsigned int d = 0; d < dim; ++d)
+        if (fixed[d] == 0) free_storage[n_free++] = d;
+      const std::span<const unsigned int> free(free_storage.data(), n_free);
+      for (uint d = 0; d < dim; ++d) {
+        if (fixed[d] == -1) point[d] = lower[d];
+        if (fixed[d] == 1) point[d] = upper[d];
+      }
+      auto value = field(point);
+      const auto merit = [&](const Value &f) {
+        double norm = 0.;
+        for (const auto d : free)
+          norm += f[d] * f[d];
+        return norm;
+      };
+      for (uint iteration = 0; iteration < config.max_iter && value.allFinite(); ++iteration) {
+        double residual = 0.;
+        for (const auto d : free)
+          residual = std::max(residual, std::abs(value[d]));
+        if (residual <= tolerance) break;
+        Matrix jacobian;
+        if (!eom_jacobian<dim>(field, point, lo, hi, jacobian)) break;
+        using ReducedMatrix = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, 0, dim, dim>;
+        using ReducedVector = Eigen::Matrix<double, Eigen::Dynamic, 1, 0, dim, 1>;
+        ReducedMatrix reduced(free.size(), free.size());
+        ReducedVector rhs(free.size());
+        for (uint i = 0; i < free.size(); ++i) {
+          rhs[i] = -value[free[i]];
+          for (uint j = 0; j < free.size(); ++j)
+            reduced(i, j) = jacobian(free[i], free[j]);
+        }
+        ReducedVector direction(free.size());
+        bool solved = false;
+        if (free.size() == 1 && reduced(0, 0) != 0.) {
+          direction[0] = rhs[0] / reduced(0, 0);
+          solved = true;
+        } else if (free.size() == 2) {
+          const double scale = reduced.cwiseAbs().maxCoeff();
+          if (scale > 0.) {
+            const double a = reduced(0, 0) / scale, b = reduced(0, 1) / scale;
+            const double c = reduced(1, 0) / scale, d = reduced(1, 1) / scale;
+            const double determinant = a * d - b * c;
+            if (std::abs(determinant) > 64. * std::numeric_limits<double>::epsilon()) {
+              const double r0 = rhs[0] / scale, r1 = rhs[1] / scale;
+              direction[0] = (d * r0 - b * r1) / determinant;
+              direction[1] = (a * r1 - c * r0) / determinant;
+              solved = true;
+            }
+          }
+        }
+        if (!solved) {
+          const Eigen::ColPivHouseholderQR<ReducedMatrix> qr(reduced);
+          direction = qr.solve(rhs);
+          if (qr.rank() < static_cast<int>(free.size())) direction = reduced.transpose() * rhs;
+        }
+        if (!direction.allFinite() || direction.squaredNorm() == 0.) break;
+        double alpha = 1.;
+        for (uint i = 0; i < free.size(); ++i) {
+          const uint d = free[i];
+          if (direction[i] > 0.) alpha = std::min(alpha, (hi[d] - point[d]) / direction[i]);
+          if (direction[i] < 0.) alpha = std::min(alpha, (lo[d] - point[d]) / direction[i]);
+        }
+        bool accepted = false;
+        for (uint backtrack = 0; alpha > 0. && backtrack < config.max_backtracks; ++backtrack, alpha *= 0.5) {
+          auto next = point;
+          for (uint i = 0; i < free.size(); ++i)
+            next[free[i]] = std::clamp(point[free[i]] + alpha * direction[i], lo[free[i]], hi[free[i]]);
+          const auto next_value = field(next);
+          if (next_value.allFinite() && merit(next_value) < (1. - config.armijo_coefficient * alpha) * merit(value)) {
+            point = next;
+            value = next_value;
+            accepted = true;
+            break;
+          }
+        }
+        if (!accepted) break;
+      }
+      if (!value.allFinite()) return std::nullopt;
+      EoMCandidate<dim> candidate;
+      candidate.point = point;
+      for (uint d = 0; d < dim; ++d) {
+        const double distance_tolerance = eom_boundary_distance_tolerance(lower[d], upper[d]);
+        if (point[d] - lower[d] <= distance_tolerance)
+          candidate.active_bounds[d] = -1;
+        else if (upper[d] - point[d] <= distance_tolerance)
+          candidate.active_bounds[d] = 1;
+        const double violation = candidate.active_bounds[d] == -1  ? std::max(0., -value[d])
+                                 : candidate.active_bounds[d] == 1 ? std::max(0., value[d])
+                                                                   : std::abs(value[d]);
+        candidate.residual = std::max(candidate.residual, violation);
+      }
+      if (candidate.residual > tolerance) return std::nullopt;
+      Matrix jacobian;
+      if (!eom_jacobian<dim>(field, point, lo, hi, jacobian) ||
+          !eom_locally_admissible<dim>(jacobian, value, candidate.active_bounds, tolerance))
+        return std::nullopt;
+      candidate.jacobian_skew_norm = (0.5 * (jacobian - jacobian.transpose())).norm();
+      return candidate;
+    }
+
+    template <int dim, typename VectorType, typename EoMFUN>
+    std::optional<EoMCandidate<dim>>
+    refine_eom_on_polynomial(const EoMCandidate<dim> &coarse, const VectorType &state,
+                             const dealii::DoFHandler<dim> &dofs, const dealii::Mapping<dim> &mapping,
+                             const EoMFUN &get_EoM, const Config::EoMConfig &config, const EoMSearchBox<dim> &bounds)
+    {
+      auto polynomial = fit_eom_polynomial(state, dofs, mapping, coarse.point, config);
+      if (!polynomial) return std::nullopt;
+      using Value = Eigen::Matrix<double, dim, 1>;
+      using NumberType = typename VectorType::value_type;
+      const auto &[lower, upper] = bounds;
+      auto lo = lower, hi = upper;
+      // Extrapolation may move through cell interfaces, but may not jump to a distant branch.
+      for (unsigned int d = 0; d < dim; ++d) {
+        const double width = polynomial->scale[d] / config.patch_radius;
+        lo[d] = std::max(lower[d], coarse.point[d] - width);
+        hi[d] = std::min(upper[d], coarse.point[d] + width);
+      }
+      const auto field = [&](const dealii::Point<dim> &point) {
+        const auto f = get_EoM(point, polynomial->template value<NumberType>(point));
+        Value out;
+        for (unsigned int d = 0; d < dim; ++d)
+          out[d] = f[d];
+        return out;
+      };
+      unsigned int patterns = 1;
+      for (unsigned int d = 0; d < dim; ++d)
+        patterns *= 3;
+      std::optional<EoMCandidate<dim>> best;
+      double distance = std::numeric_limits<double>::infinity();
+      for (unsigned int pattern = 0; pattern < patterns; ++pattern) {
+        std::array<int, dim> fixed{};
+        unsigned int code = pattern;
+        bool applicable = true;
+        for (unsigned int d = 0; d < dim; ++d, code /= 3) {
+          fixed[d] = code % 3 == 0 ? 0 : (code % 3 == 1 ? -1 : 1);
+          if (fixed[d] == -1 && lo[d] != lower[d]) applicable = false;
+          if (fixed[d] == 1 && hi[d] != upper[d]) applicable = false;
+        }
+        if (!applicable) continue;
+        const auto candidate =
+            refine_direct_eom_candidate<dim>(field, coarse.point, lo, hi, lower, upper, fixed, config);
+        if (!candidate) continue;
+        double candidate_distance = 0.;
+        for (unsigned int d = 0; d < dim; ++d)
+          candidate_distance += std::pow((candidate->point[d] - coarse.point[d]) / polynomial->scale[d], 2);
+        if (candidate_distance < distance) best = candidate, distance = candidate_distance;
+      }
+      if (best) best->local_fit = std::make_shared<EoMVectorPolynomial<dim>>(std::move(*polynomial));
+      return best;
+    }
+
     /**
-     * @brief In one field dimension, move @p guess onto the zero of the EoM field F with the lowest potential.
-     *
-     * F is evaluated directly on the cell holding @p guess and its neighbours. Candidates are the upward zeros of F
-     * (by bisection inside a cell, or at a face where F changes sign) and domain boundaries F points away from. The
-     * candidate with the lowest \f$\int_{\rm guess}^x F\f$ is returned; @p guess if there is none. Identity for
-     * dim > 1.
+     * @brief Sampled constrained root search on rectangular cells. Internal faces only delimit Newton trials;
+     * they never replace an EoM equation by a constraint. All candidates satisfy physical-box stationarity.
      */
     template <int dim, typename VectorType, typename EoMFUN>
-    dealii::Point<dim> polish_EoM_root(const dealii::Point<dim> &guess, const VectorType &sol,
-                                       const dealii::DoFHandler<dim> &dof_handler, const dealii::Mapping<dim> &mapping,
-                                       const EoMFUN &get_EoM)
+    std::vector<EoMCandidate<dim>>
+    find_direct_eom_candidates(const VectorType &sol, const dealii::DoFHandler<dim> &dof_handler,
+                               const dealii::Mapping<dim> &mapping, const EoMFUN &get_EoM,
+                               const Config::EoMConfig &config, const std::optional<dealii::Point<dim>> &initial_guess,
+                               const EoMSearchBox<dim> &bounds)
     {
-      if constexpr (dim != 1)
-        return guess;
-      else {
-        using Iterator = typename dealii::DoFHandler<dim>::active_cell_iterator;
-        const Iterator cell = dealii::GridTools::find_active_cell_around_point(mapping, dof_handler, guess).first;
-        if (cell == dof_handler.end()) return guess;
-
-        std::vector<Iterator> cells;
-        dealii::GridTools::get_active_neighbors<dealii::DoFHandler<dim>>(cell, cells); // clears its output
+      using Matrix = Eigen::Matrix<double, dim, dim>;
+      using Value = Eigen::Matrix<double, dim, 1>;
+      const auto &[lower, upper] = bounds;
+      const double tolerance = std::max(config.abs_tol, 100. * std::numeric_limits<double>::epsilon());
+      const typename LocalSolution<dim, VectorType>::TensorReadoutData readout(dof_handler.get_fe(), mapping);
+      using Cell = typename dealii::DoFHandler<dim>::active_cell_iterator;
+      struct LocatedCandidate {
+        EoMCandidate<dim> candidate;
+        double position_tolerance;
+      };
+      std::vector<Cell> cells;
+      for (const auto &cell : dof_handler.active_cell_iterators())
         cells.push_back(cell);
-        std::sort(cells.begin(), cells.end(),
-                  [](const Iterator &a, const Iterator &b) { return a->center()[0] < b->center()[0]; });
-
-        // Per cell: its interval and the solution on it.
-        std::vector<std::pair<double, double>> intervals;
-        std::deque<LocalSolution<dim, VectorType>> solutions; // constructed in place, LocalSolution does not move
-        for (const auto &c : cells) {
-          intervals.emplace_back(std::min(c->vertex(0)[0], c->vertex(1)[0]), std::max(c->vertex(0)[0], c->vertex(1)[0]));
-          solutions.emplace_back(sol, dof_handler, mapping, c);
-        }
-        const auto F = [&](const size_t i, const double x) {
-          const dealii::Point<dim> p(x);
-          return (double)get_EoM(p, solutions[i](p))[0];
-        };
-        // V(x) - V(guess) = int_guess^x F, by Gauss quadrature on each cell.
-        const dealii::QGauss<1> gauss(8);
-        const auto potential_difference = [&](const double x) {
-          const double lo = std::min(x, guess[0]), hi = std::max(x, guess[0]);
-          double integral = 0.;
-          for (size_t i = 0; i < cells.size(); ++i) {
-            const double a = std::max(lo, intervals[i].first), b = std::min(hi, intervals[i].second);
-            if (b <= a) continue;
-            for (uint q = 0; q < gauss.size(); ++q)
-              integral += gauss.weight(q) * (b - a) * F(i, a + (b - a) * gauss.point(q)[0]);
+      std::vector<std::vector<LocatedCandidate>> cell_candidates(cells.size());
+      const auto same_root = [&](const auto &point, double position_tolerance, const auto &other) {
+        for (uint d = 0; d < dim; ++d)
+          if (std::abs(other.point[d] - point[d]) >
+              position_tolerance + eom_boundary_distance_tolerance(lower[d], upper[d]))
+            return false;
+        return true;
+      };
+      tbb::parallel_for(tbb::blocked_range<size_t>(0, cells.size()), [&](const auto &range) {
+        typename LocalSolution<dim, VectorType>::NativeReadoutScratch scratch;
+        dealii::Vector<typename VectorType::value_type> point_values(dof_handler.get_fe().n_components());
+        for (size_t cell_index = range.begin(); cell_index < range.end(); ++cell_index) {
+          const auto &cell = cells[cell_index];
+          auto &candidates = cell_candidates[cell_index];
+          const auto [lo, hi] = eom_cell_box<dim>(cell, lower, upper);
+          bool intersects = true;
+          for (uint d = 0; d < dim; ++d)
+            intersects = intersects && hi[d] > lo[d];
+          if (!intersects) continue;
+          LocalSolution<dim, VectorType> local(sol, dof_handler, mapping, cell, &readout, &scratch);
+          const auto field = [&](const dealii::Point<dim> &x) {
+            local.vector_value(x, point_values);
+            const auto f = get_EoM(x, point_values);
+            Value value;
+            for (uint d = 0; d < dim; ++d)
+              value[d] = f[d];
+            return value;
+          };
+          std::vector<dealii::Point<dim>> seeds;
+          seeds.reserve(dealii::GeometryInfo<dim>::vertices_per_cell + 2 + (dim == 1 ? 2 : 0));
+          if (initial_guess) {
+            bool inside = true;
+            for (uint d = 0; d < dim; ++d)
+              inside = inside && std::isfinite((*initial_guess)[d]) && (*initial_guess)[d] >= lo[d] &&
+                       (*initial_guess)[d] <= hi[d];
+            if (inside) seeds.push_back(*initial_guess);
           }
-          return x >= guess[0] ? integral : -integral;
-        };
-
-        std::optional<double> best;
-        double best_V = std::numeric_limits<double>::infinity();
-        const auto consider = [&](const double x) {
-          const double V = potential_difference(x);
-          if (!best || V < best_V) best = x, best_V = V;
-        };
-
-        for (size_t i = 0; i < cells.size(); ++i) {
-          auto [a, b] = intervals[i];
-          const double Fa = F(i, a), Fb = F(i, b);
-          if (i == 0 && cells[i]->at_boundary(0) && Fa >= 0.) consider(a);
-          if (i + 1 == cells.size() && cells[i]->at_boundary(1) && Fb <= 0.) consider(b);
-          if (i > 0 && intervals[i - 1].second == a && F(i - 1, a) < 0. && Fa >= 0.) consider(a);
-          if (Fa < 0. && Fb >= 0.) {
-            for (uint it = 0; it < 200 && b - a > 4. * std::numeric_limits<double>::epsilon() * std::abs(b); ++it) {
-              const double m = 0.5 * (a + b);
-              const double Fm = F(i, m);
-              if (!std::isfinite(Fm)) break;
-              (Fm < 0. ? a : b) = m;
+          seeds.push_back(lo + 0.5 * (hi - lo));
+          for (uint v = 0; v < dealii::GeometryInfo<dim>::vertices_per_cell; ++v) {
+            auto p = lo;
+            for (uint d = 0; d < dim; ++d)
+              if (v & (1u << d)) p[d] = hi[d];
+            seeds.push_back(p);
+          }
+          if constexpr (dim == 1) {
+            seeds.push_back(lo + 0.25 * (hi - lo));
+            seeds.push_back(lo + 0.75 * (hi - lo));
+          }
+          uint patterns = 1;
+          for (uint d = 0; d < dim; ++d)
+            patterns *= 3;
+          for (uint pattern = 0; pattern < patterns; ++pattern) {
+            std::array<int, dim> fixed{};
+            bool applicable = true;
+            uint code = pattern;
+            for (uint d = 0; d < dim; ++d, code /= 3) {
+              fixed[d] = code % 3 == 0 ? 0 : (code % 3 == 1 ? -1 : 1);
+              if (fixed[d] == -1 && lo[d] != lower[d]) applicable = false;
+              if (fixed[d] == 1 && hi[d] != upper[d]) applicable = false;
             }
-            consider(0.5 * (a + b));
+            if (!applicable) continue;
+            for (auto point : seeds) {
+              const auto solved = refine_direct_eom_candidate<dim>(field, point, lo, hi, lower, upper, fixed, config);
+              if (!solved) continue;
+              auto candidate = *solved;
+              point = candidate.point;
+              Matrix jacobian;
+              if (!eom_jacobian<dim>(field, point, lo, hi, jacobian)) continue;
+              const Eigen::ColPivHouseholderQR<Matrix> full_qr(jacobian);
+              const double position_tolerance =
+                  full_qr.rank() == dim ? 4. * tolerance * full_qr.solve(Matrix::Identity()).norm() : 0.;
+              const bool duplicate = std::any_of(candidates.begin(), candidates.end(), [&](const auto &other) {
+                return same_root(point, position_tolerance, other.candidate);
+              });
+              if (!duplicate) candidates.push_back({candidate, position_tolerance});
+            }
           }
         }
-        return best ? dealii::Point<dim>(*best) : guess;
+      });
+      // Merge in cell/seed order, independently of task scheduling.
+      std::vector<EoMCandidate<dim>> candidates;
+      for (const auto &group : cell_candidates)
+        for (const auto &entry : group)
+          if (std::none_of(candidates.begin(), candidates.end(), [&](const auto &other) {
+                return same_root(entry.candidate.point, entry.position_tolerance, other);
+              }))
+            candidates.push_back(entry.candidate);
+      // Check both sides of an internal interface. A positive one-sided derivative alone can accept a false
+      // minimum; the interface is not a physical constraint.
+      candidates.erase(
+          std::remove_if(candidates.begin(), candidates.end(),
+                         [&](auto &candidate) {
+                           for (const auto &[cell, unit_point] : dealii::GridTools::find_all_active_cells_around_point(
+                                    mapping, dof_handler, candidate.point)) {
+                             (void)unit_point;
+                             const auto [lo, hi] = eom_cell_box<dim>(cell, lower, upper);
+                             bool intersects = true;
+                             for (uint d = 0; d < dim; ++d)
+                               intersects = intersects && hi[d] > lo[d];
+                             if (!intersects) continue;
+                             LocalSolution<dim, VectorType> local(sol, dof_handler, mapping, cell, &readout);
+                             const auto field = [&](const dealii::Point<dim> &x) {
+                               const auto f = get_EoM(x, local(x));
+                               Value value;
+                               for (uint d = 0; d < dim; ++d)
+                                 value[d] = f[d];
+                               return value;
+                             };
+                             Matrix jacobian;
+                             if (!eom_jacobian<dim>(field, candidate.point, lo, hi, jacobian) ||
+                                 !eom_locally_admissible<dim>(jacobian, field(candidate.point), candidate.active_bounds,
+                                                              tolerance))
+                               return true;
+                             candidate.jacobian_skew_norm = std::max(candidate.jacobian_skew_norm,
+                                                                     (0.5 * (jacobian - jacobian.transpose())).norm());
+                           }
+                           return false;
+                         }),
+          candidates.end());
+      if (candidates.empty())
+        throw std::runtime_error("Direct EoM search found no locally admissible constrained root; refine the "
+                                 "field-space mesh or increase EoM_max_iter.");
+      return candidates;
+    }
+
+    /// Direct line work for candidate ordering; never builds or projects onto a scalar FE space.
+    template <int dim, typename VectorType, typename EoMFUN>
+    double eom_path_work(const VectorType &state, const dealii::DoFHandler<dim> &dofs,
+                         const dealii::Mapping<dim> &mapping, const EoMFUN &eom, const EoMSearchBox<dim> &bounds,
+                         const dealii::Point<dim> &point)
+    {
+      const auto &[origin, upper] = bounds;
+      const auto direction = point - origin;
+      if (direction.norm_square() == 0.) return 0.;
+      std::vector<double> cuts{0., 1.};
+      for (const auto &cell : dofs.active_cell_iterators()) {
+        const auto [lo, hi] = eom_cell_box<dim>(cell, origin, upper);
+        for (unsigned int d = 0; d < dim; ++d)
+          if (direction[d] != 0.)
+            for (const double edge : {lo[d], hi[d]}) {
+              const double t = (edge - origin[d]) / direction[d];
+              if (t > 0. && t < 1.) cuts.push_back(t);
+            }
       }
+      std::sort(cuts.begin(), cuts.end());
+      cuts.erase(std::unique(cuts.begin(), cuts.end()), cuts.end());
+      const dealii::QGauss<1> quadrature(std::max(8u, dofs.get_fe().degree + 2));
+      double work = 0.;
+      for (unsigned int i = 1; i < cuts.size(); ++i) {
+        const double a = cuts[i - 1], b = cuts[i];
+        if (b - a <= 16. * std::numeric_limits<double>::epsilon()) continue;
+        const auto middle = origin + (.5 * (a + b)) * direction;
+        const auto cell = dealii::GridTools::find_active_cell_around_point(mapping, dofs, middle).first;
+        LocalSolution<dim, VectorType> local(state, dofs, mapping, cell);
+        for (unsigned int q = 0; q < quadrature.size(); ++q) {
+          const auto x = origin + (a + (b - a) * quadrature.point(q)[0]) * direction;
+          const auto f = eom(x, local(x));
+          for (unsigned int d = 0; d < dim; ++d)
+            work += (b - a) * quadrature.weight(q) * f[d] * direction[d];
+        }
+      }
+      return work;
     }
 
   } // namespace internal
 
   /**
-   * @brief Reconstruct the raw potential \f$V\f$ with \f$\nabla V \approx\f$ @p get_gradient.
+   * @brief Find a locally stable constrained zero of the EoM field, including physical edges and corners.
    *
-   * \f$V\f$ is the least-squares fit of \f$\nabla V\f$ to the given field on a continuous FE_Q space of order
-   * `config.raw_potential_order`, with jumps of the normal derivative across faces penalized with a weight
-   * \f$\propto \ell^2\f$, \f$\ell\f$ = `EoM_smoothing_length`. For a DG0/FV solution and
-   * `config.raw_potential_recover_mass_hessian`, a continuous Hessian field for masses is recovered as well.
+   * In the interior solve `get_EoM(x, u(x)) = 0`; at a physical lower/upper bound require the corresponding
+   * component to be nonnegative/nonpositive. The full, possibly nonsymmetric Jacobian is used in Newton steps.
+   * A sampled search over all rectangular cells and physical-bound activity patterns discovers candidates;
+   * negative curvature in feasible critical directions is rejected. Discovery is not certified exhaustive.
    *
-   * @param sol The solution, with every global dof readable.
-   * @param dof_handler, mapping Its dofs and mapping.
-   * @param get_gradient Callable `(Point<dim> x, Vector u(x)) -> array<double, dim>`: the gradient of the potential
-   * (the model's raw_potential_gradient). It should not contain terms that must not appear in the potential, such as
-   * explicit symmetry breaking.
-   * @param config The EoM/potential parameters, see Config::EoMConfig.
-   * @param cache Optional cache of the mesh-dependent system; nullptr builds it for this call only.
-   */
-  template <int dim, typename VectorType, typename GradientFUN>
-  ReconstructedRawPotential<dim, typename VectorType::value_type>
-  reconstruct_raw_potential(const VectorType &sol, const dealii::DoFHandler<dim> &dof_handler,
-                            const dealii::Mapping<dim> &mapping, const GradientFUN &get_gradient,
-                            const Config::EoMConfig &config,
-                            internal::PotentialSystemCache<dim, typename VectorType::value_type> *cache = nullptr)
-  {
-    static_assert(dim > 0, "A raw spatial potential cannot be reconstructed in zero dimensions.");
-    config.validate();
-    auto potential =
-        internal::solve_potential(sol, dof_handler, mapping, get_gradient, config, internal::PotentialKind::raw, cache);
-    if (config.raw_potential_recover_mass_hessian && dof_handler.get_fe().degree == 0) {
-      const auto models = internal::recover_dg0_gradient_models(sol, dof_handler, mapping, get_gradient);
-      internal::recover_continuous_hessian_field(potential, models, dof_handler);
-      if (config.raw_potential_mass_hessian_jump_threshold >= 0.)
-        internal::prepare_eom_side_hessian_recovery(potential, models, dof_handler,
-                                                    config.raw_potential_mass_hessian_jump_threshold);
-    }
-    return potential;
-  }
-
-  /**
-   * @brief Value, gradient and Hessians of a raw potential at the point @p point; see RawPotentialEvaluation.
-   */
-  template <int dim, typename NumberType>
-  RawPotentialEvaluation<dim, NumberType>
-  evaluate_raw_potential(const ReconstructedRawPotential<dim, NumberType> &potential,
-                         const dealii::Mapping<dim> &mapping, const dealii::Point<dim> &point)
-  {
-    const auto cell = dealii::GridTools::find_active_cell_around_point(mapping, *potential.dof_handler, point).first;
-    const auto unit_point = mapping.transform_real_to_unit_cell(cell, point);
-    dealii::FEValues<dim> fe_values(mapping, *potential.finite_element, unit_point,
-                                    dealii::update_values | dealii::update_gradients | dealii::update_hessians);
-    fe_values.reinit(cell);
-
-    std::vector<NumberType> values(1);
-    std::vector<dealii::Tensor<1, dim, NumberType>> gradients(1);
-    std::vector<dealii::Tensor<2, dim, NumberType>> potential_hessians(1);
-    fe_values.get_function_values(potential.values, values);
-    fe_values.get_function_gradients(potential.values, gradients);
-    fe_values.get_function_hessians(potential.values, potential_hessians);
-    auto mass_hessian = potential_hessians[0];
-    if (potential.recovered_mass_hessian) {
-      const auto &recovery = *potential.recovered_mass_hessian;
-      const auto hessian_cell = internal::matching_dof_cell(*recovery.dof_handler, cell);
-      dealii::FEValues<dim> hessian_fe_values(mapping, *recovery.finite_element, unit_point, dealii::update_values);
-      hessian_fe_values.reinit(hessian_cell);
-      for (uint d = 0; d < dim; ++d)
-        for (uint e = 0; e < dim; ++e) {
-          std::vector<NumberType> component_values(1);
-          hessian_fe_values.get_function_values(recovery.values[d * dim + e], component_values);
-          mass_hessian[d][e] = component_values[0];
-        }
-      mass_hessian = 0.5 * (mass_hessian + transpose(mass_hessian));
-      if (const auto eom_side_hessian =
-              internal::evaluate_eom_side_hessian(potential, cell->active_cell_index(), point)) {
-        const auto blend = internal::eom_side_hessian_blend(potential, cell->active_cell_index(), point);
-        const auto correction = *eom_side_hessian - mass_hessian;
-        const double normal_correction = blend.normal * correction * blend.normal;
-        mass_hessian += blend.weight * normal_correction * outer_product(blend.normal, blend.normal);
-      }
-    }
-    return {.value = values[0],
-            .gradient = gradients[0],
-            .potential_hessian = potential_hessians[0],
-            .mass_hessian = mass_hessian};
-  }
-
-  /**
-   * @brief Find the EoM point: the minimum of the potential whose gradient is the model's EoM field.
+   * Continuous FE states are evaluated directly. Discontinuous states are averaged into a continuous vector
+   * readout (FV/DG0 first uses local affine state fits). Explicit coordinate dependence is evaluated afterwards,
+   * so singular source terms are never fitted from centre samples. This readout retains numerical curl.
    *
-   * Let \f$F(x) = \f$ `get_EoM(x, u(x))` be the EoM field (Model::EoM), a vector in field space. Then:
-   * 1. If `config.max_iter` (`EoM_max_iter`) is 0, return the mesh vertex with the smallest \f$\ell^1\f$ norm
-   *    \f$\sum_d |x_d|\f$, without search, potential or postprocessing.
-   * 2. Reconstruct \f$V_{\rm EoM}\f$ with \f$\nabla V_{\rm EoM} \approx F\f$: least-squares fit on a continuous
-   *    piecewise quadratic (FE_Q(2)) space, with jumps of the normal derivative across faces penalized with a weight
-   *    \f$\propto \ell^2\f$, \f$\ell\f$ = `EoM_smoothing_length`, and \f$V_{\rm EoM} = 0\f$ at the vertex of step 1.
-   * 3. Find its minimum: sample \f$V_{\rm EoM}\f$ at all support and quadrature points, then refine by a projected
-   *    Newton iteration with Armijo backtracking (at most `EoM_max_iter` steps, `EoM_max_backtracks` halvings,
-   *    sufficient-decrease coefficient `EoM_armijo_coefficient`) in the cell of the best sample and its neighbours,
-   *    and in the cell of @p initial_guess and its neighbours. A step stops when the gradient falls below
-   *    `EoM_abs_tol` (at least \f$100\,\epsilon_{\rm machine}\f$); a coordinate within `EoM_bound_tolerance` of a
-   *    cell face (in unit-cell coordinates) whose gradient points outward is held fixed.
-   * 4. In one dimension, move the minimum onto a zero of \f$F\f$: the candidates are the upward zeros of \f$F\f$ in
-   *    the minimum's cell and its neighbours, and domain boundaries \f$F\f$ points away from; the one with the lowest
-   *    \f$V\f$ (computed by integrating \f$F\f$) wins. This corrects the smoothing error of step 2 near steep fields.
-   * 5. Return `EoM_postprocess(x, u(x))` of the result.
+   * Competing candidates are ranked by integrating the direct EoM along straight paths from the physical
+   * lower corner. Cell interfaces split the quadrature. This recovers potential differences for conservative
+   * fields; with curl it is an explicit path convention, not a unique thermodynamic ordering. No scalar field
+   * is reconstructed. Postprocessing receives the same state readout as the search.
    *
    * The parameters are described in Config::EoMConfig.
    *
@@ -1991,68 +1116,141 @@ namespace DiFfRG
    * @param get_EoM Callable `(Point<dim> x, Vector u(x)) -> array<double, dim>`, the EoM field.
    * @param EoM_postprocess Callable `(Point<dim> x, Vector u(x)) -> Point<dim>` applied to the result.
    * @param config The parameters.
-   * @param initial_guess Optional extra seed of the minimum search (typically the previous EoM point).
-   * @param cache Optional cache of the mesh-dependent system; nullptr builds it for this call only.
+   * @param initial_guess Optional extra root-search seed (typically the previous EoM point).
+   * @param cache Optional cache of vector interpolation geometry; nullptr builds it for this call only.
+   * @param physical_bounds Physical domain from the mesh; assemblers supply it automatically. Standalone calls
+   * without mesh metadata use the triangulation bounds when this is nullptr.
+   * @param data_kind Source discretization; assemblers set this automatically. Only FV data uses polynomial
+   * refinement, which always fits cell averages. FE states retain their existing readout.
    */
   template <int dim, typename VectorType, typename EoMFUN, typename EoMPFUN>
   EoMResult<dim, typename VectorType::value_type>
-  get_EoM_point_with_potential(typename dealii::DoFHandler<dim>::cell_iterator &EoM_cell, const VectorType &sol,
-                               const dealii::DoFHandler<dim> &dof_handler, const dealii::Mapping<dim> &mapping,
-                               const EoMFUN &get_EoM, const EoMPFUN &EoM_postprocess, const Config::EoMConfig &config,
-                               const std::optional<dealii::Point<dim>> &initial_guess = std::nullopt,
-                               internal::PotentialSystemCache<dim, typename VectorType::value_type> *cache = nullptr)
+  get_EoM_result(typename dealii::DoFHandler<dim>::cell_iterator &EoM_cell, const VectorType &sol,
+                 const dealii::DoFHandler<dim> &dof_handler, const dealii::Mapping<dim> &mapping, const EoMFUN &get_EoM,
+                 const EoMPFUN &EoM_postprocess, const Config::EoMConfig &config,
+                 const std::optional<dealii::Point<dim>> &initial_guess = std::nullopt,
+                 internal::EoMStateCache<dim, typename VectorType::value_type> *cache = nullptr,
+                 const internal::EoMSearchBox<dim> *physical_bounds = nullptr,
+                 const EoMDataKind data_kind = EoMDataKind::finite_element)
   {
     config.validate();
-    if (config.max_iter == 0) return {.point = internal::get_origin(dof_handler, EoM_cell), .potential = std::nullopt};
-
-    auto potential =
-        internal::reconstruct_potential(EoM_cell, sol, dof_handler, mapping, get_EoM, config, initial_guess, cache);
-    auto EoM = internal::polish_EoM_root(potential.minimum, sol, dof_handler, mapping, get_EoM);
-    EoM_cell = dealii::GridTools::find_active_cell_around_point(mapping, dof_handler, EoM).first;
-
-    dealii::Vector<typename VectorType::value_type> values(dof_handler.get_fe().n_components());
-    dealii::Functions::FEFieldFunction<dim, VectorType> fe_function(dof_handler, sol, mapping);
-    fe_function.set_active_cell(EoM_cell);
-    fe_function.vector_value(EoM, values);
-
-    EoM = EoM_postprocess(EoM, values);
-    EoM_cell = dealii::GridTools::find_active_cell_around_point(dof_handler, EoM);
-
-    return {.point = EoM, .potential = std::move(potential)};
+    const auto bounds = internal::eom_search_box(dof_handler, physical_bounds);
+    using NumberType = typename VectorType::value_type;
+    if (config.max_iter == 0) {
+      const auto origin = internal::get_origin(dof_handler, EoM_cell);
+      return {.point = origin, .search_point = origin};
+    }
+    const auto locate = [&](const auto &state, const auto &state_dofs) {
+      using StateVector = std::decay_t<decltype(state)>;
+      EoMResult<dim, NumberType> result;
+      result.candidates =
+          internal::find_direct_eom_candidates(state, state_dofs, mapping, get_EoM, config, initial_guess, bounds);
+      if (data_kind == EoMDataKind::finite_volume && config.patch_order != 0 && dof_handler.get_fe().degree == 0)
+        for (auto &candidate : result.candidates)
+          if (const auto refined =
+                  internal::refine_eom_on_polynomial(candidate, sol, dof_handler, mapping, get_EoM, config, bounds))
+            candidate = *refined;
+      std::sort(result.candidates.begin(), result.candidates.end(), [](const auto &a, const auto &b) {
+        for (uint d = 0; d < dim; ++d) {
+          if (a.point[d] < b.point[d]) return true;
+          if (a.point[d] > b.point[d]) return false;
+        }
+        return false;
+      });
+      const auto energy = [&](const dealii::Point<dim> &point) {
+        return internal::eom_path_work(state, state_dofs, mapping, get_EoM, bounds, point);
+      };
+      std::size_t selected = 0;
+      if (result.candidates.size() > 1) {
+        double best_energy = energy(result.candidates[0].point);
+        if (!std::isfinite(best_energy)) throw std::runtime_error("Nonfinite EoM candidate ranking.");
+        for (std::size_t i = 1; i < result.candidates.size(); ++i) {
+          const double candidate_energy = energy(result.candidates[i].point);
+          if (!std::isfinite(candidate_energy)) throw std::runtime_error("Nonfinite EoM candidate ranking.");
+          if (candidate_energy < best_energy) selected = i, best_energy = candidate_energy;
+        }
+      }
+      result.search_point = result.candidates[selected].point;
+      result.local_fit = result.candidates[selected].local_fit;
+      const auto state_cell =
+          dealii::GridTools::find_active_cell_around_point(mapping, state_dofs, result.search_point).first;
+      internal::LocalSolution<dim, StateVector> local(state, state_dofs, mapping, state_cell);
+      dealii::Tensor<2, dim> state_jacobian;
+      if (result.local_fit) {
+        state_jacobian = result.local_fit->state_jacobian(result.search_point);
+        if (config.patch_order == 3 && std::all_of(result.local_fit->orders.begin(), result.local_fit->orders.end(),
+                                                   [](const auto order) { return order == 3; })) {
+          auto quadratic_config = config;
+          quadratic_config.patch_order = 2;
+          if (const auto quadratic =
+                  internal::fit_eom_polynomial(sol, dof_handler, mapping, result.local_fit->anchor, quadratic_config)) {
+            const auto difference = state_jacobian - quadratic->state_jacobian(result.search_point);
+            double maximum = 0.;
+            for (unsigned int i = 0; i < dim; ++i)
+              for (unsigned int j = 0; j < dim; ++j)
+                maximum = std::max(maximum, std::abs(.5 * (difference[i][j] + difference[j][i])));
+            result.hessian_fit_difference = maximum;
+          }
+        }
+        result.point =
+            EoM_postprocess(result.search_point, result.local_fit->template value<NumberType>(result.search_point));
+      } else {
+        dealii::FEValues<dim> values(mapping, state_dofs.get_fe(),
+                                     mapping.transform_real_to_unit_cell(state_cell, result.search_point),
+                                     dealii::update_gradients);
+        values.reinit(state_cell);
+        std::vector<std::vector<dealii::Tensor<1, dim>>> gradients(
+            1, std::vector<dealii::Tensor<1, dim>>(state_dofs.get_fe().n_components()));
+        values.get_function_gradients(state, gradients);
+        for (unsigned int i = 0; i < std::min<std::size_t>(dim, gradients[0].size()); ++i)
+          state_jacobian[i] = gradients[0][i];
+        result.point = EoM_postprocess(result.search_point, local(result.search_point));
+      }
+      result.hessian = .5 * (state_jacobian + transpose(state_jacobian));
+      EoM_cell = dealii::GridTools::find_active_cell_around_point(mapping, dof_handler, result.point).first;
+      return result;
+    };
+    if (dof_handler.get_fe().conforms(dealii::FiniteElementData<dim>::H1)) return locate(sol, dof_handler);
+    auto state = internal::reconstruct_eom_state(sol, dof_handler, mapping, cache);
+    auto result = locate(state.values, *state.dof_handler);
+    result.reconstruction_full_rank = state.full_rank;
+    return result;
   }
 
-  /// As above, with the three most common parameters given directly and the others at their defaults.
+  /// As above, with tolerance and iteration limit given directly.
   template <int dim, typename VectorType, typename EoMFUN, typename EoMPFUN>
-  EoMResult<dim, typename VectorType::value_type> get_EoM_point_with_potential(
+  EoMResult<dim, typename VectorType::value_type> get_EoM_result(
       typename dealii::DoFHandler<dim>::cell_iterator &EoM_cell, const VectorType &sol,
       const dealii::DoFHandler<dim> &dof_handler, const dealii::Mapping<dim> &mapping, const EoMFUN &get_EoM,
       const EoMPFUN &EoM_postprocess = [](const auto &p, [[maybe_unused]] const auto &values) { return p; },
       const double EoM_abs_tol = Config::EoMConfig::default_abs_tol,
       const uint max_iter = Config::EoMConfig::default_max_iter,
-      const double EoM_smoothing_length = Config::EoMConfig::default_smoothing_length,
       const std::optional<dealii::Point<dim>> &initial_guess = std::nullopt,
-      internal::PotentialSystemCache<dim, typename VectorType::value_type> *cache = nullptr)
+      internal::EoMStateCache<dim, typename VectorType::value_type> *cache = nullptr,
+      const internal::EoMSearchBox<dim> *physical_bounds = nullptr,
+      const EoMDataKind data_kind = EoMDataKind::finite_element)
   {
-    return get_EoM_point_with_potential(EoM_cell, sol, dof_handler, mapping, get_EoM, EoM_postprocess,
-                                        Config::EoMConfig(EoM_abs_tol, max_iter, EoM_smoothing_length), initial_guess,
-                                        cache);
+    return get_EoM_result(EoM_cell, sol, dof_handler, mapping, get_EoM, EoM_postprocess,
+                          Config::EoMConfig(EoM_abs_tol, max_iter), initial_guess, cache, physical_bounds, data_kind);
   }
 
-  /// get_EoM_point_with_potential without the potential: only the EoM point.
+  /// Only the located point.
   template <int dim, typename VectorType, typename EoMFUN, typename EoMPFUN>
-  dealii::Point<dim>
-  get_EoM_point(typename dealii::DoFHandler<dim>::cell_iterator &EoM_cell, const VectorType &sol,
-                const dealii::DoFHandler<dim> &dof_handler, const dealii::Mapping<dim> &mapping, const EoMFUN &get_EoM,
-                const EoMPFUN &EoM_postprocess, const Config::EoMConfig &config,
-                const std::optional<dealii::Point<dim>> &initial_guess = std::nullopt,
-                internal::PotentialSystemCache<dim, typename VectorType::value_type> *cache = nullptr)
+  dealii::Point<dim> get_EoM_point(typename dealii::DoFHandler<dim>::cell_iterator &EoM_cell, const VectorType &sol,
+                                   const dealii::DoFHandler<dim> &dof_handler, const dealii::Mapping<dim> &mapping,
+                                   const EoMFUN &get_EoM, const EoMPFUN &EoM_postprocess,
+                                   const Config::EoMConfig &config,
+                                   const std::optional<dealii::Point<dim>> &initial_guess = std::nullopt,
+                                   internal::EoMStateCache<dim, typename VectorType::value_type> *cache = nullptr,
+                                   const internal::EoMSearchBox<dim> *physical_bounds = nullptr,
+                                   const EoMDataKind data_kind = EoMDataKind::finite_element)
   {
-    return get_EoM_point_with_potential(EoM_cell, sol, dof_handler, mapping, get_EoM, EoM_postprocess, config,
-                                        initial_guess, cache)
+    return get_EoM_result(EoM_cell, sol, dof_handler, mapping, get_EoM, EoM_postprocess, config, initial_guess, cache,
+                          physical_bounds, data_kind)
         .point;
   }
 
-  /// As above, with the three most common parameters given directly and the others at their defaults.
+  /// As above, with tolerance and iteration limit given directly.
   template <int dim, typename VectorType, typename EoMFUN, typename EoMPFUN>
   dealii::Point<dim> get_EoM_point(
       typename dealii::DoFHandler<dim>::cell_iterator &EoM_cell, const VectorType &sol,
@@ -2060,10 +1258,12 @@ namespace DiFfRG
       const EoMPFUN &EoM_postprocess = [](const auto &p, [[maybe_unused]] const auto &values) { return p; },
       const double EoM_abs_tol = Config::EoMConfig::default_abs_tol,
       const uint max_iter = Config::EoMConfig::default_max_iter,
-      const double EoM_smoothing_length = Config::EoMConfig::default_smoothing_length,
-      const std::optional<dealii::Point<dim>> &initial_guess = std::nullopt)
+      const std::optional<dealii::Point<dim>> &initial_guess = std::nullopt,
+      const internal::EoMSearchBox<dim> *physical_bounds = nullptr,
+      const EoMDataKind data_kind = EoMDataKind::finite_element)
   {
-    return get_EoM_point(EoM_cell, sol, dof_handler, mapping, get_EoM, EoM_postprocess,
-                         Config::EoMConfig(EoM_abs_tol, max_iter, EoM_smoothing_length), initial_guess);
+    return get_EoM_point<dim>(EoM_cell, sol, dof_handler, mapping, get_EoM, EoM_postprocess,
+                              Config::EoMConfig(EoM_abs_tol, max_iter), initial_guess, nullptr, physical_bounds,
+                              data_kind);
   }
 } // namespace DiFfRG

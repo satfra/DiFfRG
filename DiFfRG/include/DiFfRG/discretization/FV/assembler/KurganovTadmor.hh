@@ -614,28 +614,17 @@ namespace DiFfRG
           return solution;
         }
 
-        /// The point evaluation of the extractors and readouts; see DiFfRG::internal::AssemblerCore.
-        template <typename PotentialEvaluation> struct PointEvaluation : ReadoutSolution {
-          PotentialEvaluation potential;
-        };
-
-        /// The solution and the raw potential at @p x, which lies in @p cell (internal::AssemblerCore interface).
-        template <typename RawPotential>
-        auto evaluate_at(const Point &x, const typename Base::CellIterator &cell, const VectorType &solution,
-                         const RawPotential &raw_potential) const
+        /// The solution and its reconstructed derivatives at @p x in @p cell (AssemblerCore interface).
+        auto evaluate_at(const Point &x, const typename Base::CellIterator &cell, const VectorType &solution) const
         {
-          PointEvaluation<decltype(evaluate_raw_potential(raw_potential, mapping, x))> evaluation;
-          static_cast<ReadoutSolution &>(evaluation) = reconstruct_readout_solution(Iterator(cell), solution, x);
-          evaluation.potential = evaluate_raw_potential(raw_potential, mapping, x);
-          return evaluation;
+          return reconstruct_readout_solution(Iterator(cell), solution, x);
         }
 
         /// The named tuple the model's extract() and readouts see (internal::AssemblerCore interface).
         template <typename Evaluation, typename Extractors_>
         static auto solution_tie(const Evaluation &e, const Extractors_ &extractors, const VariablesVector &variables)
         {
-          return Base::e_tie(e.values, e.gradients, e.hessians, extractors, variables, e.potential.value,
-                             e.potential.gradient, e.potential.mass_hessian);
+          return Base::e_tie(e.values, e.gradients, e.hessians, extractors, variables);
         }
 
         /**

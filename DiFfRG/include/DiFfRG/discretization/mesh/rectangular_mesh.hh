@@ -9,6 +9,7 @@
 
 // standard library
 #include <type_traits>
+#include <utility>
 
 // DiFfRG
 #include <DiFfRG/common/linear_algebra.hh>
@@ -90,6 +91,17 @@ namespace DiFfRG
 
     /// Build the mesh described by @p mesh_config, with @p options.
     RectangularMesh(const Config::ConfigurationMesh<dim> &mesh_config, RectangularMeshOptions options);
+
+    /// Configured physical domain, before any origin-centering extension of the triangulation.
+    std::pair<dealii::Point<dim>, dealii::Point<dim>> get_physical_bounds() const
+    {
+      dealii::Point<dim> lower, upper;
+      for (uint d = 0; d < dim; ++d) {
+        lower[d] = mesh_config.grids[d].front().min;
+        upper[d] = mesh_config.grids[d].back().max;
+      }
+      return {lower, upper};
+    }
 
     /// The triangulation.
     TriangulationType &get_triangulation() { return this->triangulation; }

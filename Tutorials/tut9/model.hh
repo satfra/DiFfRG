@@ -185,13 +185,6 @@ public:
     return {{u_i[idxf("u")] - cSigma / (sigma + 1e-14)}};
   }
 
-  /// The potential is reconstructed from u alone, without the symmetry-breaking term.
-  template <int dim_, typename Vector>
-  std::array<double, 1> raw_potential_gradient(const Point<dim_> &, const Vector &u_i) const
-  {
-    return {{u_i[idxf("u")]}};
-  }
-
   /// cSigma follows Zbar, but the EoM cannot see the variables: carry it across a restart from a snapshot.
   void save_state(DiFfRG::ModelState &state) const { state.set("cSigma", cSigma); }
   void load_state(const DiFfRG::ModelState &state) { cSigma = state.get<double>("cSigma"); }

@@ -54,6 +54,9 @@ TEST_CASE("RectangularMesh default construction keeps configured geometry", "[di
   CHECK(mesh.get_triangulation().n_active_cells() == 50);
   CHECK_THAT(geometry.lower, WithinAbs(0.0, 1.0e-12));
   CHECK_THAT(geometry.upper, WithinAbs(5.0, 1.0e-12));
+  const auto [physical_lower, physical_upper] = mesh.get_physical_bounds();
+  CHECK(physical_lower[0] == 0.);
+  CHECK(physical_upper[0] == 5.);
   for (const double width : geometry.widths)
     CHECK_THAT(width, WithinAbs(0.1, 1.0e-12));
 }
@@ -95,6 +98,9 @@ TEST_CASE("RectangularMesh can center its first cell on the origin", "[discretiz
   CHECK(mesh.get_triangulation().n_active_cells() == 51);
   CHECK_THAT(geometry.lower, WithinAbs(-0.5 * expected_width, 1.0e-12));
   CHECK_THAT(geometry.upper, WithinAbs(5.0, 1.0e-12));
+  const auto [physical_lower, physical_upper] = mesh.get_physical_bounds();
+  CHECK(physical_lower[0] == 0.);
+  CHECK(physical_upper[0] == 5.);
   CHECK(std::ranges::any_of(geometry.centers, [](const double center) { return std::abs(center) <= 1.0e-12; }));
   for (const double width : geometry.widths)
     CHECK_THAT(width, WithinAbs(expected_width, 1.0e-12));

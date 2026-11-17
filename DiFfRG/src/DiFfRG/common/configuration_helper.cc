@@ -428,14 +428,13 @@ This is a DiFfRG simulation. You can pass the following optional parameters to t
 
            {"EoM_abs_tol", Config::EoMConfig::default_abs_tol},
            {"EoM_max_iter", Config::EoMConfig::default_max_iter},
-           {"EoM_smoothing_length", Config::EoMConfig::default_smoothing_length},
-           {"EoM_bound_tolerance", Config::EoMConfig::default_bound_tolerance},
            {"EoM_armijo_coefficient", Config::EoMConfig::default_armijo_coefficient},
            {"EoM_max_backtracks", Config::EoMConfig::default_max_backtracks},
-           {"raw_potential_order", Config::EoMConfig::default_raw_potential_order},
-           {"raw_potential_recover_mass_hessian", Config::EoMConfig::default_raw_potential_recover_mass_hessian},
-           {"raw_potential_mass_hessian_jump_threshold",
-            Config::EoMConfig::default_raw_potential_mass_hessian_jump_threshold},
+           {"EoM_patch_order", 0},
+           {"EoM_patch_radius", 7.},
+           {"EoM_patch_direction", json::array{}},
+           {"EoM_patch_skip_layers", 1},
+           {"EoM_patch_parity", json::array{}},
 
            {"grid", {{"x_grid", "0:0.1:1"}, {"y_grid", "0:0.1:1"}, {"z_grid", "0:0.1:1"}, {"refine", 0}}},
            {"adaptivity",
@@ -507,16 +506,12 @@ This is a DiFfRG simulation. You can pass the following optional parameters to t
               << "                                  cell count; there is nothing to tune by hand.\n"
               << "    overintegration               Extra quadrature points beyond FE order\n"
               << "    output_subdivisions           VTK output subdivisions per cell\n"
-              << "    EoM_abs_tol / EoM_max_iter    In-cell EoM minimizer tolerance and iteration limit\n"
-              << "    EoM_smoothing_length          Physical EoM-potential smoothing length (-1: automatic)\n"
-              << "    EoM_bound_tolerance           Reference-cell active-bound tolerance\n"
+              << "    EoM_abs_tol / EoM_max_iter    Direct EoM root search tolerance and iteration limit\n"
               << "    EoM_armijo_coefficient        Armijo sufficient-decrease coefficient\n"
               << "    EoM_max_backtracks            Maximum line-search backtracking steps\n"
-              << "    raw_potential_order           Raw readout potential order (2 or 3)\n"
-              << "    raw_potential_recover_mass_hessian\n"
-              << "                                  Recover an unbiased continuous FV mass Hessian\n"
-              << "    raw_potential_mass_hessian_jump_threshold\n"
-              << "                                  Detect rank-one kinks for EoM-side mass recovery (-1: disabled)\n"
+              << "    EoM_patch_order / EoM_patch_radius  FV vector-polynomial mass refinement (0: off)\n"
+              << "    EoM_patch_direction / EoM_patch_skip_layers  One-sided extrapolation and buffer\n"
+              << "    EoM_patch_parity               Optional raw-field symmetries\n"
               << "    grid/*                        Grid specification (format: \"start:step:stop\")\n"
               << "    adaptivity/*                  h-adaptive mesh refinement settings\n"
               << "  /timestepping      Time integration settings\n"

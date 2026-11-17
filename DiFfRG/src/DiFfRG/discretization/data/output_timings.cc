@@ -11,7 +11,6 @@ namespace DiFfRG
     FrameTimings &FrameTimings::operator+=(const FrameTimings &other)
     {
       contributor += other.contributor;
-      potential_solves += other.potential_solves;
       fe_attach += other.fe_attach;
       build_patches += other.build_patches;
       data_filter += other.data_filter;
@@ -21,7 +20,6 @@ namespace DiFfRG
       fe_flush += other.fe_flush;
       csv += other.csv;
       total += other.total;
-      potential_solve_count += other.potential_solve_count;
       hdf5_open_count += other.hdf5_open_count;
       return *this;
     }
@@ -32,7 +30,6 @@ namespace DiFfRG
       sum += frame;
 
       max.contributor = std::max(max.contributor, frame.contributor);
-      max.potential_solves = std::max(max.potential_solves, frame.potential_solves);
       max.fe_attach = std::max(max.fe_attach, frame.fe_attach);
       max.build_patches = std::max(max.build_patches, frame.build_patches);
       max.data_filter = std::max(max.data_filter, frame.data_filter);
@@ -42,7 +39,6 @@ namespace DiFfRG
       max.fe_flush = std::max(max.fe_flush, frame.fe_flush);
       max.csv = std::max(max.csv, frame.csv);
       max.total = std::max(max.total, frame.total);
-      max.potential_solve_count = std::max(max.potential_solve_count, frame.potential_solve_count);
       max.hdf5_open_count = std::max(max.hdf5_open_count, frame.hdf5_open_count);
     }
 
@@ -77,7 +73,6 @@ namespace DiFfRG
       // Indentation marks containment: an indented row is part of the row above it.
       row("frame total", sum.total, max.total);
       row("  contributor", sum.contributor, max.contributor);
-      row("    potential solves", sum.potential_solves, max.potential_solves);
       row("    fe attach", sum.fe_attach, max.fe_attach);
       row("  build_patches", sum.build_patches, max.build_patches);
       row("  data filter", sum.data_filter, max.data_filter);
@@ -94,12 +89,10 @@ namespace DiFfRG
             << writer.hdf5_open_close << "s | excluded from frame total";
       }
 
-      out << "\n  " << std::left << std::setw(20) << "counts" << std::right //
-          << " potential solves " << sum.potential_solve_count              //
-          << " (" << std::setprecision(1) << sum.potential_solve_count / frames
-          << "/frame)"
-          // Includes the writer thread's opens, which are the bulk of them once it is running.
-          << ", hdf5 opens " << sum.hdf5_open_count + writer.hdf5_open_count //
+      out << "\n  " << std::left << std::setw(20) << "counts"
+          << std::right //
+                        // Includes the writer thread's opens, which are the bulk of them once it is running.
+          << " hdf5 opens " << sum.hdf5_open_count + writer.hdf5_open_count //
           << " (" << std::setprecision(1) << (sum.hdf5_open_count + writer.hdf5_open_count) / frames << "/frame)";
 
       return out.str();

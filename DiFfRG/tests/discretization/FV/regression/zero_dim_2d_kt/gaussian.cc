@@ -80,8 +80,6 @@ namespace
                         public def::AD<GaussianModel>
   {
   public:
-    static constexpr bool use_potential = false; // the readout only records the EoM
-
     explicit GaussianModel(const GaussianScenario &scenario) : def::fRG(1.0), scenario(scenario) {}
     GaussianModel(const ConfigTree &json, const GaussianScenario &scenario) : def::fRG(json), scenario(scenario) {}
 

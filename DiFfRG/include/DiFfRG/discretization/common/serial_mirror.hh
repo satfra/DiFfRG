@@ -18,7 +18,7 @@ namespace DiFfRG
     /**
      * @brief A serial copy of a parallel triangulation, or @p source itself if it is serial.
      *
-     * Lets code that runs on one rank only (output, potential reconstruction) use deal.II functions that are collective
+     * Lets code that runs on one rank only (output, EoM search) use deal.II functions that are collective
      * on a parallel triangulation. The copy is cached, updated in place when the source changes, and keeps its address.
      */
     template <int dim> const dealii::Triangulation<dim> &serial_mirror(const dealii::Triangulation<dim> &source)

@@ -108,6 +108,8 @@ namespace DiFfRG
       const auto &get_fe(uint i = 0) const { return *(fe[i]); }
       /// The (bi)linear mapping from the reference cell.
       const auto &get_mapping() const { return mapping; }
+      /// Configured physical field-space domain, independent of origin-centering extensions.
+      auto get_physical_bounds() const { return mesh.get_physical_bounds(); }
       /// The triangulation of the mesh.
       const auto &get_triangulation() const { return mesh.get_triangulation(); }
       auto &get_triangulation() { return mesh.get_triangulation(); }
