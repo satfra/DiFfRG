@@ -426,7 +426,6 @@ The simulation takes about a second. Afterwards, the current folder contains
   (each line is additionally prefixed with a time stamp).
 - `output.h5`, the simulation data in HDF5 format, including the parameters used under its `/config` group. Its root attributes `finished` and `crashed` tell how the run ended: `(1, 0)` ran to completion, `(1, 1)` stopped on an error but closed its output cleanly, `(0, 0)` was killed (or is still running).
 - `output.pvd` and the folder `output/`, the FE solution as VTK files for [ParaView](https://www.paraview.org/).
-- `output_potential.pvd` and `output_eom_potential.pvd`, a reconstruction of the potential whose derivative the FE functions describe. They are not meaningful for Burgers' equation and can be ignored here.
 
 The full list of files and their layout is in [Output](../getting_started/output.md).
 

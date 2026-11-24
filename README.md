@@ -30,39 +30,6 @@ DiFfRG has been developed within the [fQCD Collaboration](https://fQCD-Collabora
    ```
 3. Continue with the [tutorials](https://satfra.github.io/DiFfRG/tutorials/index.html).
 
-## What a simulation looks like
-
-A simulation is a short `main` that chains a few template types. The physics lives in the user-written `Model` class (initial condition, fluxes, sources, ...):
-
-```cpp
-#include <DiFfRG/DiFfRG.hh>
-#include "model.hh"
-using namespace DiFfRG;
-
-int main(int argc, char *argv[])
-{
-  const auto json = Init(argc, argv).get_configuration_helper().get_json();
-
-  using Discretization = CG::Discretization<MyModel, RectangularMesh<MyModel::dim>>;
-  using Assembler = CG::Assembler<Discretization>;
-  using TimeStepper = TimeStepperSUNDIALS_IDA<Assembler>;
-
-  MyModel model(json);
-  RectangularMesh<MyModel::dim> mesh{Config::ConfigurationMesh<MyModel::dim>(json)};
-  OutputSession<Assembler> output(json);
-  const auto log = output.report_port();
-  Discretization discretization(mesh, json, log);
-  Assembler assembler(discretization, model, json);
-  TimeStepper time_stepper(json, assembler, output);
-
-  FE::FlowingVariables initial_condition(discretization);
-  initial_condition.interpolate(model);
-  time_stepper.run(initial_condition, 0., json.get_double("/timestepping/final_time"));
-}
-```
-
-Switching to another discretisation or time stepper means changing one `using` line.
-
 ## Documentation
 
 - The ***[documentation](https://satfra.github.io/DiFfRG/)***: tutorials, guides, and the C++, Python and Mathematica API references.

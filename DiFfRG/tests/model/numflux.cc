@@ -34,10 +34,8 @@ namespace
     const Extractors e{};
     const Variables v;
     std::array<double, 1> vs{{u_s}}, vn{{u_n}};
-    double width = 1.;
     std::array<Tensor<1, dim>, 1> NF{};
-    model.numflux(NF, normal, Point<dim>(), batch_tie<false, false>(vs, e, v, width),
-                  batch_tie<false, false>(vn, e, v, width));
+    model.numflux(NF, normal, Point<dim>(), batch_tie<false, false>(vs, e, v), batch_tie<false, false>(vn, e, v));
     return NF[0] * normal;
   }
 
@@ -52,7 +50,6 @@ namespace
     for (auto *b : {&s, &n}) {
       b->reinit(1);
       b->set_shared(e, v);
-      b->width(0) = 1.;
       for (int d = 0; d < dim; ++d)
         b->coordinate(d, 0) = 0.;
     }

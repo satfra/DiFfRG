@@ -12,6 +12,20 @@ namespace DiFfRG
 {
   namespace internal
   {
+    /**
+     * @brief The active cell across interior face @p face of @p cell. On an adapted 1D mesh the cell across a face
+     * may be refined; then this is its child at the shared face. (Faces with several active neighbours, which
+     * appear in 2D and 3D, are not supported.)
+     */
+    template <typename Iterator> Iterator active_face_neighbor(const Iterator &cell, const unsigned int face)
+    {
+      auto neighbor = cell->neighbor(face);
+      if constexpr (Iterator::AccessorType::dimension == 1)
+        while (neighbor->has_children())
+          neighbor = neighbor->child(1 - face);
+      return neighbor;
+    }
+
     /// Width of @p cell normal to face @p face_no: cell volume divided by face area.
     template <typename CellIterator> double face_normal_cell_width(const CellIterator &cell, const uint face_no)
     {

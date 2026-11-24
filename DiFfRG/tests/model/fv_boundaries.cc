@@ -1,3 +1,4 @@
+#include <DiFfRG/discretization/FV/stencil.hh>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -155,15 +156,10 @@ namespace
         KT::internal::make_physical_boundary_side_stencil<dim, NumberType, 1>(boundary_stencil);
     const auto ghost_stencil = KT::internal::make_ghost_boundary_side_stencil<dim, NumberType, 1>(boundary_stencil);
 
-    const auto u_grad_physical = ReconstructorNumber::template compute_gradient<1>(
-        physical_stencil.cell.x, physical_stencil.cell.u, physical_stencil.neighbors.x, physical_stencil.neighbors.u);
-    const auto u_grad_ghost = ReconstructorNumber::template compute_gradient<1>(
-        ghost_stencil.cell.x, ghost_stencil.cell.u, ghost_stencil.neighbors.x, ghost_stencil.neighbors.u);
-    const auto u_grad_minus = ReconstructorNumber::template compute_gradient_at_point<1>(
-        physical_stencil.cell.x, x_face, physical_stencil.cell.u, physical_stencil.neighbors.x,
-        physical_stencil.neighbors.u);
-    const auto u_grad_plus = ReconstructorNumber::template compute_gradient_at_point<1>(
-        ghost_stencil.cell.x, x_face, ghost_stencil.cell.u, ghost_stencil.neighbors.x, ghost_stencil.neighbors.u);
+    const auto u_grad_physical = ReconstructorNumber::template compute_gradient<1>(physical_stencil);
+    const auto u_grad_ghost = ReconstructorNumber::template compute_gradient<1>(ghost_stencil);
+    const auto u_grad_minus = ReconstructorNumber::template compute_gradient_at_point<1>(physical_stencil, x_face);
+    const auto u_grad_plus = ReconstructorNumber::template compute_gradient_at_point<1>(ghost_stencil, x_face);
     const auto u_minus =
         KT::internal::reconstruct_u<1, NumberType, 1>(physical_stencil.cell.u, physical_stencil.cell.x, x_face,
                                                      u_grad_physical);
@@ -286,14 +282,24 @@ namespace
     const std::array<std::array<double, 1>, 2> u_neighbors_right{{{{-physical_values[0]}}, {{physical_values[1]}}}};
     const std::array<std::array<double, 1>, 2> u_neighbors_left{{{{-physical_values[1]}}, {{physical_values[0]}}}};
 
-    const auto u_grad_right = Reconstructor::compute_gradient<1>(right_center, u_center_right, x_neighbors_right,
-                                                                 u_neighbors_right);
-    const auto u_grad_left =
-        Reconstructor::compute_gradient<1>(left_center, u_center_left, x_neighbors_left, u_neighbors_left);
-    const auto u_grad_minus =
-        Reconstructor::compute_gradient_at_point<1>(right_center, x_face, u_center_right, x_neighbors_right, u_neighbors_right);
-    const auto u_grad_plus =
-        Reconstructor::compute_gradient_at_point<1>(left_center, x_face, u_center_left, x_neighbors_left, u_neighbors_left);
+    const auto u_grad_right = Reconstructor::compute_gradient<1>(
+        DiFfRG::FV::CellStencilData<1, double, 1>{.cell = {.x = right_center, .u = u_center_right},
+                                                  .neighbor_x = x_neighbors_right,
+                                                  .neighbor_u = u_neighbors_right});
+    const auto u_grad_left = Reconstructor::compute_gradient<1>(
+        DiFfRG::FV::CellStencilData<1, double, 1>{.cell = {.x = left_center, .u = u_center_left},
+                                                  .neighbor_x = x_neighbors_left,
+                                                  .neighbor_u = u_neighbors_left});
+    const auto u_grad_minus = Reconstructor::compute_gradient_at_point<1>(
+        DiFfRG::FV::CellStencilData<1, double, 1>{.cell = {.x = right_center, .u = u_center_right},
+                                                  .neighbor_x = x_neighbors_right,
+                                                  .neighbor_u = u_neighbors_right},
+        x_face);
+    const auto u_grad_plus = Reconstructor::compute_gradient_at_point<1>(
+        DiFfRG::FV::CellStencilData<1, double, 1>{.cell = {.x = left_center, .u = u_center_left},
+                                                  .neighbor_x = x_neighbors_left,
+                                                  .neighbor_u = u_neighbors_left},
+        x_face);
 
     result.u_minus = KT::internal::reconstruct_u<1, double, 1>(u_center_right, right_center, x_face, u_grad_right)[0];
     result.u_plus = KT::internal::reconstruct_u<1, double, 1>(u_center_left, left_center, x_face, u_grad_left)[0];
@@ -311,14 +317,24 @@ namespace
       const std::array<std::array<AD, 1>, 2> tagged_neighbors_left{{{{-tagged_physical[1]}}, {{tagged_physical[0]}}}};
 
       using ReconstructorAD = DiFfRG::def::TVDReconstructor<1, DiFfRG::def::MinModLimiter, AD>;
-      const auto tagged_u_grad_right = ReconstructorAD::compute_gradient<1>(right_center, tagged_center_right,
-                                                                            x_neighbors_right, tagged_neighbors_right);
-      const auto tagged_u_grad_left =
-          ReconstructorAD::compute_gradient<1>(left_center, tagged_center_left, x_neighbors_left, tagged_neighbors_left);
+      const auto tagged_u_grad_right = ReconstructorAD::compute_gradient<1>(
+          DiFfRG::FV::CellStencilData<1, AD, 1>{.cell = {.x = right_center, .u = tagged_center_right},
+                                                .neighbor_x = x_neighbors_right,
+                                                .neighbor_u = tagged_neighbors_right});
+      const auto tagged_u_grad_left = ReconstructorAD::compute_gradient<1>(
+          DiFfRG::FV::CellStencilData<1, AD, 1>{.cell = {.x = left_center, .u = tagged_center_left},
+                                                .neighbor_x = x_neighbors_left,
+                                                .neighbor_u = tagged_neighbors_left});
       const auto tagged_u_grad_minus = ReconstructorAD::compute_gradient_at_point<1>(
-          right_center, x_face, tagged_center_right, x_neighbors_right, tagged_neighbors_right);
+          DiFfRG::FV::CellStencilData<1, AD, 1>{.cell = {.x = right_center, .u = tagged_center_right},
+                                                .neighbor_x = x_neighbors_right,
+                                                .neighbor_u = tagged_neighbors_right},
+          x_face);
       const auto tagged_u_grad_plus = ReconstructorAD::compute_gradient_at_point<1>(
-          left_center, x_face, tagged_center_left, x_neighbors_left, tagged_neighbors_left);
+          DiFfRG::FV::CellStencilData<1, AD, 1>{.cell = {.x = left_center, .u = tagged_center_left},
+                                                .neighbor_x = x_neighbors_left,
+                                                .neighbor_u = tagged_neighbors_left},
+          x_face);
       const auto tagged_u_minus =
           KT::internal::reconstruct_u<1, AD, 1>(tagged_center_right, right_center, x_face, tagged_u_grad_right);
       const auto tagged_u_plus =

@@ -45,24 +45,22 @@ namespace DiFfRG
     /// Rebuild the sparsity pattern of the jacobian, e.g. when the dofs the extractors read have changed.
     virtual void rebuild_jacobian_sparsity() = 0;
 
-    /// The FE solution and the reconstructed raw potential at one point.
-    template <typename PotentialEvaluation = RawPotentialEvaluation<dim, NumberType>> struct PointEvaluation {
+    /// The FE solution and its derivatives at one point.
+    struct PointEvaluation {
       std::vector<Vector<NumberType>> values{Vector<NumberType>(Components::count_fe_functions())};
       std::vector<std::vector<Tensor<1, dim, NumberType>>> gradients{
           std::vector<Tensor<1, dim, NumberType>>(Components::count_fe_functions())};
       std::vector<std::vector<Tensor<2, dim, NumberType>>> hessians{
           std::vector<Tensor<2, dim, NumberType>>(Components::count_fe_functions())};
-      PotentialEvaluation potential;
       /// Kept for the shape values the extractor jacobian needs.
       std::shared_ptr<FEValues<dim>> fe_values;
     };
 
-    /// @brief Evaluate the FE solution and the raw potential at @p x, which lies in @p cell.
-    template <typename RawPotential>
+    /// @brief Evaluate the FE solution and its derivatives at @p x, which lies in @p cell.
     auto evaluate_at(const Point<dim> &x, const typename DoFHandler<dim>::cell_iterator &cell,
-                     const VectorType &solution_global, const RawPotential &raw_potential) const
+                     const VectorType &solution_global) const
     {
-      PointEvaluation<decltype(evaluate_raw_potential(raw_potential, this->mapping, x))> evaluation;
+      PointEvaluation evaluation;
       evaluation.fe_values = std::make_shared<FEValues<dim>>(
           this->mapping, this->fe, this->mapping.transform_real_to_unit_cell(cell, x),
           update_values | update_gradients | update_quadrature_points | update_JxW_values | update_hessians);
@@ -70,7 +68,6 @@ namespace DiFfRG
       evaluation.fe_values->get_function_values(solution_global, evaluation.values);
       evaluation.fe_values->get_function_gradients(solution_global, evaluation.gradients);
       evaluation.fe_values->get_function_hessians(solution_global, evaluation.hessians);
-      evaluation.potential = evaluate_raw_potential(raw_potential, this->mapping, x);
       return evaluation;
     }
 
@@ -78,8 +75,7 @@ namespace DiFfRG
     template <typename Evaluation, typename Extractors>
     static auto solution_tie(const Evaluation &e, const Extractors &extractors, const VariablesVector &variables)
     {
-      return Core::e_tie(e.values[0], e.gradients[0], e.hessians[0], extractors, variables, e.potential.value,
-                         e.potential.gradient, e.potential.mass_hessian);
+      return Core::e_tie(e.values[0], e.gradients[0], e.hessians[0], extractors, variables);
     }
   };
 } // namespace DiFfRG

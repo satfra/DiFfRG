@@ -21,7 +21,6 @@ below.
 | `<run>.log` | The run log: progress, messages, final performance summaries. |
 | `<run>.h5` | All data in one HDF5 file (if `/output/hdf5`, default on); layout below. |
 | `<run>.pvd` + `<run>/*.vtu` | The FE solution for ParaView (if `/output/vtk`, default on). The VTU frames go to the subfolder `/output/field_directory` (default: the run name). |
-| `<run>_potential.pvd`, `<run>_eom_potential.pvd` | The potential reconstructed from the FE functions, see [Models](models.md#the-reconstructed-potential). |
 | `<run>_<table>.csv` | CSV tables written by the model's readouts, e.g. `<run>_data.csv` for `output.table("data.csv")`. |
 | `<run>.log.json` | The parameters, only if HDF5 is off or `/output/json = true`. |
 | `<run>_snapshot_<nnn>.h5` | [Snapshots](snapshots.md), if requested. |
@@ -37,7 +36,6 @@ The parameters of the run are always recorded: in `/config` of the HDF5 file, el
 | `/scalars/<name>` | One dataset per scalar written by the readouts, one entry per frame. |
 | `/maps/<name>`, `/coordinates/<name>` | Grid-valued data written with `hdf5.map(...)`, e.g. dressing functions on a momentum grid. |
 | `/FE/<frame>` | The FE solution of each frame (six-digit frame number). |
-| `/potential/<frame>`, `/eom_potential/<frame>` | The reconstructed potentials. |
 
 Each frame is written completely and the file is closed after it, so the file can be read while the run
 continues, and a killed run leaves all frames before the last one intact.
@@ -122,8 +120,7 @@ data_out.write_frame(time, [&](auto &frame) {
 });
 ```
 
-This writes `<run>_auxiliary.pvd` and the HDF5 group `/auxiliary`. The names `FE`, `potential`,
-`eom_potential`, `scalars`, `maps` and `coordinates` are reserved.
+This writes `<run>_auxiliary.pvd` and the HDF5 group `/auxiliary`. The names `FE`, `scalars`, `maps` and `coordinates` are reserved.
 
 ### Diagnostics
 

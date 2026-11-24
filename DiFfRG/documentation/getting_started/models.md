@@ -178,25 +178,18 @@ and momentum-dependent couplings feeding each other) are complete examples.
 [Output](output.md#writing-data-from-a-model). `readouts_multiple` registers several readouts, each with its own
 EoM.
 
-## The reconstructed potential
+## EoM roots and masses
 
-FE functions usually describe derivatives of a potential, $u = \partial_\rho V$. For output, readouts and
-extractors, DiFfRG reconstructs the potential itself, normalized to $V(0) = 0$, from the gradient given by
-`raw_potential_gradient(x, u)` (default: the first `dim` FE functions). It is written to `<run>_potential.pvd`
-and the HDF5 group `/potential`, and is available in readouts and extractors as the entries `"potential"`,
-`"potential_gradient"` and `"potential_hessian"`; these entry names may still change. A model with a different
-component layout overrides the gradient:
+The EoM search operates on the vector field directly. `get_EoM_result` returns the root, candidates and optional
+local FV polynomial in `EoMResult`. FV refinement fits cell averages automatically; FE data, including ordinary
+DG0, retain their existing readout. Its `hessian` is the symmetric derivative of the first `dim` state components
+at `search_point`, using the accepted polynomial when available. This represents a potential Hessian when those
+components are its gradient; model coordinate factors and wave-function normalizations must still be applied.
 
-```cpp
-template <int dim, typename Vector>
-std::array<double, dim> raw_potential_gradient(const Point<dim> &, const Vector &u) const
-{
-  return {{u[idxf("u")]}};
-}
-```
-
-The reconstruction is a solve over the whole mesh. A model whose extractors and readouts do not read the
-potential should declare `static constexpr bool use_potential = false;` to skip it on every residual evaluation.
+Model extractors and readouts receive the standard `"fe_functions"`, `"fe_derivatives"` and `"fe_hessians"` slots,
+plus extractors, variables and any LDG levels. These follow each assembler's FE or FV reconstruction; they are
+separate from the optional root-local polynomial in `EoMResult`. No extra potential slots or automatic scalar
+potential output series are provided.
 
 ## Affine constraints
 

@@ -139,3 +139,25 @@ AUMPTestCase["MakeKernelGroup with Get -> False emits no get()", {"make-kernel",
 AUMPTestCase["Get must be a Boolean", {"make-kernel", "get", "abort"},
     AUMPCHECKAbort[groupOf["Get" -> "no"]];
 ];
+
+(* An interpolator parameter declared `const auto&` makes the kernel an abbreviated function template,
+   which nvcc 12.8 cannot compile (internal error in check_name_hiding_by_template_parameters). The
+   generator names the handle type instead; kernel_handle_t is by definition what the integrator passes. *)
+AUMPTestCase["interpolator parameters are named, not auto", {"make-kernel", "group", "interpolator", "funkit"},
+    Module[{files = generateFlow["grp", groupOf[]&]},
+        AUMPCHECK[containsAll[files["kernel.hh"], {
+            "const DiFfRG::kernel_handle_t<SplineInterpolator1D<double, LinearCoordinates1D<double>>, double>& ZA",
+            "const DiFfRG::kernel_handle_t<SplineInterpolator1D<double, LinearCoordinates1D<double>>, double>& ZB"}]];
+        AUMPCHECK[!StringContainsQ[files["kernel.hh"], "const auto& ZA"]];
+        AUMPCHECK[!StringContainsQ[files["kernel.hh"], "const auto& ZB"]];
+    ];
+];
+
+(* The named type must keep the precision dependence the `auto` was there for: a single-precision kernel
+   still receives the single-precision copy of a double interpolator. *)
+AUMPTestCase["a float kernel names the single-precision handle", {"make-kernel", "group", "interpolator", "precision", "funkit"},
+    Module[{files = generateFlow["grp", groupOf["ComputeType" -> "float"]&]},
+        AUMPCHECK[StringContainsQ[files["kernel.hh"],
+            "const DiFfRG::kernel_handle_t<SplineInterpolator1D<double, LinearCoordinates1D<double>>, float>& ZA"]];
+    ];
+];

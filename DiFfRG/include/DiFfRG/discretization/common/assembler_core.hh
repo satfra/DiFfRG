@@ -85,8 +85,8 @@ namespace DiFfRG
      * and the timings.
      *
      * The assemblers differ in how they evaluate the solution at a single point, which they provide (CRTP):
-     *  - `evaluate_at(x, cell, solution, raw_potential)`: the solution and the raw potential at @p x, which lies in
-     *    @p cell; an object with a `potential` member (a RawPotentialEvaluation) and, for extract_with_jacobian(),
+     *  - `evaluate_at(x, cell, solution)`: the solution and its derivatives at @p x in
+     *    @p cell; for extract_with_jacobian(), the returned object also provides
      *    `fe_values` (an FEValues at the point);
      *  - `solution_tie(evaluation, extractors, variables)`: the named tuple the model's extract() and readouts see.
      *
@@ -125,8 +125,7 @@ namespace DiFfRG
                     const std::string_view component)
           : discretization(discretization), model(model), fe(discretization.get_fe()),
             dof_handler(discretization.get_dof_handler()), mapping(discretization.get_mapping()), EoM_cell(no_cell()),
-            old_extractor_cell(no_cell()), EoM_config(resolve_eom_config(dof_handler, Config::EoMConfig(config))),
-            component(component)
+            old_extractor_cell(no_cell()), EoM_config(Config::EoMConfig(config)), component(component)
       {
       }
 
@@ -304,17 +303,19 @@ namespace DiFfRG
       {
         auto EoM = this->EoM;
         auto cell = EoM_cell;
-        if (search_EoM || cell == no_cell())
-          EoM = locate_EoM(cell, solution, model_EoM(variables), [&](const auto &p, const auto &values) {
-                  return postprocess ? model.EoM_postprocess(p, values) : p;
-                }).point;
+        if (search_EoM || cell == no_cell()) {
+          const auto result = locate_EoM(cell, solution, model_EoM(variables), [&](const auto &p, const auto &values) {
+            return postprocess ? model.EoM_postprocess(p, values) : p;
+          });
+          EoM = result.point;
+        }
         if (set_EoM) {
           this->EoM = EoM;
           EoM_cell = cell;
         }
         derived().prepare_point_evaluation(solution);
         const auto [x, x_cell] = resolve_extractor_point(EoM, cell, solution);
-        const auto e = derived().evaluate_at(x, x_cell, solution, extractor_raw_potential(solution));
+        const auto e = derived().evaluate_at(x, x_cell, solution);
         model.extract(data, x, derived().solution_tie(e, nothing, variables));
       }
 
@@ -331,8 +332,8 @@ namespace DiFfRG
       template <typename... T> static constexpr auto e_tie(T &&...t)
       {
         return named_tuple<std::tuple<T &...>,
-                           StringSet<"fe_functions", "fe_derivatives", "fe_hessians", "extractors", "variables",
-                                     "potential", "potential_gradient", "potential_hessian">>(std::tie(t...));
+                           StringSet<"fe_functions", "fe_derivatives", "fe_hessians", "extractors", "variables">>(
+            std::tie(t...));
       }
 
       /// What a derived assembler may shadow; see the class documentation.
@@ -412,33 +413,17 @@ namespace DiFfRG
       auto locate_EoM(CellIterator &cell, const VectorType &solution, const EoMFun &EoM_fun,
                       const PostprocessFun &postprocess) const
       {
-        auto result = get_EoM_point_with_potential(cell, solution, dof_handler, mapping, EoM_fun, postprocess,
-                                                   EoM_config, EoM_minimum_guess, &potential_cache);
-        if (result.potential) EoM_minimum_guess = result.potential->minimum;
+        const auto physical_bounds = discretization.get_physical_bounds();
+        constexpr auto data_kind = [] {
+          if constexpr (requires { Discretization::is_fv_discretization; }) {
+            if constexpr (Discretization::is_fv_discretization) return EoMDataKind::finite_volume;
+          }
+          return EoMDataKind::finite_element;
+        }();
+        auto result = get_EoM_result(cell, solution, dof_handler, mapping, EoM_fun, postprocess, EoM_config,
+                                     EoM_minimum_guess, &eom_cache, &physical_bounds, data_kind);
+        EoM_minimum_guess = result.search_point;
         return result;
-      }
-
-      /**
-       * @brief The raw potential for the extractors, or an inert placeholder if the model does not read it.
-       *
-       * Reconstructing it is a direct solve over the whole mesh, and extract() runs on every residual and every
-       * jacobian -- so a model that never touches the potential slots should say so and skip it.
-       */
-      auto extractor_raw_potential(const VectorType &solution) const
-      {
-        if constexpr (Model::use_potential)
-          return reconstruct_potential(solution);
-        else
-          return UnusedPotential{};
-      }
-
-      /// The raw potential of the readouts; see reconstruct_raw_potential.
-      auto reconstruct_potential(const VectorType &solution) const
-      {
-        return reconstruct_raw_potential(
-            solution, dof_handler, mapping,
-            [&](const auto &p, const auto &values) { return model.raw_potential_gradient(p, values); }, EoM_config,
-            &potential_cache);
       }
 
       /**
@@ -460,26 +445,11 @@ namespace DiFfRG
           return {EoM_point, EoM_point_cell};
       }
 
-      /// One readout per entry of the model's readouts_multiple, each at its own EoM.
+      /// One readout per EoM registered by the model.
       void readouts(OutputFrame<dim, VectorType> &data_out, const VectorType &solution,
                     const VariablesVector &variables) const
       {
         derived().prepare_point_evaluation(solution);
-        // The raw potential is a solve over the whole mesh; skip it if neither the model nor the output reads it.
-        constexpr bool model_reads_potential = Model::use_potential;
-        if (model_reads_potential || data_out.writes_raw_potential()) {
-          auto potential = reconstruct_potential(solution);
-          readouts_with(data_out, solution, variables, potential);
-          data_out.attach_raw_potential(std::move(potential));
-        } else if constexpr (!model_reads_potential)
-          readouts_with(data_out, solution, variables, UnusedPotential{});
-      }
-
-      /// readouts() with the raw potential @p potential (or UnusedPotential) in the solution tuples.
-      template <typename Potential>
-      void readouts_with(OutputFrame<dim, VectorType> &data_out, const VectorType &solution,
-                         const VariablesVector &variables, const Potential &potential) const
-      {
         // GCC 16 fails to find members inside `if constexpr` in this variadic lambda; keep `this->`.
         auto helper = [&](auto &&...args) {
           if constexpr (sizeof...(args) == 3) {
@@ -497,7 +467,7 @@ namespace DiFfRG
               return this->model.EoM_postprocess(p, values);
             });
             const auto EoM = EoM_result.point;
-            const auto readout_solution = this->derived().evaluate_at(EoM, cell, solution, potential);
+            const auto readout_solution = this->derived().evaluate_at(EoM, cell, solution);
 
             // The readout is always at this readout's EoM. The extractors may not be: a model that defines
             // extractor_point reads them elsewhere, and dt_variables must see the same values here as it does
@@ -505,12 +475,11 @@ namespace DiFfRG
             Extractors extracted{};
             if constexpr (Components::count_extractors() > 0) {
               const auto [x, x_cell] = this->resolve_extractor_point(EoM, cell, solution);
-              const auto e = this->derived().evaluate_at(x, x_cell, solution, potential);
+              const auto e = this->derived().evaluate_at(x, x_cell, solution);
               this->model.extract(extracted, x, this->derived().solution_tie(e, this->nothing, variables));
             }
             outputter(data_out, EoM,
                       this->derived().solution_tie(readout_solution, std::as_const(extracted), variables));
-            data_out.attach_eom_potential(std::move(EoM_result));
           } else {
             validate_readout_helper_arity<decltype(args)...>();
           }
@@ -541,7 +510,7 @@ namespace DiFfRG
         const bool new_cell = MPI::any_of(discretization.get_communicator(), old_extractor_cell != cell);
         old_extractor_cell = cell;
 
-        const auto e = derived().evaluate_at(x, cell, solution, extractor_raw_potential(solution));
+        const auto e = derived().evaluate_at(x, cell, solution);
         const auto solution_tuple = derived().solution_tie(e, nothing, variables);
         model.extract(data, x, solution_tuple);
 
@@ -606,8 +575,8 @@ namespace DiFfRG
       CellIterator old_extractor_cell;
       const Config::EoMConfig EoM_config;
       mutable std::optional<Point<dim>> EoM_minimum_guess;
-      /// Mesh-dependent half of the potential reconstructions, built once and reused; see PotentialSystemCache.
-      mutable PotentialSystemCache<dim, NumberType> potential_cache;
+      /// Mesh-dependent interpolation weights of the direct vector readout.
+      mutable EoMStateCache<dim, NumberType> eom_cache;
       /// d(extractors)/d(dofs of extractor_dof_indices), from extract_with_jacobian().
       FullMatrix<NumberType> extractor_jacobian;
       std::vector<types::global_dof_index> extractor_dof_indices;

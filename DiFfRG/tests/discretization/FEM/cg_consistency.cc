@@ -234,10 +234,7 @@ namespace
     std::vector<std::vector<Tensor<1, dim>>> du(quadrature.size(), std::vector<Tensor<1, dim>>(2));
     std::vector<std::vector<Tensor<2, dim>>> ddu(quadrature.size(), std::vector<Tensor<2, dim>>(2));
     const std::array<double, 0> no_extractors{};
-    const double cell_width = 0.;
-    const auto at = [&](const uint q) {
-      return batch_tie<true, true>(u[q], du[q], ddu[q], no_extractors, s.u, cell_width);
-    };
+    const auto at = [&](const uint q) { return batch_tie<true, true>(u[q], du[q], ddu[q], no_extractors, s.u); };
 
     for (const auto &cell : s.discretization.get_dof_handler().active_cell_iterators()) {
       cell->get_dof_indices(dofs);

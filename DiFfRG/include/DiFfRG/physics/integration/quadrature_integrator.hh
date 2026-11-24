@@ -262,6 +262,7 @@ namespace DiFfRG
         if constexpr (host_memory) {
           launch(Kokkos::View<OT *, CPU_memory, Kokkos::MemoryUnmanaged>(dest.data(), n));
           space.fence();
+          check_device_errors("QuadratureIntegrator::map_points");
         } else {
           auto &stage = result.template get<OT>();
           const auto device_result = stage.device_view(space, n);
@@ -269,6 +270,7 @@ namespace DiFfRG
           launch(device_result);
           Kokkos::deep_copy(space, pinned, device_result);
           space.fence();
+          check_device_errors("QuadratureIntegrator::map_points");
           parallel_chunks(n, [&](const size_t begin, const size_t end) {
             std::memcpy(dest.data() + begin, pinned.data() + begin, (end - begin) * sizeof(OT));
           });
@@ -290,6 +292,7 @@ namespace DiFfRG
           src = pinned.data();
         }
         space.fence();
+        check_device_errors("QuadratureIntegrator::map_points");
         parallel_chunks(n, [&](const size_t begin, const size_t end) {
           for (size_t i = begin; i < end; ++i)
             for (size_t j = 0; j < N; ++j)
@@ -870,6 +873,7 @@ namespace DiFfRG
       get(space, m_result_view, t...);
       Kokkos::deep_copy(space, m_result_host, m_result_view);
       space.fence();
+      check_device_errors("QuadratureIntegrator::get");
       dest = m_result_host();
     }
 

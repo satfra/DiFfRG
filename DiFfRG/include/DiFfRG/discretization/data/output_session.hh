@@ -1,7 +1,6 @@
 #pragma once
 
 #include <DiFfRG/common/run_reporter.hh>
-#include <DiFfRG/discretization/common/eom.hh>
 #include <DiFfRG/discretization/data/csv_output.hh>
 #include <DiFfRG/discretization/data/diagnostic_port.hh>
 #include <DiFfRG/discretization/data/fe_output.hh>
@@ -120,7 +119,7 @@ namespace DiFfRG
      * @brief An additional field series @p name, created on first use: VTK `<run>_<name>.pvd` (if `/output/vtk`),
      * HDF5 group `/<name>` in the run's `.h5` file (if `/output/hdf5`).
      *
-     * @p name is a single path component and not one of FE, potential, eom_potential, scalars, maps, coordinates.
+     * @p name is a single path component and not one of FE, scalars, maps, coordinates.
      */
     FieldCollector fields(const std::string &name)
     {
@@ -171,27 +170,6 @@ namespace DiFfRG
                     "OutputFrame::fe_output() was removed. Use auto fields = output.fields(); fields.attach(...) "
                     "instead");
       return session.fe_out;
-    }
-
-    /// Write the reconstructed EoM potential of @p result (if any) to the `eom_potential` series.
-    void attach_eom_potential(EoMResult<dim, typename VectorType::value_type> result)
-    {
-      session.attach_eom_potential(std::move(result));
-    }
-
-    /// Write the raw potential to the `potential` series; at most once per frame.
-    void attach_raw_potential(ReconstructedRawPotential<dim, typename VectorType::value_type> potential)
-    {
-      session.attach_raw_potential(std::move(potential));
-    }
-
-    /// Whether a raw potential attached to this frame would be written anywhere (VTK or HDF5).
-    bool writes_raw_potential() const
-    {
-      if constexpr (dim > 0)
-        return !session.potential_fe_out.will_discard();
-      else
-        return false;
     }
 
     /**
@@ -246,10 +224,8 @@ namespace DiFfRG
    * | File                                   | Content | Written if |
    * |----------------------------------------|---------|------------|
    * | `R/N.pvd`, `R/F/N_NNNNNN.vtu`          | FE fields, one .vtu per frame NNNNNN | `/output/vtk` |
-   * | `R/N_potential.pvd` (+ .vtu)           | raw potential (attach_raw_potential) | `/output/vtk` |
-   * | `R/N_eom_potential.pvd` (+ .vtu)       | EoM potential (attach_eom_potential) | `/output/vtk` |
    * | `R/N_X.pvd` (+ .vtu)                   | field series fields("X") | `/output/vtk` |
-   * | `R/N.h5`                               | `/config`, `/scalars`, `/maps`, `/coordinates`, the field series `/FE`, `/potential`, `/eom_potential`, `/X`; see HDF5Output | `/output/hdf5` |
+   * | `R/N.h5`                               | `/config`, `/scalars`, `/maps`, `/coordinates`, the field series `/FE`, `/X`; see HDF5Output | `/output/hdf5` |
    * | `R/N_X.h5`                             | hdf5("X"), same layout without field series | always |
    * | `R/N_X` (e.g. `R/N_data.csv`)          | table("X"), see CsvOutput | always |
    * | `R/N.log`                              | the run log, filtered by `/output/log_level` | always |
@@ -319,14 +295,10 @@ namespace DiFfRG
         current_frame = internal::FrameTimings{};
         internal::ScopedTimer total_timer(current_frame.total);
         {
-          const auto solves_before = internal::potential_solve_stats();
           internal::ScopedTimer contributor_timer(current_frame.contributor);
           OutputFrame<dim, VectorType> frame(*this);
           std::forward<Contributor>(contributor)(frame);
           contributor_timer.stop();
-          const auto &solves_after = internal::potential_solve_stats();
-          current_frame.potential_solve_count += solves_after.solves - solves_before.solves;
-          current_frame.potential_solves += solves_after.seconds - solves_before.seconds;
         }
         flush_frame(time);
         total_timer.stop();
@@ -358,13 +330,10 @@ namespace DiFfRG
     bool is_writer_rank() const noexcept { return active; }
 
   private:
-
     FEOutput<dim, VectorType> &fe_output() { return fe_out; }
     FEOutput<dim, VectorType> &field_output(const std::string &name);
     template <typename FieldVectorType>
     void configure_field_output(FEOutput<dim, FieldVectorType> &sink, const std::string &group_name);
-    void attach_raw_potential(ReconstructedRawPotential<dim, typename VectorType::value_type> potential);
-    void attach_eom_potential(EoMResult<dim, typename VectorType::value_type> result);
     CsvOutput &csv(const std::string &name);
     HDF5Output &hdf5(const std::string &name);
     HDF5Output &hdf5();
@@ -394,10 +363,6 @@ namespace DiFfRG
     /// Declared before the sinks that use it, so it is destroyed after them.
     internal::HDF5FrameWriter hdf5_writer;
     FEOutput<dim, VectorType> fe_out;
-    std::optional<ReconstructedRawPotential<dim, typename VectorType::value_type>> pending_raw_potential;
-    FEOutput<dim, dealii::Vector<typename VectorType::value_type>> potential_fe_out;
-    std::vector<ReconstructedEoMPotential<dim, typename VectorType::value_type>> pending_eom_potentials;
-    FEOutput<dim, dealii::Vector<typename VectorType::value_type>> eom_potential_fe_out;
     std::map<std::string, FEOutput<dim, VectorType>> named_fe_outs;
     std::set<std::string> pending_named_fe_outs;
     std::map<std::string, CsvOutput> csv_files;

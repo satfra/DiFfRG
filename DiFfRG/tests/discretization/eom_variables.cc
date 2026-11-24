@@ -46,12 +46,6 @@ namespace
       return {{u[0] - variables[0]}};
     }
 
-    template <typename Vector>
-    std::array<double, 1> raw_potential_gradient(const Point<1> &, const Vector &values) const
-    {
-      return {{values[0]}};
-    }
-
     template <typename NT, typename Solution>
     void extract(std::array<NT, 1> &extractors, const Point<1> &x, const Solution &sol) const
     {
@@ -80,7 +74,6 @@ namespace
                           {"output_subdivisions", 1},
                           {"EoM_abs_tol", 1e-12},
                           {"EoM_max_iter", 100},
-                          {"EoM_smoothing_length", -1.},
                           {"grid", {{"x_grid", "0:0.02:1"}, {"y_grid", "0:1:1"}, {"z_grid", "0:1:1"}, {"refine", 0}}}}},
                         {"output", {{"verbosity", 0}, {"vtk", false}, {"hdf5", false}}}});
   }

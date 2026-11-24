@@ -1,6 +1,8 @@
 #pragma once
 
 #include "DiFfRG/common/math.hh"
+#include <DiFfRG/discretization/FV/face_state.hh>
+#include <DiFfRG/discretization/FV/stencil.hh>
 
 #include <DiFfRG/discretization/FV/reconstructor/advection/abstract_reconstructor.hh>
 #include <DiFfRG/discretization/FV/reconstructor/diffusion/corrected_weighted_least_squares_reconstructor.hh>
@@ -36,20 +38,9 @@ namespace DiFfRG
         template <int dim, typename NumberType, size_t n_components> struct BoundaryStencilData;
 
         using def::ReconstructionDerivativeData;
-
-        /**
-         * @brief The active cell across interior face @p face of @p cell. On an adapted 1D mesh the cell across a face
-         * may be refined; then this is its child at the shared face. (Faces with several active neighbours, which
-         * appear in 2D and 3D, are not supported.)
-         */
-        template <typename Iterator> Iterator active_face_neighbor(const Iterator &cell, const unsigned int face)
-        {
-          auto neighbor = cell->neighbor(face);
-          if constexpr (Iterator::AccessorType::dimension == 1)
-            while (neighbor->has_children())
-              neighbor = neighbor->child(1 - face);
-          return neighbor;
-        }
+        using FV::CellData;
+        using FV::CellStencilData;
+        using FV::FaceReconstructionState;
 
         template <int dim, typename NumberType, size_t n_components>
         using DiffusionFaceState = def::DiffusionFaceState<dim, NumberType, n_components>;
@@ -64,29 +55,6 @@ namespace DiFfRG
           static constexpr size_t physical_cell = 2;
           static constexpr size_t upper_inner = 3;
           static constexpr size_t upper_outer = 4;
-        };
-
-        template <int dim, typename NumberType, size_t n_components> struct FaceReconstructionState {
-          std::array<NumberType, n_components> u_minus{};
-          std::array<NumberType, n_components> u_plus{};
-          GradientType<dim, NumberType, n_components> center_grad_minus{};
-          GradientType<dim, NumberType, n_components> center_grad_plus{};
-          GradientType<dim, NumberType, n_components> face_grad_minus{};
-          GradientType<dim, NumberType, n_components> face_grad_plus{};
-          std::array<NumberType, n_components> diffusion_u_minus{};
-          std::array<NumberType, n_components> diffusion_u_plus{};
-          GradientType<dim, NumberType, n_components> diffusion_grad_minus{};
-          GradientType<dim, NumberType, n_components> diffusion_grad_plus{};
-          std::array<NumberType, n_components> diffusion_u{};
-          GradientType<dim, NumberType, n_components> diffusion_grad{};
-          /// Only 1D reconstructs third derivatives; in more dimensions they would be zeros (half the state in 2D),
-          /// so they are not stored.
-          struct NoThirdDerivatives {
-          };
-          using ThirdDerivatives =
-              std::conditional_t<dim == 1, ThirdDerivativeType<dim, NumberType, n_components>, NoThirdDerivatives>;
-          [[no_unique_address]] ThirdDerivatives third_derivatives_minus{};
-          [[no_unique_address]] ThirdDerivatives third_derivatives_plus{};
         };
 
         template <int dim, typename NumberType, size_t n_components>
@@ -110,54 +78,6 @@ namespace DiFfRG
           reversed.third_derivatives_plus = state.third_derivatives_minus;
           return reversed;
         }
-
-        template <int dim, typename NumberType, size_t n_components> struct CellData {
-          dealii::Point<dim> x;
-          std::array<NumberType, n_components> u;
-          std::array<dealii::types::global_dof_index, n_components> dof_indices;
-        };
-
-        template <int dim, size_t n_components> struct CellGeometryDofs {
-          dealii::Point<dim> x;
-          std::array<dealii::types::global_dof_index, n_components> dof_indices;
-        };
-
-        template <int dim, typename NumberType, size_t n_components> struct NeighborData {
-          static constexpr size_t n_faces = 2 * dim;
-          std::array<dealii::Point<dim>, n_faces> x;
-          std::array<std::array<NumberType, n_components>, n_faces> u;
-          std::array<std::array<dealii::types::global_dof_index, n_components>, n_faces> dof_indices;
-        };
-
-        template <int dim, size_t n_components> struct NeighborTopologyData {
-          static constexpr size_t n_faces = 2 * dim;
-          std::array<dealii::Point<dim>, n_faces> x;
-          std::array<std::array<dealii::types::global_dof_index, n_components>, n_faces> dof_indices;
-        };
-
-        template <int dim, typename NumberType, size_t n_components> struct CellStencilData {
-          static constexpr size_t n_faces = 2 * dim;
-          CellData<dim, NumberType, n_components> cell;
-          NeighborData<dim, NumberType, n_components> neighbors;
-          std::array<dealii::types::boundary_id, n_faces> boundary_ids;
-          std::array<dealii::Point<dim>, n_faces> face_centers;
-        };
-
-        template <int dim, typename NumberType, size_t n_components> struct SolutionReconstructionCache {
-          static constexpr size_t n_faces = 2 * dim;
-          std::vector<CellStencilData<dim, NumberType, n_components>> cell_stencils;
-          std::vector<std::array<FaceReconstructionState<dim, NumberType, n_components>, n_faces>> face_reconstructions;
-          std::vector<std::array<bool, n_faces>> face_reconstruction_valid;
-          bool topology_initialized = false;
-        };
-
-        template <int dim, size_t n_components> struct CellStencilTopologyData {
-          static constexpr size_t n_faces = 2 * dim;
-          CellGeometryDofs<dim, n_components> cell;
-          NeighborTopologyData<dim, n_components> neighbors;
-          std::array<dealii::types::boundary_id, n_faces> boundary_ids;
-          std::array<dealii::Point<dim>, n_faces> face_centers;
-        };
 
         template <int dim, typename NumberType, size_t n_components>
         std::array<NumberType, n_components>
@@ -197,25 +117,24 @@ namespace DiFfRG
           stencil.u = u_sorted;
         }
 
-        template <int dim, typename NumberType, size_t n_components>
-        FourPointStencil<dim, NumberType, n_components>
-        make_interior_third_derivative_stencil(const CellStencilData<dim, NumberType, n_components> &minus_stencil,
-                                               const CellStencilData<dim, NumberType, n_components> &plus_stencil,
-                                               const dealii::Point<dim> &x_q)
+        template <typename Stencil>
+        auto make_interior_third_derivative_stencil(const Stencil &minus_stencil, const Stencil &plus_stencil,
+                                                    const dealii::Point<Stencil::dimension> &x_q)
         {
+          constexpr int dim = Stencil::dimension;
+          constexpr size_t n_components = Stencil::components;
+          using NumberType = typename Stencil::scalar_type;
           static_assert(dim == 1, "Third-derivative FV stencils currently support only dim=1.");
 
-          const auto outer_face = [&](const CellStencilData<dim, NumberType, n_components> &stencil) {
-            return stencil.cell.x[0] < x_q[0] ? 0U : 1U;
-          };
+          const auto outer_face = [&](const Stencil &stencil) { return stencil.center()[0] < x_q[0] ? 0U : 1U; };
 
           FourPointStencil<dim, NumberType, n_components> result{};
           const auto minus_outer = outer_face(minus_stencil);
           const auto plus_outer = outer_face(plus_stencil);
-          result.x = {minus_stencil.neighbors.x[minus_outer], minus_stencil.cell.x, plus_stencil.cell.x,
-                      plus_stencil.neighbors.x[plus_outer]};
-          result.u = {minus_stencil.neighbors.u[minus_outer], minus_stencil.cell.u, plus_stencil.cell.u,
-                      plus_stencil.neighbors.u[plus_outer]};
+          result.x = {minus_stencil.neighbor_center(minus_outer), minus_stencil.center(), plus_stencil.center(),
+                      plus_stencil.neighbor_center(plus_outer)};
+          result.u = {minus_stencil.neighbor_values(minus_outer), minus_stencil.values(), plus_stencil.values(),
+                      plus_stencil.neighbor_values(plus_outer)};
           sort_four_point_stencil(result);
           return result;
         }
@@ -247,13 +166,13 @@ namespace DiFfRG
           return result;
         }
 
-        template <int dim, typename NumberType, size_t n_components>
-        DiffusionFaceState<dim, NumberType, n_components>
-        compute_diffusion_face_state(const CellStencilData<dim, NumberType, n_components> &minus_stencil,
-                                     const CellStencilData<dim, NumberType, n_components> &plus_stencil)
+        template <typename Stencil>
+        auto compute_diffusion_face_state(const Stencil &minus_stencil, const Stencil &plus_stencil)
         {
-          using DiffusionReconstructor = def::CorrectedWeightedLeastSquaresDiffusionReconstructor<dim, NumberType>;
-          return DiffusionReconstructor::template compute_face_state<n_components>(minus_stencil, plus_stencil);
+          using DiffusionReconstructor =
+              def::CorrectedWeightedLeastSquaresDiffusionReconstructor<Stencil::dimension,
+                                                                       typename Stencil::scalar_type>;
+          return DiffusionReconstructor::template compute_face_state<Stencil::components>(minus_stencil, plus_stencil);
         }
 
         template <int dim, typename NumberType, size_t n_components>
@@ -264,39 +183,24 @@ namespace DiFfRG
           return DiffusionReconstructor::template extract_derivatives<n_components>(state);
         }
 
-        template <int dim, typename NumberType, size_t n_components, typename VectorType>
-        void fill_cell_data_from_topology(const CellGeometryDofs<dim, n_components> &topology,
-                                          const VectorType &solution_global,
-                                          CellData<dim, NumberType, n_components> &data)
-        {
-          data.x = topology.x;
-          data.dof_indices = topology.dof_indices;
-          for (unsigned int i = 0; i < n_components; ++i)
-            data.u[i] = solution_global(topology.dof_indices[i]);
-        }
-
         /// The face state from the two side stencils. Without @p with_diffusion, the diffusion entries (and the 1D
         /// third derivatives, which only the diffusion flux reads) stay zero.
-        template <
-            def::HasReconstructor Reconstructor, bool with_diffusion = true, int dim, typename NumberType,
-            size_t n_components,
-            typename DiffusionReconstructor = def::CorrectedWeightedLeastSquaresDiffusionReconstructor<dim, NumberType>>
-        FaceReconstructionState<dim, NumberType, n_components>
-        compute_interior_face_reconstruction_state(const CellStencilData<dim, NumberType, n_components> &minus_stencil,
-                                                   const CellStencilData<dim, NumberType, n_components> &plus_stencil,
-                                                   const dealii::Point<dim> &x_q)
+        template <def::HasReconstructor Reconstructor, bool with_diffusion = true, typename Stencil,
+                  typename DiffusionReconstructor = def::CorrectedWeightedLeastSquaresDiffusionReconstructor<
+                      Stencil::dimension, typename Stencil::scalar_type>>
+        auto compute_interior_face_reconstruction_state(const Stencil &minus_stencil, const Stencil &plus_stencil,
+                                                        const dealii::Point<Stencil::dimension> &x_q)
         {
+          constexpr int dim = Stencil::dimension;
+          constexpr size_t n_components = Stencil::components;
+          using NumberType = typename Stencil::scalar_type;
           FaceReconstructionState<dim, NumberType, n_components> state{};
-          state.center_grad_minus = Reconstructor::template compute_gradient<n_components>(
-              minus_stencil.cell.x, minus_stencil.cell.u, minus_stencil.neighbors.x, minus_stencil.neighbors.u);
-          state.center_grad_plus = Reconstructor::template compute_gradient<n_components>(
-              plus_stencil.cell.x, plus_stencil.cell.u, plus_stencil.neighbors.x, plus_stencil.neighbors.u);
-          state.face_grad_minus = Reconstructor::template compute_gradient_at_point<n_components>(
-              minus_stencil.cell.x, x_q, minus_stencil.cell.u, minus_stencil.neighbors.x, minus_stencil.neighbors.u);
-          state.face_grad_plus = Reconstructor::template compute_gradient_at_point<n_components>(
-              plus_stencil.cell.x, x_q, plus_stencil.cell.u, plus_stencil.neighbors.x, plus_stencil.neighbors.u);
-          state.u_minus = reconstruct_u(minus_stencil.cell.u, minus_stencil.cell.x, x_q, state.center_grad_minus);
-          state.u_plus = reconstruct_u(plus_stencil.cell.u, plus_stencil.cell.x, x_q, state.center_grad_plus);
+          state.center_grad_minus = Reconstructor::template compute_gradient<n_components>(minus_stencil);
+          state.center_grad_plus = Reconstructor::template compute_gradient<n_components>(plus_stencil);
+          state.face_grad_minus = Reconstructor::template compute_gradient_at_point<n_components>(minus_stencil, x_q);
+          state.face_grad_plus = Reconstructor::template compute_gradient_at_point<n_components>(plus_stencil, x_q);
+          state.u_minus = reconstruct_u(minus_stencil.values(), minus_stencil.center(), x_q, state.center_grad_minus);
+          state.u_plus = reconstruct_u(plus_stencil.values(), plus_stencil.center(), x_q, state.center_grad_plus);
           if constexpr (!with_diffusion) return state;
           const auto diffusion_state =
               DiffusionReconstructor::template compute_face_state<n_components>(minus_stencil, plus_stencil);
@@ -317,19 +221,16 @@ namespace DiFfRG
           return state;
         }
 
-        template <def::HasReconstructor Reconstructor, int dim, typename NumberType, size_t n_components>
-        std::array<NumberType, n_components> reconstruct_u_derivative(
-            const std::array<autodiff::Real<1, NumberType>, n_components> &u_center, const dealii::Point<dim> &center,
-            const dealii::Point<dim> &x, const std::array<dealii::Point<dim>, 2 * dim> &x_n,
-            const std::array<std::array<autodiff::Real<1, NumberType>, n_components>, 2 * dim> &u_n)
+        template <def::HasReconstructor Reconstructor, typename Stencil>
+        auto reconstruct_u_derivative(const Stencil &stencil, const dealii::Point<Stencil::dimension> &x)
         {
-          const auto u_grad_deriv =
-              Reconstructor::template compute_gradient_derivative<n_components>(center, u_center, x_n, u_n);
-          std::array<NumberType, n_components> result;
-          for (size_t c = 0; c < n_components; ++c) {
-            result[c] = derivative(u_center[c]);
-            result[c] += dealii::scalar_product(u_grad_deriv[c], x - center);
-          }
+          using Scalar = std::remove_cvref_t<decltype(autodiff::derivative(stencil.values()[0]))>;
+          constexpr size_t n_components = Stencil::components;
+          const auto gradient = Reconstructor::template compute_gradient_derivative<n_components>(stencil);
+          std::array<Scalar, n_components> result{};
+          for (size_t c = 0; c < n_components; ++c)
+            result[c] =
+                autodiff::derivative(stencil.values()[c]) + dealii::scalar_product(gradient[c], x - stencil.center());
           return result;
         }
 
@@ -454,12 +355,12 @@ namespace DiFfRG
           result.cell.x = boundary_stencil.x[center_index];
           result.cell.u = boundary_stencil.u[center_index];
           result.cell.dof_indices = boundary_stencil.dof_indices[center_index];
-          result.neighbors.x[0] = boundary_stencil.x[left_index];
-          result.neighbors.x[1] = boundary_stencil.x[right_index];
-          result.neighbors.u[0] = boundary_stencil.u[left_index];
-          result.neighbors.u[1] = boundary_stencil.u[right_index];
-          result.neighbors.dof_indices[0] = boundary_stencil.dof_indices[left_index];
-          result.neighbors.dof_indices[1] = boundary_stencil.dof_indices[right_index];
+          result.neighbor_x[0] = boundary_stencil.x[left_index];
+          result.neighbor_x[1] = boundary_stencil.x[right_index];
+          result.neighbor_u[0] = boundary_stencil.u[left_index];
+          result.neighbor_u[1] = boundary_stencil.u[right_index];
+          result.neighbor_dof_indices[0] = boundary_stencil.dof_indices[left_index];
+          result.neighbor_dof_indices[1] = boundary_stencil.dof_indices[right_index];
           return result;
         }
 
@@ -597,9 +498,9 @@ namespace DiFfRG
         {
           CellStencilData<dim, NumberType, n_components> result = physical_stencil;
           const unsigned int normal_face = boundary_stencil.cell_face;
-          result.neighbors.x[normal_face] = boundary_stencil.x[boundary_stencil.ghost_center];
-          result.neighbors.u[normal_face] = boundary_stencil.u[boundary_stencil.ghost_center];
-          result.neighbors.dof_indices[normal_face] = boundary_stencil.dof_indices[boundary_stencil.ghost_center];
+          result.neighbor_x[normal_face] = boundary_stencil.x[boundary_stencil.ghost_center];
+          result.neighbor_u[normal_face] = boundary_stencil.u[boundary_stencil.ghost_center];
+          result.neighbor_dof_indices[normal_face] = boundary_stencil.dof_indices[boundary_stencil.ghost_center];
           return result;
         }
 
@@ -650,19 +551,19 @@ namespace DiFfRG
           const size_t normal_outer =
               boundary_stencil.lower_boundary ? boundary_stencil.ghost_left : boundary_stencil.ghost_right;
           if (boundary_stencil.lower_boundary) {
-            result.neighbors.x[normal_minus] = boundary_stencil.x[normal_outer];
-            result.neighbors.u[normal_minus] = boundary_stencil.u[normal_outer];
-            result.neighbors.dof_indices[normal_minus] = boundary_stencil.dof_indices[normal_outer];
-            result.neighbors.x[normal_plus] = boundary_stencil.x[physical_cell];
-            result.neighbors.u[normal_plus] = boundary_stencil.u[physical_cell];
-            result.neighbors.dof_indices[normal_plus] = boundary_stencil.dof_indices[physical_cell];
+            result.neighbor_x[normal_minus] = boundary_stencil.x[normal_outer];
+            result.neighbor_u[normal_minus] = boundary_stencil.u[normal_outer];
+            result.neighbor_dof_indices[normal_minus] = boundary_stencil.dof_indices[normal_outer];
+            result.neighbor_x[normal_plus] = boundary_stencil.x[physical_cell];
+            result.neighbor_u[normal_plus] = boundary_stencil.u[physical_cell];
+            result.neighbor_dof_indices[normal_plus] = boundary_stencil.dof_indices[physical_cell];
           } else {
-            result.neighbors.x[normal_minus] = boundary_stencil.x[physical_cell];
-            result.neighbors.u[normal_minus] = boundary_stencil.u[physical_cell];
-            result.neighbors.dof_indices[normal_minus] = boundary_stencil.dof_indices[physical_cell];
-            result.neighbors.x[normal_plus] = boundary_stencil.x[normal_outer];
-            result.neighbors.u[normal_plus] = boundary_stencil.u[normal_outer];
-            result.neighbors.dof_indices[normal_plus] = boundary_stencil.dof_indices[normal_outer];
+            result.neighbor_x[normal_minus] = boundary_stencil.x[physical_cell];
+            result.neighbor_u[normal_minus] = boundary_stencil.u[physical_cell];
+            result.neighbor_dof_indices[normal_minus] = boundary_stencil.dof_indices[physical_cell];
+            result.neighbor_x[normal_plus] = boundary_stencil.x[normal_outer];
+            result.neighbor_u[normal_plus] = boundary_stencil.u[normal_outer];
+            result.neighbor_dof_indices[normal_plus] = boundary_stencil.dof_indices[normal_outer];
           }
 
           const auto set_model_tangential_neighbor = [&](const unsigned int result_face) {
@@ -676,9 +577,9 @@ namespace DiFfRG
               neighbor_stencil = make_composed_corner_boundary_stencil(boundary_reconstruction_stencil, result_face,
                                                                        physical_stencil, model);
             }
-            result.neighbors.x[result_face] = neighbor_stencil.x[neighbor_stencil.ghost_center];
-            result.neighbors.u[result_face] = neighbor_stencil.u[neighbor_stencil.ghost_center];
-            result.neighbors.dof_indices[result_face] = neighbor_stencil.dof_indices[neighbor_stencil.ghost_center];
+            result.neighbor_x[result_face] = neighbor_stencil.x[neighbor_stencil.ghost_center];
+            result.neighbor_u[result_face] = neighbor_stencil.u[neighbor_stencil.ghost_center];
+            result.neighbor_dof_indices[result_face] = neighbor_stencil.dof_indices[neighbor_stencil.ghost_center];
           };
 
           set_model_tangential_neighbor(tangential_minus);
@@ -698,9 +599,9 @@ namespace DiFfRG
                       dealii::ExcMessage(
                           "KT boundary stencil was rejected while populating a boundary-adjacent cell stencil."));
 
-          cell_stencil.neighbors.x[face_index] = boundary_stencil.x[boundary_stencil.ghost_center];
-          cell_stencil.neighbors.u[face_index] = boundary_stencil.u[boundary_stencil.ghost_center];
-          cell_stencil.neighbors.dof_indices[face_index] = boundary_stencil.dof_indices[boundary_stencil.ghost_center];
+          cell_stencil.neighbor_x[face_index] = boundary_stencil.x[boundary_stencil.ghost_center];
+          cell_stencil.neighbor_u[face_index] = boundary_stencil.u[boundary_stencil.ghost_center];
+          cell_stencil.neighbor_dof_indices[face_index] = boundary_stencil.dof_indices[boundary_stencil.ghost_center];
         }
 
         template <typename Model, typename NumberType, size_t n_components>
@@ -717,9 +618,9 @@ namespace DiFfRG
                       dealii::ExcMessage(
                           "KT boundary stencil was rejected while populating a boundary-adjacent cell stencil."));
 
-          cell_stencil.neighbors.x[face_index] = boundary_stencil.x[boundary_stencil.ghost_center];
-          cell_stencil.neighbors.u[face_index] = boundary_stencil.u[boundary_stencil.ghost_center];
-          cell_stencil.neighbors.dof_indices[face_index] = boundary_stencil.dof_indices[boundary_stencil.ghost_center];
+          cell_stencil.neighbor_x[face_index] = boundary_stencil.x[boundary_stencil.ghost_center];
+          cell_stencil.neighbor_u[face_index] = boundary_stencil.u[boundary_stencil.ghost_center];
+          cell_stencil.neighbor_dof_indices[face_index] = boundary_stencil.dof_indices[boundary_stencil.ghost_center];
         }
 
         template <typename Model, typename NumberType, size_t n_components>
@@ -847,31 +748,19 @@ namespace DiFfRG
         }
 
         template <int dim, typename NumberType, size_t n_components>
-        NeighborData<dim, autodiff::Real<1, NumberType>, n_components>
-        make_tagged_neighbors(const NeighborData<dim, NumberType, n_components> &neighbor_data,
-                              dealii::types::global_dof_index dof_j)
-        {
-          using AD = autodiff::Real<1, NumberType>;
-          NeighborData<dim, AD, n_components> result;
-          result.x = neighbor_data.x;
-          result.dof_indices = neighbor_data.dof_indices;
-          for (size_t face = 0; face < NeighborData<dim, NumberType, n_components>::n_faces; ++face) {
-            for (size_t c = 0; c < n_components; ++c) {
-              result.u[face][c] = AD(neighbor_data.u[face][c]);
-              if (neighbor_data.dof_indices[face][c] == dof_j) seed(result.u[face][c]);
-            }
-          }
-          return result;
-        }
-
-        template <int dim, typename NumberType, size_t n_components>
         CellStencilData<dim, autodiff::Real<1, NumberType>, n_components>
         tag_cell_stencil_dofs(const CellStencilData<dim, NumberType, n_components> &cell_stencil,
                               dealii::types::global_dof_index dof_j)
         {
           CellStencilData<dim, autodiff::Real<1, NumberType>, n_components> result;
           result.cell = tag_cell_dofs(cell_stencil.cell, dof_j);
-          result.neighbors = make_tagged_neighbors(cell_stencil.neighbors, dof_j);
+          result.neighbor_x = cell_stencil.neighbor_x;
+          result.neighbor_dof_indices = cell_stencil.neighbor_dof_indices;
+          for (size_t f = 0; f < 2 * dim; ++f)
+            for (size_t c = 0; c < n_components; ++c) {
+              result.neighbor_u[f][c] = cell_stencil.neighbor_u[f][c];
+              if (cell_stencil.neighbor_dof_indices[f][c] == dof_j) seed(result.neighbor_u[f][c]);
+            }
           result.boundary_ids = cell_stencil.boundary_ids;
           result.face_centers = cell_stencil.face_centers;
           return result;

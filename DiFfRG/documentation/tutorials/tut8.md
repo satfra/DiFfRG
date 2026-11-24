@@ -187,8 +187,7 @@ template <int dim_, typename Vector> std::array<double, 1> EoM(const Point<dim_>
 
 The extractors, and therefore the flow, are evaluated there. `readouts_multiple` writes two tables: `data.csv` at
 the physical minimum and `data_chiral.csv` at the minimum of $V$ alone, the chiral-limit value of the condensate
-for the same flow. `raw_potential_gradient` tells the potential output to reconstruct $V$ without the $-c\sigma$
-term.
+for the same flow.
 
 $\bar c$ depends on $Z_\phi$, which is a Variable, but the EoM only sees the FE functions; the model caches $\bar c$
 in `dt_variables`. That makes it history the snapshot does not hold, so `save_state` and `load_state` carry it

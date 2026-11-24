@@ -16,7 +16,9 @@ namespace DiFfRG
    *
    * When an interpolator is passed as an argument to an integrator, the kernel receives this handle instead of the
    * interpolator: the same index(), at() and operator(), with the data in the precision ctype the kernel computes in.
-   * Kernels should therefore take interpolator arguments as `const auto &`.
+   * Kernels should therefore take interpolator arguments as `const kernel_handle_t<T, ctype> &`, which is that type
+   * by definition. `const auto &` deduces the same type, but it makes the kernel an abbreviated function template,
+   * which nvcc 12.8 cannot compile in a generated translation unit; the code generator writes the named form.
    *
    * A class deriving from an interpolator inherits handle(). If it changes what the interpolator returns, it has to
    * override handle() as well, or kernels bypass the change.

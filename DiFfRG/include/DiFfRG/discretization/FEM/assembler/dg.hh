@@ -537,7 +537,7 @@ namespace DiFfRG
         face_normals.resize(face_batch[0].size());
 
         const auto store = [&](Batch &batch, const size_t first, const auto &fe_v, auto &values, auto &gradients,
-                               auto &hessians, const double width) {
+                               auto &hessians) {
           fe_v.get_function_values(solution_global, values);
           if constexpr (reads_derivatives) fe_v.get_function_gradients(solution_global, gradients);
           if constexpr (reads_hessians) fe_v.get_function_hessians(solution_global, hessians);
@@ -554,7 +554,6 @@ namespace DiFfRG
             }
             for (uint d = 0; d < dim; ++d)
               batch.coordinate(d, i) = fe_v.quadrature_point(q)[d];
-            batch.width(i) = width;
           }
         };
 
@@ -562,8 +561,7 @@ namespace DiFfRG
           auto &s = scratch->local();
           for (size_t k = r.begin(); k != r.end(); ++k) {
             s.fe_values.reinit(cells[k]);
-            store(cell_batch, k * n_q, s.fe_values, s.values, s.gradients, s.hessians,
-                  DiFfRG::internal::cell_width(cells[k]));
+            store(cell_batch, k * n_q, s.fe_values, s.values, s.gradients, s.hessians);
           }
         });
         tbb::parallel_for(tbb::blocked_range<size_t>(0, topology.boundary_faces.size()),
@@ -573,7 +571,7 @@ namespace DiFfRG
                               const auto &[cell, face_no] = topology.boundary_faces[f];
                               s.fe_face_values.reinit(cell, face_no);
                               store(boundary_batch, f * n_q_face, s.fe_face_values, s.face_values, s.face_gradients,
-                                    s.face_hessians, DiFfRG::internal::cell_width(cell));
+                                    s.face_hessians);
                               for (uint q = 0; q < n_q_face; ++q)
                                 boundary_normals[f * n_q_face + q] = s.fe_face_values.normal_vector(q);
                             }
@@ -585,7 +583,7 @@ namespace DiFfRG
                 const auto &fe_iv = reinit_interface(s, f);
                 for (uint side = 0; side < 2; ++side)
                   store(face_batch[side], f * n_q_face, fe_iv.get_fe_face_values(side), s.face_values, s.face_gradients,
-                        s.face_hessians, DiFfRG::internal::cell_width(topology.faces[f].cell[side]));
+                        s.face_hessians);
                 for (uint q = 0; q < n_q_face; ++q)
                   face_normals[f * n_q_face + q] = fe_iv.normal_vector(q);
               }

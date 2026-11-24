@@ -47,8 +47,8 @@ namespace DiFfRG
         dealii::Tensor<2, dim> normal_matrix{};
         std::array<dealii::Tensor<1, dim, NumberType>, n_components> rhs{};
 
-        for (size_t face = 0; face < stencil.neighbors.x.size(); ++face) {
-          const auto dx = stencil.neighbors.x[face] - stencil.cell.x;
+        for (size_t face = 0; face < CellStencil::n_faces; ++face) {
+          const auto dx = stencil.neighbor_center(face) - stencil.center();
           double distance2 = 0.0;
           for (size_t d = 0; d < dim; ++d)
             distance2 += dx[d] * dx[d];
@@ -60,7 +60,7 @@ namespace DiFfRG
               normal_matrix[d][e] += weight * dx[d] * dx[e];
 
           for (size_t c = 0; c < n_components; ++c) {
-            const NumberType du = stencil.neighbors.u[face][c] - stencil.cell.u[c];
+            const NumberType du = stencil.neighbor_values(face)[c] - stencil.values()[c];
             for (size_t d = 0; d < dim; ++d)
               rhs[c][d] += NumberType(weight * dx[d]) * du;
           }
@@ -104,11 +104,11 @@ namespace DiFfRG
         DiffusionFaceState<dim, NumberType, n_components> state{};
         const auto grad_minus = compute_cell_gradient<n_components>(minus_stencil);
         const auto grad_plus = compute_cell_gradient<n_components>(plus_stencil);
-        const auto d = plus_stencil.cell.x - minus_stencil.cell.x;
+        const auto d = plus_stencil.center() - minus_stencil.center();
 
         for (size_t c = 0; c < n_components; ++c) {
-          state.u_minus[c] = minus_stencil.cell.u[c];
-          state.u_plus[c] = plus_stencil.cell.u[c];
+          state.u_minus[c] = minus_stencil.values()[c];
+          state.u_plus[c] = plus_stencil.values()[c];
         }
         state.grad_minus = correct_gradient<n_components>(grad_minus, state.u_minus, state.u_plus, d);
         state.grad_plus = correct_gradient<n_components>(grad_plus, state.u_minus, state.u_plus, d);

@@ -68,7 +68,6 @@
  * | dt_variables | \f$D_a = -\partial_t v_a\f$ | all |
  * | EoM, EoM_postprocess | the EoM point, where extractors and readouts are evaluated | all PDE assemblers |
  * | extract | \f$e_b\f$ | all PDE assemblers |
- * | raw_potential_gradient | gradient of the potential reconstructed for extract, readouts | all PDE assemblers |
  * | readouts_multiple, readouts | output at the EoM point(s) | all |
  * | face_indicator, cell_indicator | mesh refinement indicators | DG, LDG: faces, cells; CG, KT (1D): cells |
  * | affine_constraints | constraints on individual dofs | all PDE assemblers |
@@ -84,7 +83,6 @@
  * | `use_derivatives` | no term reads \f$\partial u\f$ (nor \f$\partial^2 u\f$). CG, DG: neither gathered nor differentiated. KT gathers the gradient regardless. |
  * | `use_hessians` | no term reads \f$\partial^2 u\f$. CG, DG: not gathered nor differentiated. KT: source() gets no `"fe_hessians"` (otherwise the diagonal stencil curvature). |
  * | `use_diffusion_flux` | KT: diffusion_flux() is zero; its reconstruction, evaluation and jacobian are skipped. |
- * | `use_potential` | extract() and readouts() do not read the reconstructed potential: no global solve per residual and jacobian, and per frame only if the output writes the potential. |
  *
  * ### Building blocks in def::
  * A model inherits, besides AbstractModel, one class of each row it needs (pass the model as template argument
@@ -127,8 +125,7 @@ namespace DiFfRG
     inline constexpr int no_wave_speed = -1;
 
     /// Return type of AbstractModel's cell_indicator and face_indicator, by which HAdaptivity tells them apart.
-    struct DefaultIndicator {
-    };
+    struct DefaultIndicator {};
 
     /**
      * @brief Base class of every model: declares all hooks an assembler may call, with defaults.
@@ -186,9 +183,6 @@ namespace DiFfRG
       static constexpr bool use_hessians = true;
       /// KT: diffusion_flux() is not identically zero.
       static constexpr bool use_diffusion_flux = true;
-      /// extract() or readouts() read the reconstructed potential (`"potential"`, `"potential_gradient"`,
-      /// `"potential_hessian"`).
-      static constexpr bool use_potential = true;
       //@}
 
       /**
@@ -258,7 +252,7 @@ namespace DiFfRG
        * @param F_i the result, one \f$d\f$-vector per FE function.
        * @param x the point in field space.
        * @param sol named tuple: `"fe_functions"`, `"fe_derivatives"`, `"fe_third_derivatives"` (\f$\partial_x^3
-       * u_i\f$, 1D only; zero otherwise), `"extractors"`, `"variables"`, `"cell_width"`. Extractors are frozen, as
+       * u_i\f$, 1D only; zero otherwise), `"extractors"`, `"variables"`. Extractors are frozen, as
        * for flux().
        */
       template <int dim, typename NumberType, typename Solutions, size_t n_fe_functions>
@@ -277,11 +271,10 @@ namespace DiFfRG
        * @param sol named tuple; its entries depend on the assembler:
        * - CG, DG: `"fe_functions"` \f$u_i\f$, `"fe_derivatives"` \f$\partial u_i\f$ (unless
        *   `use_derivatives = false`), `"fe_hessians"` \f$\partial^2 u_i\f$ (unless `use_hessians = false`),
-       *   `"extractors"` \f$e_b\f$, `"variables"` \f$v_a\f$, `"cell_width"`.
-       * - LDG main level: `"fe_functions"`, `"LDG1"`, ... (the LDG levels), `"extractors"`, `"variables"`,
-       *   `"cell_width"`.
+       *   `"extractors"` \f$e_b\f$, `"variables"` \f$v_a\f$.
+       * - LDG main level: `"fe_functions"`, `"LDG1"`, ... (the LDG levels), `"extractors"`, `"variables"`.
        * - KT: `"fe_functions"`, `"fe_derivatives"` (the limited reconstructed gradient), `"fe_hessians"` (the diagonal
-       *   stencil curvature; unless `use_hessians = false`), `"extractors"`, `"variables"`, `"cell_width"`.
+       *   stencil curvature; unless `use_hessians = false`), `"extractors"`, `"variables"`.
        *
        * The same tuple is passed to flux() (on KT faces without hessians).
        */
@@ -305,7 +298,7 @@ namespace DiFfRG
        * component c, direction d, point i. Compute only what `out.requested(Term::...)` asks for; all columns are
        * zero on entry.
        * @param batch a PointBatch: `values(c)`, `derivatives(c, d)`, `hessians(c, d1, d2)`, `coordinates(d)`,
-       * `extractors()`, `variables()`, `x(i)`, `cell_width(i)`, `size()`. LDG adds `ldg_values(k, c)`, KT diffusion
+       * `extractors()`, `variables()`, `x(i)`, `size()`. LDG adds `ldg_values(k, c)`, KT diffusion
        * traces `third_derivatives(c, d0, d1, d2)`. Inputs the assembler does not gather do not compile; test with
        * `if constexpr (Batch::has_derivatives)` / `Batch::has_hessians`.
        *
@@ -479,30 +472,13 @@ namespace DiFfRG
        * @param result to be filled with \f$e_b\f$, one entry per extractor.
        * @param x the extractor point: the EoM point, or extractor_point() if the model defines it.
        * @param sol named tuple: `"fe_functions"`, `"fe_derivatives"`, `"fe_hessians"`, `"extractors"` (a placeholder,
-       * do not read), `"variables"`, and the reconstructed scalar potential `"potential"`, `"potential_gradient"`,
-       * `"potential_hessian"` (see raw_potential_gradient(); unusable if `use_potential = false`). LDG
-       * adds `"LDG1"`, ... after `"fe_functions"`. Under def::AD the extractor jacobian is the AD of this function.
+       * do not read), and `"variables"`. LDG adds `"LDG1"`, ... after `"fe_functions"`. Under def::AD the
+       * extractor jacobian is the AD of this function.
        */
       template <int dim, typename Vector, typename Solutions>
       void extract([[maybe_unused]] Vector &result, [[maybe_unused]] const Point<dim> &x,
                    [[maybe_unused]] const Solutions &sol) const
       {
-      }
-
-      /**
-       * @brief The gradient \f$\nabla_x U\f$ of the scalar potential \f$U(x)\f$ that is reconstructed for extract()
-       * and readouts(). Default: the first `dim` FE functions (missing ones are zero).
-       *
-       * Kept separate from EoM(), which may contain terms (e.g. explicit symmetry breaking) that are not part of
-       * the potential.
-       */
-      template <int dim, typename Vector>
-      std::array<double, dim> raw_potential_gradient([[maybe_unused]] const Point<dim> &x, const Vector &u) const
-      {
-        std::array<double, dim> gradient{};
-        for (uint d = 0; d < dim && d < u.size(); ++d)
-          gradient[d] = u[d];
-        return gradient;
       }
 
       /**

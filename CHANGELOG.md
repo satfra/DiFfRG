@@ -147,12 +147,11 @@
 
 ### Added
 
-- Model traits `use_derivatives`, `use_hessians`, `use_diffusion_flux`, `use_potential`: `static constexpr bool`
+- Model traits `use_derivatives`, `use_hessians`, `use_diffusion_flux`: `static constexpr bool`
   members of `AbstractModel`, all true; a model declares one again with false to skip work it does not need.
   `use_diffusion_flux = false` makes KT skip the diffusion reconstruction, evaluation and jacobian.
-  **Breaking:** they replace `extract_uses_potential` and `readouts_use_potential` (now the single
-  `use_potential`) and KT's opt-in `source_uses_hessians`: a KT source now gets `"fe_hessians"` unless the model
-  sets `use_hessians = false`.
+  **Breaking:** KT's opt-in `source_uses_hessians` is replaced: a KT source now gets `"fe_hessians"` unless the
+  model sets `use_hessians = false`.
 - Flow snapshots and restarts. `/timestepping/snapshots/k` (or `/t`) makes a run write its complete
   state, including the full parameter tree, at those RG scales to `<run>_snapshot_<nnn>.h5`, and
   `--restart <file>` makes a later run continue from such a snapshot instead of starting at Λ. A

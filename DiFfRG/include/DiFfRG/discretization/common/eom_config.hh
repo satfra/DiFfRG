@@ -3,25 +3,25 @@
 #include <DiFfRG/common/config_tree.hh>
 
 #include <string>
+#include <vector>
 
 namespace DiFfRG::Config
 {
   // clang-format off
   /**
-   * @brief Parameters of the EoM search (get_EoM_point_with_potential) and of the raw-potential reconstruction
-   * (reconstruct_raw_potential).
+   * @brief Parameters of the EoM search (get_EoM_result) and its root-local vector-field Hessian
    *
    * | Key                                                        | Type   | Default | Meaning |
    * |------------------------------------------------------------|--------|---------|---------|
-   * | `/discretization/EoM_abs_tol`                              | double | 1e-12   | gradient tolerance of the minimum search; at least \f$100\,\epsilon_{\rm machine}\f$ is used |
-   * | `/discretization/EoM_max_iter`                             | uint   | 100     | Newton steps per seed of the minimum search; 0: no search, the EoM point is the mesh vertex with the smallest \f$\ell^1\f$ norm |
-   * | `/discretization/EoM_smoothing_length`                     | double | -1      | smoothing length \f$\ell\f$ of the potential reconstructions; -1: twice the smallest cell width normal to a face; otherwise a field-space length \f$\ge 0\f$ |
-   * | `/discretization/EoM_bound_tolerance`                      | double | 1e-12   | distance (unit-cell coordinates) from a cell face below which a search coordinate is held at the face |
+   * | `/discretization/EoM_abs_tol`                              | double | 1e-12   | componentwise EoM tolerance of the constrained root search; at least \f$100\,\epsilon_{\rm machine}\f$ is used |
+   * | `/discretization/EoM_max_iter`                             | uint   | 100     | Newton steps per seed; 0: no search, return the mesh vertex with the smallest \f$\ell^1\f$ norm |
+   * | `/discretization/EoM_patch_order`                          | uint   | 0       | FV local refinement: 0 off, 2 quadratic, 3 cubic; lowers degree on rank-deficient patches |
+   * | `/discretization/EoM_patch_radius`                         | double | 7       | positive patch radius in local cell widths |
+   * | `/discretization/EoM_patch_direction`                      | array  | []      | empty: upper side in every coordinate; nonzero vector: projected half-plane; zero vector: centred |
+   * | `/discretization/EoM_patch_skip_layers`                    | uint   | 1       | exclusion buffer in each coordinate for the default upper patch, or projected widths for an explicit direction |
+   * | `/discretization/EoM_patch_parity`                         | array  | []      | one row per state component, one entry per coordinate: -1 odd, +1 even about x_d=0, 0 unrestricted |
    * | `/discretization/EoM_armijo_coefficient`                   | double | 1e-4    | sufficient-decrease coefficient of the line search; in (0, 1) |
    * | `/discretization/EoM_max_backtracks`                       | uint   | 20      | maximum step halvings of the line search; > 0 |
-   * | `/discretization/raw_potential_order`                      | uint   | 2       | polynomial order of the raw potential, 2 or 3 |
-   * | `/discretization/raw_potential_recover_mass_hessian`       | bool   | false   | DG0/FV only: recover a continuous Hessian field for the masses |
-   * | `/discretization/raw_potential_mass_hessian_jump_threshold`| double | -1      | with the above: relative Hessian jump across a face above which the face is treated as a kink and one-sided values are used near it; -1 disables |
    *
    * The constructors call validate(), which throws std::invalid_argument for values outside these ranges.
    */
@@ -29,19 +29,13 @@ namespace DiFfRG::Config
   struct EoMConfig {
     inline static constexpr double default_abs_tol = 1e-12;
     inline static constexpr unsigned int default_max_iter = 100;
-    inline static constexpr double default_smoothing_length = -1.;
-    inline static constexpr double default_bound_tolerance = 1e-12;
     inline static constexpr double default_armijo_coefficient = 1e-4;
     inline static constexpr unsigned int default_max_backtracks = 20;
-    inline static constexpr unsigned int default_raw_potential_order = 2;
-    inline static constexpr bool default_raw_potential_recover_mass_hessian = false;
-    inline static constexpr double default_raw_potential_mass_hessian_jump_threshold = -1.;
 
     /// All defaults.
     EoMConfig() = default;
-    /// The search parameters given directly; the raw-potential parameters at their defaults.
-    EoMConfig(double abs_tol, unsigned int max_iter, double smoothing_length,
-              double bound_tolerance = default_bound_tolerance, double armijo_coefficient = default_armijo_coefficient,
+    /// Search parameters given directly.
+    EoMConfig(double abs_tol, unsigned int max_iter, double armijo_coefficient = default_armijo_coefficient,
               unsigned int max_backtracks = default_max_backtracks);
     /// Read all keys of the table above.
     explicit EoMConfig(const ConfigTree &config);
@@ -53,12 +47,17 @@ namespace DiFfRG::Config
 
     double abs_tol = default_abs_tol;
     unsigned int max_iter = default_max_iter;
-    double smoothing_length = default_smoothing_length;
-    double bound_tolerance = default_bound_tolerance;
     double armijo_coefficient = default_armijo_coefficient;
     unsigned int max_backtracks = default_max_backtracks;
-    unsigned int raw_potential_order = default_raw_potential_order;
-    bool raw_potential_recover_mass_hessian = default_raw_potential_recover_mass_hessian;
-    double raw_potential_mass_hessian_jump_threshold = default_raw_potential_mass_hessian_jump_threshold;
+    /// Optional FV polynomial refinement: 0 off, 2 quadratic, 3 cubic, with rank-based order reduction.
+    unsigned int patch_order = 0;
+    /// Patch radius in local cell widths, chosen for upper-side cubic fits in 1D-3D away from domain edges.
+    double patch_radius = 7.;
+    /// Empty: upper side in every coordinate. Nonzero vector: projected half-plane; zero vector: centred.
+    std::vector<double> patch_direction;
+    /// Buffer in each coordinate for the default patch, or projected widths for an explicit direction.
+    unsigned int patch_skip_layers = 1;
+    /// Per state component and coordinate about x_d=0: -1 odd, +1 even, 0 unrestricted. Empty: no parity.
+    std::vector<std::vector<int>> patch_parity;
   };
 } // namespace DiFfRG::Config

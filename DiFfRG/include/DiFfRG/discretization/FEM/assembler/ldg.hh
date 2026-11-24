@@ -136,17 +136,14 @@ namespace DiFfRG
       template <typename... T> auto fe_more_conv(std::tuple<T &...> &t) const
       {
         if constexpr (stencil == 2)
-          return named_tuple<std::tuple<T &...>,
-                             StringSet<"fe_functions", "LDG1", "fe_derivatives", "fe_hessians", "extractors",
-                                       "variables", "potential", "potential_gradient", "potential_hessian">>(t);
+          return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "LDG1", "fe_derivatives", "fe_hessians",
+                                                           "extractors", "variables">>(t);
         else if constexpr (stencil == 3)
-          return named_tuple<std::tuple<T &...>,
-                             StringSet<"fe_functions", "LDG1", "LDG2", "fe_derivatives", "fe_hessians", "extractors",
-                                       "variables", "potential", "potential_gradient", "potential_hessian">>(t);
+          return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "LDG1", "LDG2", "fe_derivatives",
+                                                           "fe_hessians", "extractors", "variables">>(t);
         else if constexpr (stencil == 4)
           return named_tuple<std::tuple<T &...>, StringSet<"fe_functions", "LDG1", "LDG2", "LDG3", "fe_derivatives",
-                                                           "fe_hessians", "extractors", "variables", "potential",
-                                                           "potential_gradient", "potential_hessian">>(t);
+                                                           "fe_hessians", "extractors", "variables">>(t);
         else
           throw std::runtime_error("LDG supports 2 to 4 FE subsystems, i.e. 1 to 3 levels.");
       }
@@ -517,8 +514,7 @@ namespace DiFfRG
       /// \f$\alpha\, \partial m/\partial(\partial_t u) + \beta\, \partial m / \partial u\f$, contracted with the shape
       /// functions; see AbstractAssembler::jacobian_mass.
       virtual void jacobian_mass(BlockSparseMatrix<NumberType> &jacobian, const VectorType &solution,
-                                 const VectorType &solution_dot, NumberType alpha = 1.,
-                                 NumberType beta = 1.) override
+                                 const VectorType &solution_dot, NumberType alpha = 1., NumberType beta = 1.) override
       {
         const auto state = this->constrained(solution, solution_dot);
         const VectorType &solution_global = state.u(), &solution_global_dot = state.u_dot();
@@ -542,8 +538,8 @@ namespace DiFfRG
        * @param beta The weight of \f$\partial m/\partial u\f$.
        * @param variables The variables \f$v\f$, if any.
        */
-      virtual void jacobian(BlockSparseMatrix<NumberType> &jacobian, const VectorType &solution,
-                            NumberType weight, const VectorType &solution_dot, NumberType alpha, NumberType beta,
+      virtual void jacobian(BlockSparseMatrix<NumberType> &jacobian, const VectorType &solution, NumberType weight,
+                            const VectorType &solution_dot, NumberType alpha, NumberType beta,
                             const VectorType &variables = VectorType()) override
       {
         const DiFfRG::internal::LocalVariables<VectorType> local_variables(variables);
@@ -819,11 +815,10 @@ namespace DiFfRG
         boundary_normals.resize(boundary_b.size());
         face_normals.resize(faces_b[0].size());
 
-        const auto geometry = [](Batch &batch, const size_t first, const auto &fev, const double width) {
+        const auto geometry = [](Batch &batch, const size_t first, const auto &fev) {
           for (const auto &q : fev.quadrature_point_indices()) {
             for (uint d = 0; d < dim; ++d)
               batch.coordinate(d, first + q) = fev.quadrature_point(q)[d];
-            batch.width(first + q) = width;
           }
         };
         tbb::parallel_for(tbb::blocked_range<size_t>(0, cells[0].size()), [&](const tbb::blocked_range<size_t> &r) {
@@ -831,7 +826,7 @@ namespace DiFfRG
           for (size_t k = r.begin(); k != r.end(); ++k) {
             for (uint l = 0; l < n_levels; ++l)
               s.fe_v[l]->reinit(cells[l][k]);
-            geometry(cells_b, k * n_q, *s.fe_v[0], DiFfRG::internal::cell_width(cells[0][k]));
+            geometry(cells_b, k * n_q, *s.fe_v[0]);
             store(
                 cells_b, k * n_q, [&](const uint l) -> const FEValuesBase<dim> & { return *s.fe_v[l]; },
                 [&](const uint l) -> auto & { return s.values[l]; });
@@ -845,7 +840,7 @@ namespace DiFfRG
                 for (uint l = 0; l < n_levels; ++l)
                   s.fe_fv[l]->reinit(DiFfRG::internal::on(*dof_handler_list[l], cell),
                                      topology.boundary_faces[f].second);
-                geometry(boundary_b, f * n_q_face, *s.fe_fv[0], DiFfRG::internal::cell_width(cell));
+                geometry(boundary_b, f * n_q_face, *s.fe_fv[0]);
                 store(
                     boundary_b, f * n_q_face, [&](const uint l) -> const FEValuesBase<dim> & { return *s.fe_fv[l]; },
                     [&](const uint l) -> auto & { return s.face_values[l]; });
@@ -859,8 +854,7 @@ namespace DiFfRG
               for (size_t f = r.begin(); f != r.end(); ++f) {
                 const auto &fe_iv0 = reinit_interface(s, f);
                 for (uint side = 0; side < 2; ++side) {
-                  geometry(faces_b[side], f * n_q_face, fe_iv0.get_fe_face_values(side),
-                           DiFfRG::internal::cell_width(topology.faces[f].cell[side]));
+                  geometry(faces_b[side], f * n_q_face, fe_iv0.get_fe_face_values(side));
                   store(
                       faces_b[side], f * n_q_face,
                       [&](const uint l) -> const FEValuesBase<dim> & { return s.fe_iv[l]->get_fe_face_values(side); },
@@ -1505,15 +1499,14 @@ namespace DiFfRG
 
       void prepare_point_evaluation(const VectorType &solution) const { rebuild_ldg_vectors(solution); }
 
-      /// The LDG solution across all subsystems, its gradients and hessians, and the raw potential,
+      /// The LDG solution across all subsystems, its gradients and hessians,
       /// all at one point. Built by evaluate_at().
-      template <typename PotentialEvaluation = RawPotentialEvaluation<dim, NumberType>> struct PointEvaluation {
+      struct PointEvaluation {
         std::vector<Vector<NumberType>> solutions;
         std::vector<std::vector<Tensor<1, dim, NumberType>>> gradients{
             std::vector<Tensor<1, dim, NumberType>>(Components::count_fe_functions())};
         std::vector<std::vector<Tensor<2, dim, NumberType>>> hessians{
             std::vector<Tensor<2, dim, NumberType>>(Components::count_fe_functions())};
-        PotentialEvaluation potential;
         /// Subsystem 0's FEValues at the point, kept for the shape values the extractor jacobian needs.
         std::shared_ptr<FEValues<dim>> fe_values;
       };
@@ -1525,9 +1518,8 @@ namespace DiFfRG
        * re-addressed per subsystem before its FEValues can be reinit'ed. Only subsystem 0 (the
        * solution proper) has gradients and hessians read off it; the LDG levels are values only.
        */
-      template <typename RawPotential>
       auto evaluate_at(const Point<dim> &x, const typename DoFHandler<dim>::cell_iterator &x_cell,
-                       const VectorType &solution_global, const RawPotential &raw_potential) const
+                       const VectorType &solution_global) const
       {
         using t_Iterator = typename Triangulation<dim>::active_cell_iterator;
         const auto x_unit = mapping.transform_real_to_unit_cell(x_cell, x);
@@ -1542,7 +1534,7 @@ namespace DiFfRG
           fe_v[k]->reinit(cell);
         }
 
-        PointEvaluation<decltype(evaluate_raw_potential(raw_potential, mapping, x))> evaluation;
+        PointEvaluation evaluation;
         for (uint k = 0; k < Components::count_fe_subsystems(); ++k) {
           std::vector<Vector<NumberType>> values{Vector<NumberType>(Components::count_fe_functions(k))};
           if (k == 0)
@@ -1553,7 +1545,6 @@ namespace DiFfRG
         }
         fe_v[0]->get_function_gradients(solution_global, evaluation.gradients);
         fe_v[0]->get_function_hessians(solution_global, evaluation.hessians);
-        evaluation.potential = evaluate_raw_potential(raw_potential, mapping, x);
         evaluation.fe_values = fe_v[0];
         return evaluation;
       }
@@ -1562,8 +1553,7 @@ namespace DiFfRG
       auto solution_tie(const Evaluation &e, const Extractors_ &extractors, const VariablesVector &variables) const
       {
         auto t = std::tuple_cat(vector_to_tuple<Components::count_fe_subsystems()>(e.solutions),
-                                std::tie(e.gradients[0], e.hessians[0], extractors, variables, e.potential.value,
-                                         e.potential.gradient, e.potential.mass_hessian));
+                                std::tie(e.gradients[0], e.hessians[0], extractors, variables));
         return fe_more_conv(t);
       }
     };

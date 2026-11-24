@@ -17,9 +17,9 @@
  * - Set the data with `update(ptr)`: `ptr` points to `coordinates.size()` values, row-major for more than one axis
  *   (the last axis runs fastest).
  * - Evaluate with `f(x...)` on host or device. Outside the grid the boundary value is used; periodic axes wrap.
- * - To use one in an integration kernel, pass it as an argument to the integrator's get()/map(); the kernel should
- *   take it as `const auto &` and receives a lightweight read-only handle with the same call operator (see
- *   has_kernel_handle).
+ * - To use one in an integration kernel, pass it as an argument to the integrator's get()/map(); the kernel receives
+ *   a lightweight read-only handle with the same call operator and should take it as
+ *   `const kernel_handle_t<Interpolator, ctype> &` (see has_kernel_handle).
  *
  * @code
  * LogarithmicCoordinates1D<double> coords(64, 1e-3, 40., 2.); // 64 points, p in [1e-3, 40], bias 2
