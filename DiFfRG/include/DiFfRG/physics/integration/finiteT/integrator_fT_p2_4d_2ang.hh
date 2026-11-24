@@ -4,6 +4,7 @@
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/physics/integration/finiteT/quadrature_integrator_fT.hh>
 #include <DiFfRG/physics/integration/optimize.hh>
+#include <DiFfRG/physics/integration/phi_even.hh>
 
 namespace DiFfRG
 {
@@ -103,6 +104,8 @@ namespace DiFfRG
    * \f$\int \frac{dq_0}{2\pi}\f$.
    * The spatial momentum is \f$\vec q = q\,(c,\, \sqrt{1-c^2}\cos\phi,\, \sqrt{1-c^2}\sin\phi)\f$; \f$\phi\f$ uses the
    * trapezoidal rule, which is very accurate for periodic integrands.
+   * For a kernel_is_phi_even kernel and an even `phi_order` the rule is folded onto
+   * \f$[0, \pi]\f$, with `phi_order`/2 + 1 nodes (see kernel_is_phi_even).
    * Here \f$q_\text{max} = \sqrt{x_\text{extent}}\, k\f$, with \f$x_\text{extent}\f$ in units of \f$k^2\f$ and the RG
    * scale \f$k\f$ set by set_k() (initially the constructor argument `k`, default 1).
    *
@@ -182,22 +185,16 @@ namespace DiFfRG
      */
     Integrator_fT_p2_4D_2ang(QuadratureProvider &quadrature_provider, const std::array<size_t, 3> grid_size,
                              ctype x_extent = 2., ctype T = 1, ctype k = 1)
-        // The azimuthal angle phi in [0,2pi) has a smooth 2pi-periodic integrand; the periodic trapezoidal
-        // rule integrates it with spectral (exponential) accuracy, unlike Gauss-Legendre.
-        : Base(quadrature_provider, grid_size, {0, -1, 0}, {std::sqrt(x_extent) * k, 1, 2 * M_PI},
-               {QuadratureType::legendre, QuadratureType::legendre, QuadratureType::trapezoidal}, T, k),
-          x_extent(x_extent), k(k)
+        : Integrator_fT_p2_4D_2ang(quadrature_provider, grid_size, x_extent, T, k,
+                                   internal::PhiRule(kernel_is_phi_even<KERNEL>, grid_size[2]))
     {
-      // The summand of a finite-extent kernel vanishes outside the same ball in (q0, q) that cuts the spatial grid, so
-      // the exact Matsubara sum is cut at the same radius.
-      Base::set_frequency_cutoff(std::sqrt(this->x_extent) * this->k);
     }
 
     /// Set \f$x_\text{extent}\f$, so that \f$q_\text{max} = \sqrt{x_\text{extent}}\, k\f$.
     void set_x_extent(ctype x_extent)
     {
       this->x_extent = x_extent;
-      Base::set_grid_extents({0, -1, 0}, {std::sqrt(x_extent) * k, 1, 2 * M_PI});
+      Base::set_grid_extents({0, -1, 0}, {std::sqrt(x_extent) * k, 1, phi_end});
       Base::set_frequency_cutoff(std::sqrt(this->x_extent) * this->k);
     }
 
@@ -205,7 +202,7 @@ namespace DiFfRG
     void set_k(ctype k)
     {
       this->k = k;
-      Base::set_grid_extents({0, -1, 0}, {std::sqrt(x_extent) * k, 1, 2 * M_PI});
+      Base::set_grid_extents({0, -1, 0}, {std::sqrt(x_extent) * k, 1, phi_end});
       Base::set_k(k);
       Base::set_frequency_cutoff(std::sqrt(this->x_extent) * this->k);
     }
@@ -215,7 +212,22 @@ namespace DiFfRG
     void set_light_E(ctype light_E) { Base::set_light_E(light_E); }
 
   private:
+    // The azimuthal angle phi in [0,2pi) has a smooth 2pi-periodic integrand; the periodic trapezoidal rule integrates
+    // it with spectral (exponential) accuracy, unlike Gauss-Legendre. phi_even kernels: folded onto [0, pi].
+    Integrator_fT_p2_4D_2ang(QuadratureProvider &quadrature_provider, const std::array<size_t, 3> grid_size,
+                             ctype x_extent, ctype T, ctype k, const internal::PhiRule phi)
+        : Base(quadrature_provider, {grid_size[0], grid_size[1], phi.nodes}, {0, -1, 0},
+               {std::sqrt(x_extent) * k, 1, static_cast<ctype>(phi.end)},
+               {QuadratureType::legendre, QuadratureType::legendre, phi.type}, T, k),
+          x_extent(x_extent), k(k), phi_end(phi.end)
+    {
+      // The summand of a finite-extent kernel vanishes outside the same ball in (q0, q) that cuts the spatial grid, so
+      // the exact Matsubara sum is cut at the same radius.
+      Base::set_frequency_cutoff(std::sqrt(this->x_extent) * this->k);
+    }
+
     ctype x_extent;
     ctype k;
+    ctype phi_end;
   };
 } // namespace DiFfRG

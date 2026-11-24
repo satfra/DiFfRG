@@ -67,6 +67,48 @@ namespace DiFfRG
       else
         return std::array<bool, 0>{};
     }
+  } // namespace internal
+
+  /**
+   * @brief Whether the hoisted form of `K` (kernel_has_pre) is also split at its innermost integration variable.
+   *
+   * Such a kernel declares `static constexpr bool has_split = true`, a `static constexpr std::array<bool, N>
+   * split_reads` with one flag per kernel() parameter (as pre_reads), and
+   * - `split(P, a...)`, taking pre()'s value and kernel()'s parameters and returning (as a trivially copy-constructible
+   *   value) the part of post() that does not depend on the parameters split_reads leaves out;
+   * - `post_split(P, S, a...)` with `S = split(P, a...)`, which returns `post(P, a...)`;
+   * and, with a table (kernel_has_tab), `split_tab(P, a...)` and `post_split_tab(P, S, row, stride, a...)` for
+   * post_tab(). NumTracer emits them when split() takes a dressing lookup.
+   *
+   * The integrator then evaluates the innermost box variable in an inner loop (QuadratureIntegrator): split() once per
+   * node of the other variables, post_split() at every innermost node. The values are those of post(), so only the
+   * order of the sum changes. It does so only where split() does not read the innermost variable.
+   */
+  template <class K>
+  inline constexpr bool kernel_has_split = requires {
+    requires K::has_split;
+    K::split_reads.size();
+  };
+
+  namespace internal
+  {
+    /// Whether the split() of `K` reads kernel() parameter @p i; true for an index beyond `K::split_reads`.
+    template <class K> constexpr bool split_reads(const size_t i)
+    {
+      if constexpr (kernel_has_split<K>)
+        return i >= K::split_reads.size() || K::split_reads[i];
+      else
+        return true;
+    }
+
+    /// The `split_reads` mask of `K`, or an empty one; for adapters that forward a kernel's split form.
+    template <class K> constexpr auto split_reads_of()
+    {
+      if constexpr (kernel_has_split<K>)
+        return K::split_reads;
+      else
+        return std::array<bool, 0>{};
+    }
 
     /**
      * @brief Append an identity of @p v to @p key; false if @p v has none, in which case nothing built from it is

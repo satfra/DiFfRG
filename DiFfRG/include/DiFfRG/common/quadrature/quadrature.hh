@@ -68,16 +68,30 @@ namespace DiFfRG
    * | `laguerre` | \f$(x - a)^\alpha e^{-b (x - a)}\f$ | \f$[a, \infty)\f$ | \f$a = 0\f$, \f$b = 1\f$, \f$\alpha = 1\f$ |
    * | `hermite` | \f$\lvert x - a \rvert^\alpha e^{-b (x - a)^2}\f$ | \f$(-\infty, \infty)\f$ | \f$a = 0\f$, \f$b = 1\f$, \f$\alpha = 1\f$ |
    * | `trapezoidal` | \f$1\f$ | \f$[a, b)\f$, periodic | \f$[0, 1)\f$ |
+   * | `trapezoidal_folded` | \f$1\f$ (even integrands) | \f$[a, b]\f$ | \f$[0, 1]\f$ |
    *
    * Note the defaults \f$\alpha = 1\f$ for `laguerre` and `hermite`: set `alpha = 0` for the standard weights
    * \f$e^{-x}\f$ and \f$e^{-x^2}\f$. `trapezoidal` uses \f$n\f$ equidistant nodes \f$x_i = a + i h\f$, \f$h = (b-a)/n\f$,
    * with weights \f$h\f$; for smooth periodic integrands (e.g. an azimuthal angle on \f$[0, 2\pi)\f$) it converges
-   * exponentially.
+   * exponentially. `trapezoidal_folded` is the periodic rule with \f$2(n-1)\f$ nodes on
+   * \f$[a, 2b - a)\f$ folded onto \f$[a, b]\f$ for an integrand even about \f$a\f$ (\f$f(a + x) = f(a - x)\f$): \f$n \geq 2\f$ nodes
+   * \f$x_i = a + i h\f$, \f$h = (b-a)/(n-1)\f$, both endpoints included, weights \f$h\f$ at the endpoints and \f$2h\f$ inside,
+   * so \f$\sum_i w_i f(x_i) \approx \int_a^{2b-a} dx\, f(x)\f$. It is the `phi_even` fold of the integrators.
    */
   // clang-format on
   struct QuadratureType {
     /// The available rules, see QuadratureType.
-    enum QuadratureKind { legendre, chebyshev, chebyshev2, laguerre, hermite, jacobi, trapezoidal, count };
+    enum QuadratureKind {
+      legendre,
+      chebyshev,
+      chebyshev2,
+      laguerre,
+      hermite,
+      jacobi,
+      trapezoidal,
+      trapezoidal_folded,
+      count
+    };
     QuadratureKind kind = legendre;
     /// Interval or shift and scale parameters, see the table in QuadratureType.
     double a = 0., b = 1.;

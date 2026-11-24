@@ -26,7 +26,7 @@ namespace DiFfRG
     } else if (kind == QuadratureKind::laguerre) {
       a = 0.;
       b = 1.;
-    } else if (kind == QuadratureKind::trapezoidal) {
+    } else if (kind == QuadratureKind::trapezoidal || kind == QuadratureKind::trapezoidal_folded) {
       a = 0.;
       b = 1.;
     }
@@ -53,8 +53,10 @@ namespace DiFfRG
     // The periodic trapezoidal rule is not a Gauss rule and is not provided by GSL: it uses equispaced
     // nodes on [a,b) with equal weights and, for smooth periodic integrands (endpoints a and b identified,
     // e.g. an azimuthal angle phi in [0,2pi)), converges spectrally. Fill nodes/weights directly.
-    if (_t.kind == QuadratureType::trapezoidal) {
-      const std::string name = "trapezoidal";
+    if (_t.kind == QuadratureType::trapezoidal || _t.kind == QuadratureType::trapezoidal_folded) {
+      const bool folded = _t.kind == QuadratureType::trapezoidal_folded;
+      if (folded && order < 2) throw std::runtime_error("trapezoidal_folded needs at least 2 nodes");
+      const std::string name = folded ? "trapezoidal_folded" : "trapezoidal";
       device_nodes = Kokkos::View<NT *, Kokkos::DefaultExecutionSpace::memory_space>(
           "device_nodes_" + name + "_" + std::to_string(order), order);
       device_weights = Kokkos::View<NT *, Kokkos::DefaultExecutionSpace::memory_space>(
@@ -63,11 +65,13 @@ namespace DiFfRG
       auto host_mirror_nodes = Kokkos::create_mirror_view(device_nodes);
       auto host_mirror_weights = Kokkos::create_mirror_view(device_weights);
 
-      // x_i = a + (b-a) i/order, weight = (b-a)/order. The node at b is omitted (identified with a).
-      const double h = (_t.b - _t.a) / static_cast<double>(order);
+      // periodic: x_i = a + (b-a) i/order, weight (b-a)/order, the node at b omitted (identified with a).
+      // folded: x_i = a + (b-a) i/(order-1), weight h at both endpoints and 2h inside (each inner node stands for
+      // itself and its mirror image about a).
+      const double h = (_t.b - _t.a) / static_cast<double>(folded ? order - 1 : order);
       for (size_t i = 0; i < order; ++i) {
         host_mirror_nodes(i) = _t.a + h * static_cast<double>(i);
-        host_mirror_weights(i) = h;
+        host_mirror_weights(i) = (folded && i != 0 && i + 1 != order) ? 2. * h : h;
       }
 
       Kokkos::deep_copy(device_nodes, host_mirror_nodes);

@@ -27,6 +27,22 @@ namespace
       return NT(0);
     }
   };
+
+  // Even in phi and coupled to the other variables (not a trigonometric polynomial in phi): with the phi_even trait
+  // the integrator folds its phi rule onto [0, pi] (even phi_order), which must reproduce the full rule term by term.
+  template <typename NT, bool even> struct EvenPhiIntegrand {
+    using ctype = typename DiFfRG::get_type::ctype<NT>;
+    static constexpr bool phi_even = even;
+    static KOKKOS_FORCEINLINE_FUNCTION auto kernel(const ctype q, const ctype cos1, const ctype cos2, const ctype phi,
+                                                   const NT a)
+    {
+      using Kokkos::cos, Kokkos::exp, Kokkos::sin, Kokkos::sqrt;
+      const ctype s = sqrt(ctype(1) - cos1 * cos1) * sqrt(ctype(1) - cos2 * cos2);
+      return exp(-q * q) / (ctype(1.3) + a * q * s * cos(phi) + ctype(0.2) * cos1) *
+             (ctype(1) + q * q * s * s * powr<2>(sin(phi)));
+    }
+    static KOKKOS_FORCEINLINE_FUNCTION auto constant(const NT /*a*/) { return NT(0); }
+  };
 } // namespace
 
 TEST_CASE("Test 4D momentum + 3 angle integrals", "[integration][quadrature]")
@@ -139,6 +155,24 @@ TEST_CASE("Test 4D momentum + 3 angle integrals", "[integration][quadrature]")
                   << " | expected precision: " << std::setw(12) << expected_precision << std::endl;
       }
       CHECK(rel_err < expected_precision);
+    }
+
+    SECTION("phi_even fold")
+    {
+      // folded (even phi_order) and unfolded (odd phi_order) against the full rule, same integrand
+      for (const size_t nphi : {8, 9, 12}) {
+        Integrator_p2_4D_3ang<dim, NT, EvenPhiIntegrand<NT, true>, ExecutionSpace> folded(quadrature_provider,
+                                                                                          {24, 8, 8, nphi}, x_extent);
+        Integrator_p2_4D_3ang<dim, NT, EvenPhiIntegrand<NT, false>, ExecutionSpace> full(quadrature_provider,
+                                                                                         {24, 8, 8, nphi}, x_extent);
+        // after set_k: the grid extents are rebuilt, the folded phi axis must stay on [0, pi]
+        folded.set_k(0.6);
+        full.set_k(0.6);
+        NT a{}, b{};
+        folded.get(a, NT(0.7));
+        full.get(b, NT(0.7));
+        CHECK(t_abs((a - b) / b) < 1e-13);
+      }
     }
 
     SECTION("Periodic phi")

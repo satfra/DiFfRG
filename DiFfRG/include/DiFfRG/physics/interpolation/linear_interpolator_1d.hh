@@ -59,7 +59,7 @@ namespace DiFfRG
 
     NT KOKKOS_FUNCTION operator()(const ctype x) const { return at(index(x)); }
 
-    const Coordinates &get_coordinates() const { return coordinates; }
+    KOKKOS_FORCEINLINE_FUNCTION const Coordinates &get_coordinates() const { return coordinates; }
 
   private:
     using View = internal::RawView1D<NT>;
@@ -226,7 +226,7 @@ namespace DiFfRG
      *
      * @return const Coordinates& the coordinate system
      */
-    const Coordinates &get_coordinates() const { return coordinates; }
+    KOKKOS_FORCEINLINE_FUNCTION const Coordinates &get_coordinates() const { return coordinates; }
 
     /**
      * @brief Pointer to the host copy of the values (read-only; change the data with update()).

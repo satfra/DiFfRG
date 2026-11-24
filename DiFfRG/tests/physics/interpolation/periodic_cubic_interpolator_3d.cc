@@ -147,3 +147,42 @@ TEST_CASE("PeriodicCubicInterpolator3D: host, device and handles agree", "[3D][i
   CHECK(ip.handle<double>()(s0, s1, phi) == Catch::Approx(res_host).epsilon(1e-14));
   CHECK(ip.handle<float>()(float(s0), float(s1), float(phi)) == Catch::Approx(res_host).epsilon(1e-5));
 }
+
+TEST_CASE("PeriodicCubicInterpolator3D: index_axis and get_coordinates on host and device",
+          "[3D][interpolation][periodic][gpu]")
+{
+  DiFfRG::Init();
+
+  const Grid g(8, 4, 12);
+  const auto ip =
+      g.fill([](int i, int j, double phi) { return std::cos(phi) + 0.1 * j + 0.01 * i * std::sin(2 * phi); });
+  const auto h = ip.handle<double>();
+
+  // per-axis indices are the components of index(), and at() of them is operator(), bitwise on the host
+  const double pts[4][3] = {{2e-3, 0.1, -2.5}, {0.37, 0.55, 0.3}, {3.1, 0.9, 3.0}, {9.5, 0.02, -0.01}};
+  for (const auto &p : pts) {
+    const auto idx = ip.index(p[0], p[1], p[2]);
+    CHECK(ip.index_axis<0>(p[0]) == idx[0]);
+    CHECK(ip.index_axis<1>(p[1]) == idx[1]);
+    CHECK(ip.index_axis<2>(p[2]) == idx[2]);
+    CHECK(h.index_axis<0>(p[0]) == idx[0]);
+    CHECK(ip.at({{ip.index_axis<0>(p[0]), ip.index_axis<1>(p[1]), ip.index_axis<2>(p[2])}}) == ip(p[0], p[1], p[2]));
+  }
+
+  // the same on the device, through the kernel handle
+  double dev_err = 0.;
+  Kokkos::parallel_reduce(
+      "index_axis 3D", Kokkos::RangePolicy(0, 4),
+      KOKKOS_LAMBDA(const uint n, double &err) {
+        const double q[4][3] = {{2e-3, 0.1, -2.5}, {0.37, 0.55, 0.3}, {3.1, 0.9, 3.0}, {9.5, 0.02, -0.01}};
+        const auto idx = h.index(q[n][0], q[n][1], q[n][2]);
+        const double a0 = h.template index_axis<0>(q[n][0]), a1 = h.template index_axis<1>(q[n][1]),
+                     a2 = h.template index_axis<2>(q[n][2]);
+        const double c0 = h.get_coordinates().template get_coordinates<0>().backward(q[n][0]);
+        err += Kokkos::abs(a0 - idx[0]) + Kokkos::abs(a1 - idx[1]) + Kokkos::abs(a2 - idx[2]) +
+               Kokkos::abs(c0 - idx[0]) + Kokkos::abs(h.at({{a0, a1, a2}}) - h(q[n][0], q[n][1], q[n][2]));
+      },
+      dev_err);
+  // rounding only: nvcc contracts the separate per-axis transforms into FMAs differently from the fused index()
+  CHECK(dev_err < 1e-14);
+}

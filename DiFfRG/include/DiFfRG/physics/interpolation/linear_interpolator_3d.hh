@@ -155,7 +155,17 @@ namespace DiFfRG
 
     NT KOKKOS_FUNCTION operator()(const ctype &x, const ctype &y, const ctype &z) const { return at(index(x, y, z)); }
 
-    const Coordinates &get_coordinates() const { return coordinates; }
+    KOKKOS_FORCEINLINE_FUNCTION const Coordinates &get_coordinates() const { return coordinates; }
+    /**
+     * @brief Fractional grid index of @p x along axis @p a alone, i.e. index(...)[a]. Lookups that share one
+     * coordinate on an axis can share this part of the coordinate transform; combine with at(). Needs coordinates
+     * with per-axis access (CoordinatePackND).
+     */
+    template <size_t a>
+    KOKKOS_FORCEINLINE_FUNCTION typename Coordinates::ctype index_axis(const typename Coordinates::ctype x) const
+    {
+      return coordinates.template get_coordinates<a>().backward(x);
+    }
 
   private:
     using View = internal::RawView3D<NT, Layout>;
@@ -331,7 +341,17 @@ namespace DiFfRG
      *
      * @return const Coordinates& the coordinate system
      */
-    const Coordinates &get_coordinates() const { return coordinates; }
+    KOKKOS_FORCEINLINE_FUNCTION const Coordinates &get_coordinates() const { return coordinates; }
+    /**
+     * @brief Fractional grid index of @p x along axis @p a alone, i.e. index(...)[a]. Lookups that share one
+     * coordinate on an axis can share this part of the coordinate transform; combine with at(). Needs coordinates
+     * with per-axis access (CoordinatePackND).
+     */
+    template <size_t a>
+    KOKKOS_FORCEINLINE_FUNCTION typename Coordinates::ctype index_axis(const typename Coordinates::ctype x) const
+    {
+      return coordinates.template get_coordinates<a>().backward(x);
+    }
 
     /**
      * @brief Pointer to the host copy of the values (read-only).

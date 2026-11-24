@@ -20,7 +20,7 @@ namespace
 {
   /**
    * A kernel on two integration variables (x, c), an external point p and the arguments (a, b, Z). The part
-   * Z(x) exp(-x^2) / (1 + a x^2) depends on x, a and Z only; the rest also on c, p and b.
+   * Z(x) exp(-x^2) / (1 + a x^2) depends on x, a and Z only; the rest also on c, p and b, and is linear in c.
    */
   struct PlainKernel {
     template <typename A, typename Z>
@@ -28,10 +28,16 @@ namespace
     {
       return z(x) * Kokkos::exp(-x * x) / (1. + a * x * x);
     }
+    /// the c-independent coefficient of c in rest()
+    template <typename P, typename B>
+    static KOKKOS_FORCEINLINE_FUNCTION auto slope(const P &loop, const double p, const B &b)
+    {
+      return loop * b * p + b * b;
+    }
     template <typename P, typename B> static KOKKOS_FORCEINLINE_FUNCTION auto rest(const P &loop, const double c,
                                                                                     const double p, const B &b)
     {
-      return loop * (1. + b * c * p) + b * b * c;
+      return loop + c * slope(loop, p, b);
     }
 
     template <typename A, typename B, typename Z>
@@ -72,6 +78,31 @@ namespace
     static constexpr std::array<bool, 6> pre_reads{true, true, false, true, false, true};
   };
 
+  /// HoistedKernel split at its innermost variable c: split() holds rest()'s c-independent slope.
+  struct SplitKernel : HoistedKernel {
+    static constexpr bool has_split = true;
+    // x, c, p, a, b, Z
+    static constexpr std::array<bool, 6> split_reads{false, false, true, false, true, false};
+
+    template <typename P, typename A, typename B, typename Z>
+    static KOKKOS_FORCEINLINE_FUNCTION auto split(const P &pre, const double, const double, const double p, const A &,
+                                                  const B &b, const Z &)
+    {
+      return device::make_tuple(slope(device::get<0>(pre), p, b));
+    }
+    template <typename P, typename S, typename A, typename B, typename Z>
+    static KOKKOS_FORCEINLINE_FUNCTION auto post_split(const P &pre, const S &spl, const double, const double c,
+                                                       const double, const A &, const B &, const Z &)
+    {
+      return device::get<0>(pre) + c * device::get<0>(spl);
+    }
+  };
+
+  /// A split kernel whose split() reads the innermost variable: never split.
+  struct BadSplitKernel : SplitKernel {
+    static constexpr std::array<bool, 6> split_reads{false, true, true, false, true, false};
+  };
+
   using Coordinates = LinearCoordinates1D<double>;
   using Interpolator = SplineInterpolator1D<double, Coordinates>;
 
@@ -102,6 +133,9 @@ namespace
     STATIC_REQUIRE(Integrator<HoistedKernel, ExecutionSpace>::can_hoist);
     STATIC_REQUIRE(!Integrator<PlainKernel, ExecutionSpace>::can_hoist);
     STATIC_REQUIRE(!Integrator<BadHoistedKernel, ExecutionSpace>::can_hoist);
+    STATIC_REQUIRE(Integrator<SplitKernel, ExecutionSpace>::can_split);
+    STATIC_REQUIRE(!Integrator<HoistedKernel, ExecutionSpace>::can_split);
+    STATIC_REQUIRE(!Integrator<BadSplitKernel, ExecutionSpace>::can_split);
 
     const Coordinates zgrid(16, 0., 2.);
     Interpolator z(zgrid);
@@ -150,6 +184,39 @@ namespace
           CAPTURE(a_per_point, i, r_plain[i], r_hoisted[i]);
           REQUIRE(close(r_hoisted[i], r_plain[i]));
         }
+      }
+    }
+
+    SECTION("inner split")
+    {
+      // the innermost variable in an inner loop: the same values, in another order of the sum
+      auto split = make<SplitKernel, ExecutionSpace>(provider);
+      for (const double a : {0.5, 0.7})
+        for (const double b : {-0.3, 0.4}) {
+          double r_plain{}, r_split{};
+          plain.get(r_plain, 0.8, a, b, z);
+          split.get(r_split, 0.8, a, b, z);
+          CAPTURE(a, b, r_plain, r_split);
+          REQUIRE(close(r_split, r_plain));
+        }
+      const Coordinates pgrid(12, 0.1, 1.5);
+      std::vector<double> m_plain(pgrid.size()), m_split(pgrid.size());
+      plain.map(m_plain.data(), pgrid, 0.6, 0.2, z);
+      split.map(m_split.data(), pgrid, 0.6, 0.2, z);
+      Kokkos::fence();
+      for (size_t i = 0; i < pgrid.size(); ++i) {
+        CAPTURE(i, m_plain[i], m_split[i]);
+        REQUIRE(close(m_split[i], m_plain[i]));
+      }
+      const size_t n = 37;
+      std::vector<double> p(n), b(n), r_plain(n), r_split(n);
+      for (size_t i = 0; i < n; ++i)
+        p[i] = 0.1 + 0.03 * double(i), b[i] = -0.5 + 0.02 * double(i);
+      plain.map_points(PointSpan<double>(r_plain), p, 0.55, b, z);
+      split.map_points(PointSpan<double>(r_split), p, 0.55, b, z);
+      for (size_t i = 0; i < n; ++i) {
+        CAPTURE(i, r_plain[i], r_split[i]);
+        REQUIRE(close(r_split[i], r_plain[i]));
       }
     }
 

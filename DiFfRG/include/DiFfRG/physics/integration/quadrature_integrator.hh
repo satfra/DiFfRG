@@ -456,6 +456,14 @@ namespace DiFfRG
     static constexpr bool can_hoist = kernel_has_pre<KERNEL> && !internal::pre_reads_any<KERNEL>(1, dim);
 
     /**
+     * @brief Whether the hoisted paths evaluate the innermost integration variable in an inner loop (kernel_has_split):
+     * split() once per node of the other variables, post_split() / post_split_tab() at each innermost node. Only
+     * where split() does not read the innermost variable.
+     */
+    static constexpr bool can_split =
+        can_hoist && kernel_has_split<KERNEL> && dim >= 2 && !internal::split_reads<KERNEL>(dim - 1);
+
+    /**
      * @brief Turn reuse of the pre() table across calls on or off (default on).
      *
      * A table is reused while the first axis, every argument pre() reads and the data of every interpolator
@@ -562,6 +570,79 @@ namespace DiFfRG
                   return device::apply(
                       [&](const auto &...iargs) {
                         return NT(KERNEL::post_tab(P, row, stride, xargs..., pargs..., iargs...));
+                      },
+                      args);
+                },
+                pos);
+          },
+          x);
+    }
+
+    /// split() at @p x (its innermost entry is not read), @p pos, @p args, from the pre() table entry @p P.
+    template <typename PT, typename PosArr, typename ArgTuple>
+    KOKKOS_INLINE_FUNCTION static auto split_value(const PT &P, const device::array<ctype, dim> &x, const PosArr &pos,
+                                                   const ArgTuple &args)
+    {
+      return device::apply(
+          [&](const auto &...xargs) {
+            return device::apply(
+                [&](const auto &...pargs) {
+                  return device::apply(
+                      [&](const auto &...iargs) { return KERNEL::split(P, xargs..., pargs..., iargs...); }, args);
+                },
+                pos);
+          },
+          x);
+    }
+
+    /// kernel() at @p x, @p pos, @p args, from the pre() table entry @p P and the split() value @p S.
+    template <typename PT, typename ST, typename PosArr, typename ArgTuple>
+    KOKKOS_INLINE_FUNCTION static NT post_split_value(const PT &P, const ST &S, const device::array<ctype, dim> &x,
+                                                      const PosArr &pos, const ArgTuple &args)
+    {
+      return device::apply(
+          [&](const auto &...xargs) {
+            return device::apply(
+                [&](const auto &...pargs) {
+                  return device::apply(
+                      [&](const auto &...iargs) { return NT(KERNEL::post_split(P, S, xargs..., pargs..., iargs...)); },
+                      args);
+                },
+                pos);
+          },
+          x);
+    }
+
+    /// split_tab() at @p x (its innermost entry is not read), @p pos, @p args, from the pre() table entry @p P.
+    template <typename PT, typename PosArr, typename ArgTuple>
+    KOKKOS_INLINE_FUNCTION static auto split_tab_value(const PT &P, const device::array<ctype, dim> &x,
+                                                       const PosArr &pos, const ArgTuple &args)
+    {
+      return device::apply(
+          [&](const auto &...xargs) {
+            return device::apply(
+                [&](const auto &...pargs) {
+                  return device::apply(
+                      [&](const auto &...iargs) { return KERNEL::split_tab(P, xargs..., pargs..., iargs...); }, args);
+                },
+                pos);
+          },
+          x);
+    }
+
+    /// kernel() from the pre() table entry @p P, the split_tab() value @p S and the table entries `row[e * stride]`.
+    template <typename PT, typename ST, typename PosArr, typename ArgTuple>
+    KOKKOS_INLINE_FUNCTION static NT post_split_tab_value(const PT &P, const ST &S, const ctype *row,
+                                                          const size_t stride, const device::array<ctype, dim> &x,
+                                                          const PosArr &pos, const ArgTuple &args)
+    {
+      return device::apply(
+          [&](const auto &...xargs) {
+            return device::apply(
+                [&](const auto &...pargs) {
+                  return device::apply(
+                      [&](const auto &...iargs) {
+                        return NT(KERNEL::post_split_tab(P, S, row, stride, xargs..., pargs..., iargs...));
                       },
                       args);
                 },
@@ -840,7 +921,42 @@ namespace DiFfRG
         const ctype *tab = m_tab_get.data.data();
         size_t NB;
         const auto bstride = tab_box_strides(NB);
-        if constexpr (can_hoist) {
+        if constexpr (can_split) {
+          using PT = decltype(pre_value(ctype(0), device::tuple<>{}, args));
+          const PT *table = prepare_pre_table<PT>(space, device::tuple<>{}, args, dim, t...);
+          constexpr int last = dim - 1;
+          const size_t n_last = grid_size[last];
+          device::array<size_t, last> outer_size;
+          for (int i = 0; i < last; ++i)
+            outer_size[i] = grid_size[i];
+          auto functor = KOKKOS_LAMBDA(const device::array<size_t, last> &idx, NT &update)
+          {
+            device::array<ctype, dim> x;
+            ctype weight = 1;
+            bool is_first = true;
+            size_t b = 0;
+            for (int i = 0; i < last; ++i) {
+              x[i] = Kokkos::fma(scale[i], n[i][idx[i]], start[i]);
+              weight *= w[i][idx[i]] * scale[i];
+              is_first &= idx[i] == 0;
+              b += idx[i] * bstride[i];
+            }
+            x[last] = start[last];
+            const auto &P = table[idx[0]];
+            const auto S = split_tab_value(P, x, device::tuple<>{}, args);
+            NT sum{};
+            for (size_t j = 0; j < n_last; ++j) {
+              x[last] = Kokkos::fma(scale[last], n[last][j], start[last]);
+              sum += (weight * (w[last][j] * scale[last])) *
+                     post_split_tab_value(P, S, tab + b + j * bstride[last], NB, x, device::tuple<>{}, args);
+            }
+            update += sum;
+            device::apply([&](const auto &...iargs) { update += is_first ? KERNEL::constant(iargs...) : NT(0); }, args);
+          };
+          Kokkos::parallel_reduce("QuadratureIntegral_tab_split_" + std::to_string(dim) + "D",
+                                  make_kokkos_nd_range<last, ExecutionSpace>(space, {0}, outer_size),
+                                  internal::KokkosNDLambdaWrapperReduction<last, decltype(functor)>(functor), dest);
+        } else if constexpr (can_hoist) {
           using PT = decltype(pre_value(ctype(0), device::tuple<>{}, args));
           const PT *table = prepare_pre_table<PT>(space, device::tuple<>{}, args, dim, t...);
           auto functor = KOKKOS_LAMBDA(const device::array<size_t, dim> &idx, NT &update)
@@ -883,6 +999,38 @@ namespace DiFfRG
                                   make_kokkos_nd_range<dim, ExecutionSpace>(space, {0}, grid_size),
                                   internal::KokkosNDLambdaWrapperReduction<dim, decltype(functor)>(functor), dest);
         }
+      } else if constexpr (can_split) {
+        using PT = decltype(pre_value(ctype(0), device::tuple<>{}, args));
+        const PT *table = prepare_pre_table<PT>(space, device::tuple<>{}, args, dim, t...);
+        constexpr int last = dim - 1;
+        const size_t n_last = grid_size[last];
+        device::array<size_t, last> outer_size;
+        for (int i = 0; i < last; ++i)
+          outer_size[i] = grid_size[i];
+        auto functor = KOKKOS_LAMBDA(const device::array<size_t, last> &idx, NT &update)
+        {
+          device::array<ctype, dim> x;
+          ctype weight = 1;
+          bool is_first = true;
+          for (int i = 0; i < last; ++i) {
+            x[i] = Kokkos::fma(scale[i], n[i][idx[i]], start[i]);
+            weight *= w[i][idx[i]] * scale[i];
+            is_first &= idx[i] == 0;
+          }
+          x[last] = start[last];
+          const auto &P = table[idx[0]];
+          const auto S = split_value(P, x, device::tuple<>{}, args);
+          NT sum{};
+          for (size_t j = 0; j < n_last; ++j) {
+            x[last] = Kokkos::fma(scale[last], n[last][j], start[last]);
+            sum += (weight * (w[last][j] * scale[last])) * post_split_value(P, S, x, device::tuple<>{}, args);
+          }
+          update += sum;
+          device::apply([&](const auto &...iargs) { update += is_first ? KERNEL::constant(iargs...) : NT(0); }, args);
+        };
+        Kokkos::parallel_reduce("QuadratureIntegral_split_" + std::to_string(dim) + "D",
+                                make_kokkos_nd_range<last, ExecutionSpace>(space, {0}, outer_size),
+                                internal::KokkosNDLambdaWrapperReduction<last, decltype(functor)>(functor), dest);
       } else if constexpr (can_hoist) {
         using PT = decltype(pre_value(ctype(0), device::tuple<>{}, args));
         const PT *table = prepare_pre_table<PT>(space, device::tuple<>{}, args, dim, t...);
@@ -1037,7 +1185,43 @@ namespace DiFfRG
         constexpr size_t E = KERNEL::tab_size;
         size_t NB;
         const auto bstride = tab_box_strides(NB);
-        if constexpr (can_hoist && !internal::pre_reads_any<KERNEL>(dim, dim + cdim)) {
+        if constexpr (can_split && !internal::pre_reads_any<KERNEL>(dim, dim + cdim)) {
+          // split: one thread per (point, node of the first dim - 1 variables), the innermost variable in a loop that
+          // writes each node's own cache entry, so the sum is the same as without the split
+          const device::array<pos_ctype, cdim> pos0{};
+          using PT = decltype(pre_value(ctype(0), pos0, m_args));
+          const PT *table = prepare_pre_table<PT>(space, pos0, m_args, dim + cdim, args...);
+          constexpr int last = dim - 1;
+          const size_t n_last = grid_size[last];
+          device::array<size_t, dim> outer_extents;
+          for (int i = 0; i < dim; ++i)
+            outer_extents[i] = extents[i];
+          auto functor = KOKKOS_LAMBDA(const device::array<size_t, dim> &idx)
+          {
+            device::array<pos_ctype, cdim> pos;
+            for (size_t d = 0; d < cdim; ++d)
+              pos[d] = static_cast<pos_ctype>(pos_view(idx[0] * cdim + d));
+            device::array<ctype, dim> x;
+            ctype weight = 1;
+            size_t b = 0;
+            for (int i = 0; i < last; ++i) {
+              x[i] = Kokkos::fma(scale[i], n[i][idx[1 + i]], start[i]);
+              weight *= w[i][idx[1 + i]] * scale[i];
+              b += idx[1 + i] * bstride[i];
+            }
+            x[last] = start[last];
+            const auto &P = table[idx[1]];
+            const auto S = split_tab_value(P, x, pos, m_args);
+            for (size_t j = 0; j < n_last; ++j) {
+              x[last] = Kokkos::fma(scale[last], n[last][j], start[last]);
+              const ctype *row = tab + (b + j * bstride[last]) * E * NS + shape_of(idx[0]);
+              auto entry = device::apply([&](const auto &...i) { return Kokkos::subview(cache, i..., j); }, idx);
+              entry() = (weight * (w[last][j] * scale[last])) * post_split_tab_value(P, S, row, NS, x, pos, m_args);
+            }
+          };
+          Kokkos::parallel_for(make_kokkos_nd_range_divisible<dim, ExecutionSpace>(space, {0}, outer_extents),
+                               internal::KokkosNDLambdaWrapper<dim, decltype(functor)>(functor));
+        } else if constexpr (can_hoist && !internal::pre_reads_any<KERNEL>(dim, dim + cdim)) {
           const device::array<pos_ctype, cdim> pos0{};
           using PT = decltype(pre_value(ctype(0), pos0, m_args));
           const PT *table = prepare_pre_table<PT>(space, pos0, m_args, dim + cdim, args...);
@@ -1081,6 +1265,39 @@ namespace DiFfRG
           Kokkos::parallel_for(make_kokkos_nd_range_divisible<1 + dim, ExecutionSpace>(space, {0}, extents),
                                internal::KokkosNDLambdaWrapper<1 + dim, decltype(functor)>(functor));
         }
+      } else if constexpr (can_split && has_cacheable_positions_v<Coordinates> &&
+                           !internal::pre_reads_any<KERNEL>(dim, dim + cdim)) {
+        // split, as in the table branch above
+        const device::array<pos_ctype, cdim> pos0{};
+        using PT = decltype(pre_value(ctype(0), pos0, m_args));
+        const PT *table = prepare_pre_table<PT>(space, pos0, m_args, dim + cdim, args...);
+        constexpr int last = dim - 1;
+        const size_t n_last = grid_size[last];
+        device::array<size_t, dim> outer_extents;
+        for (int i = 0; i < dim; ++i)
+          outer_extents[i] = extents[i];
+        auto functor = KOKKOS_LAMBDA(const device::array<size_t, dim> &idx)
+        {
+          device::array<pos_ctype, cdim> pos;
+          for (size_t d = 0; d < cdim; ++d)
+            pos[d] = static_cast<pos_ctype>(pos_view(idx[0] * cdim + d));
+          device::array<ctype, dim> x;
+          ctype weight = 1;
+          for (int i = 0; i < last; ++i) {
+            x[i] = Kokkos::fma(scale[i], n[i][idx[1 + i]], start[i]);
+            weight *= w[i][idx[1 + i]] * scale[i];
+          }
+          x[last] = start[last];
+          const auto &P = table[idx[1]];
+          const auto S = split_value(P, x, pos, m_args);
+          for (size_t j = 0; j < n_last; ++j) {
+            x[last] = Kokkos::fma(scale[last], n[last][j], start[last]);
+            auto entry = device::apply([&](const auto &...i) { return Kokkos::subview(cache, i..., j); }, idx);
+            entry() = (weight * (w[last][j] * scale[last])) * post_split_value(P, S, x, pos, m_args);
+          }
+        };
+        Kokkos::parallel_for(make_kokkos_nd_range_divisible<dim, ExecutionSpace>(space, {0}, outer_extents),
+                             internal::KokkosNDLambdaWrapper<dim, decltype(functor)>(functor));
       } else if constexpr (can_hoist && has_cacheable_positions_v<Coordinates> &&
                            !internal::pre_reads_any<KERNEL>(dim, dim + cdim)) {
         // hoisted: pre() must not read the external position, which sits right after the integration variables
@@ -1382,8 +1599,13 @@ namespace DiFfRG
             PT *table = pre_table_storage<PT>();
             m_pre_table.refresh(pre_table_key<PT>(dim, args.value...), space, space,
                                 [&] { fill_pre_table_points(table, device_args); });
-            m_map_points.run(space, dest,
-                             [&](const auto &result) { launch_map_points_tab_hoisted(result, n, device_args, table); });
+            if constexpr (can_split)
+              m_map_points.run(space, dest,
+                               [&](const auto &result) { launch_map_points_tab_split(result, n, device_args, table); });
+            else
+              m_map_points.run(space, dest, [&](const auto &result) {
+                launch_map_points_tab_hoisted(result, n, device_args, table);
+              });
             return;
           }
         }
@@ -1402,8 +1624,12 @@ namespace DiFfRG
             PT *table = pre_table_storage<PT>();
             m_pre_table.refresh(pre_table_key<PT>(dim, args.value...), space, space,
                                 [&] { fill_pre_table_points(table, device_args); });
-            m_map_points.run(space, dest,
-                             [&](const auto &result) { launch_map_points_hoisted(result, n, device_args, table); });
+            if constexpr (can_split)
+              m_map_points.run(space, dest,
+                               [&](const auto &result) { launch_map_points_split(result, n, device_args, table); });
+            else
+              m_map_points.run(space, dest,
+                               [&](const auto &result) { launch_map_points_hoisted(result, n, device_args, table); });
             return;
           }
         }
@@ -1751,6 +1977,167 @@ namespace DiFfRG
                         }
                         vec_update +=
                             weight * hoisted_value(table[flat / strides[0]], x, device::tuple<>{}, point_args);
+                      },
+                      vec_sum);
+                  team_update += vec_sum;
+                },
+                integral);
+            Kokkos::single(Kokkos::PerTeam(team), [&]() {
+              NT sum = device::apply([&](const auto &...a) { return NT(KERNEL::constant(a(i)...)); }, args);
+              sum += integral;
+              result(i) = static_cast<OT>(sum);
+            });
+          });
+    }
+
+    /// The strides of the first dim - 1 box variables (row-major) and their node count, for the split launches.
+    size_t outer_strides(device::array<size_t, dim> &strides) const
+    {
+      constexpr int last = dim - 1;
+      size_t total = 1;
+      for (int d = 0; d < last; ++d)
+        total *= grid_size[d];
+      strides[last] = 0;
+      strides[last - 1] = 1;
+      for (int d = last - 2; d >= 0; --d)
+        strides[d] = strides[d + 1] * grid_size[d + 1];
+      return total;
+    }
+
+    /// launch_map_points_tab_hoisted() for a split kernel (can_split): each lane takes one node of the first dim - 1
+    /// variables, evaluates split_tab() there and post_split_tab() at every node of the innermost one. Public for the
+    /// same reason as launch_map_points().
+    template <typename ResultView, typename DeviceArgs, typename PT>
+    void launch_map_points_tab_split(const ResultView &result, const size_t n, const DeviceArgs &device_args,
+                                     const PT *table)
+    {
+      using OT = typename ResultView::value_type;
+
+      const auto &nd = nodes;
+      const auto &w = weights;
+      const auto &start = grid_start;
+      const auto &scale = grid_scale;
+      const auto args = device_args;
+      constexpr size_t E = KERNEL::tab_size;
+      constexpr int last = dim - 1;
+      const ctype *tab = m_tab_points.data.data();
+      const auto shape_of = m_tab_points.shape_of;
+      size_t NB;
+      const auto bstride = tab_box_strides(NB);
+      device::array<size_t, dim> strides;
+      const size_t total = outer_strides(strides);
+      const size_t n_last = grid_size[last];
+
+      using TeamType = typename Kokkos::TeamPolicy<ExecutionSpace>::member_type;
+      constexpr int vector_width = 32;
+      const size_t n_outer = (total + vector_width - 1) / vector_width;
+      Kokkos::parallel_for(
+          "QuadratureIntegrator_map_points_tab_split",
+          Kokkos::TeamPolicy<ExecutionSpace>(space, n, Kokkos::AUTO, vector_width),
+          KOKKOS_LAMBDA(const TeamType &team) {
+            const size_t i = team.league_rank();
+            const auto point_args = device::apply([&](const auto &...a) { return device::tie(a(i)...); }, args);
+            const ctype *point_tab = tab + size_t(shape_of(i)) * E * NB;
+            NT integral{};
+            Kokkos::parallel_reduce(
+                Kokkos::TeamThreadRange(team, n_outer),
+                [&](const size_t outer, NT &team_update) {
+                  NT vec_sum{};
+                  Kokkos::parallel_reduce(
+                      Kokkos::ThreadVectorRange(team, vector_width),
+                      [&](const size_t inner, NT &vec_update) {
+                        const size_t flat = outer * vector_width + inner;
+                        if (flat >= total) return;
+                        device::array<ctype, dim> x;
+                        ctype weight = 1;
+                        size_t remainder = flat, b = 0;
+                        for (int d = 0; d < last; ++d) {
+                          const size_t id = remainder / strides[d];
+                          remainder -= id * strides[d];
+                          x[d] = Kokkos::fma(scale[d], nd[d][id], start[d]);
+                          weight *= w[d][id] * scale[d];
+                          b += id * bstride[d];
+                        }
+                        x[last] = start[last];
+                        const auto &P = table[flat / strides[0]];
+                        const auto S = split_tab_value(P, x, device::tuple<>{}, point_args);
+                        NT sum{};
+                        for (size_t j = 0; j < n_last; ++j) {
+                          x[last] = Kokkos::fma(scale[last], nd[last][j], start[last]);
+                          sum += (weight * (w[last][j] * scale[last])) *
+                                 post_split_tab_value(P, S, point_tab + b + j * bstride[last], NB, x, device::tuple<>{},
+                                                      point_args);
+                        }
+                        vec_update += sum;
+                      },
+                      vec_sum);
+                  team_update += vec_sum;
+                },
+                integral);
+            Kokkos::single(Kokkos::PerTeam(team), [&]() {
+              NT sum = device::apply([&](const auto &...a) { return NT(KERNEL::constant(a(i)...)); }, args);
+              sum += integral;
+              result(i) = static_cast<OT>(sum);
+            });
+          });
+    }
+
+    /// launch_map_points_hoisted() for a split kernel (can_split); see launch_map_points_tab_split(). Public for the
+    /// same reason as launch_map_points().
+    template <typename ResultView, typename DeviceArgs, typename PT>
+    void launch_map_points_split(const ResultView &result, const size_t n, const DeviceArgs &device_args,
+                                 const PT *table)
+    {
+      using OT = typename ResultView::value_type;
+
+      const auto &nd = nodes;
+      const auto &w = weights;
+      const auto &start = grid_start;
+      const auto &scale = grid_scale;
+      const auto args = device_args;
+      constexpr int last = dim - 1;
+      device::array<size_t, dim> strides;
+      const size_t total = outer_strides(strides);
+      const size_t n_last = grid_size[last];
+
+      using TeamType = typename Kokkos::TeamPolicy<ExecutionSpace>::member_type;
+      constexpr int vector_width = 32;
+      const size_t n_outer = (total + vector_width - 1) / vector_width;
+      Kokkos::parallel_for(
+          "QuadratureIntegrator_map_points_split",
+          Kokkos::TeamPolicy<ExecutionSpace>(space, n, Kokkos::AUTO, vector_width),
+          KOKKOS_LAMBDA(const TeamType &team) {
+            const size_t i = team.league_rank();
+            const auto point_args = device::apply([&](const auto &...a) { return device::tie(a(i)...); }, args);
+            NT integral{};
+            Kokkos::parallel_reduce(
+                Kokkos::TeamThreadRange(team, n_outer),
+                [&](const size_t outer, NT &team_update) {
+                  NT vec_sum{};
+                  Kokkos::parallel_reduce(
+                      Kokkos::ThreadVectorRange(team, vector_width),
+                      [&](const size_t inner, NT &vec_update) {
+                        const size_t flat = outer * vector_width + inner;
+                        if (flat >= total) return;
+                        device::array<ctype, dim> x;
+                        ctype weight = 1;
+                        size_t remainder = flat;
+                        for (int d = 0; d < last; ++d) {
+                          const size_t id = remainder / strides[d];
+                          remainder -= id * strides[d];
+                          x[d] = Kokkos::fma(scale[d], nd[d][id], start[d]);
+                          weight *= w[d][id] * scale[d];
+                        }
+                        x[last] = start[last];
+                        const auto &P = table[flat / strides[0]];
+                        const auto S = split_value(P, x, device::tuple<>{}, point_args);
+                        NT sum{};
+                        for (size_t j = 0; j < n_last; ++j) {
+                          x[last] = Kokkos::fma(scale[last], nd[last][j], start[last]);
+                          sum += (weight * (w[last][j] * scale[last])) *
+                                 post_split_value(P, S, x, device::tuple<>{}, point_args);
+                        }
+                        vec_update += sum;
                       },
                       vec_sum);
                   team_update += vec_sum;

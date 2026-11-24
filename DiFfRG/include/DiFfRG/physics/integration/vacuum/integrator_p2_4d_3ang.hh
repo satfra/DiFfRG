@@ -3,6 +3,7 @@
 // DiFfRG
 #include <DiFfRG/common/math.hh>
 #include <DiFfRG/physics/integration/optimize.hh>
+#include <DiFfRG/physics/integration/phi_even.hh>
 #include <DiFfRG/physics/integration/quadrature_integrator.hh>
 
 // standard libraries
@@ -108,6 +109,41 @@ namespace DiFfRG
         return int_prefactor * powr<4 - 1>(q) * KERNEL::post_tab(P, row, stride, q, t...);
       }
 
+      // Split form (kernel_has_split): forwarded, with the measure applied in post_split() / post_split_tab().
+      static constexpr bool has_split = kernel_has_split<KERNEL>;
+      static constexpr auto split_reads = internal::split_reads_of<KERNEL>();
+
+      template <typename PT, typename... T>
+      static KOKKOS_FORCEINLINE_FUNCTION auto split(const PT &P, const T &...t)
+        requires(kernel_has_pre<KERNEL> && kernel_has_split<KERNEL>)
+      {
+        return KERNEL::split(P, t...);
+      }
+
+      template <typename PT, typename ST, typename... T>
+      static KOKKOS_FORCEINLINE_FUNCTION NT post_split(const PT &P, const ST &S, const ctype q, const T &...t)
+        requires(kernel_has_pre<KERNEL> && kernel_has_split<KERNEL>)
+      {
+        using namespace DiFfRG::compute;
+        return int_prefactor * powr<4 - 1>(q) * KERNEL::post_split(P, S, q, t...);
+      }
+
+      template <typename PT, typename... T>
+      static KOKKOS_FORCEINLINE_FUNCTION auto split_tab(const PT &P, const T &...t)
+        requires(kernel_has_tab<KERNEL> && kernel_has_pre<KERNEL> && kernel_has_split<KERNEL>)
+      {
+        return KERNEL::split_tab(P, t...);
+      }
+
+      template <typename PT, typename ST, typename... T>
+      static KOKKOS_FORCEINLINE_FUNCTION NT post_split_tab(const PT &P, const ST &S, const ctype *row,
+                                                           const std::size_t stride, const ctype q, const T &...t)
+        requires(kernel_has_tab<KERNEL> && kernel_has_pre<KERNEL> && kernel_has_split<KERNEL>)
+      {
+        using namespace DiFfRG::compute;
+        return int_prefactor * powr<4 - 1>(q) * KERNEL::post_split_tab(P, S, row, stride, q, t...);
+      }
+
       template <typename... T>
       static KOKKOS_FORCEINLINE_FUNCTION NT constant(const T &...t)
         requires provides_constant<NT, KERNEL, T...>
@@ -131,7 +167,9 @@ namespace DiFfRG
    * \f$q_\text{max} = \sqrt{x_\text{extent}}\, k\f$, with \f$x_\text{extent}\f$ in units of \f$k^2\f$ and the RG scale
    * \f$k\f$ set by set_k() (initially 1). The weight \f$\sqrt{1-c_1^2}\f$ is built into the \f$c_1\f$ (Gauss-Chebyshev)
    * quadrature, so the kernel does not include it; \f$\phi\f$ uses the trapezoidal rule, which is very accurate for
-   * periodic integrands. The `_p2` in the name is historical: the kernel receives \f$|q|\f$, not \f$q^2\f$.
+   * periodic integrands. For a kernel_is_phi_even kernel and an even `phi_order` the rule is folded onto
+   * \f$[0, \pi]\f$, with `phi_order`/2 + 1 nodes (see kernel_is_phi_even). The `_p2` in the name is historical: the
+   * kernel receives \f$|q|\f$, not \f$q^2\f$.
    *
    * Kernel interface:
    * - get(): `KERNEL::kernel(q, c1, c2, phi, args...)` and `KERNEL::constant(args...)`
@@ -183,12 +221,8 @@ namespace DiFfRG
      */
     Integrator_p2_4D_3ang(QuadratureProvider &quadrature_provider, const std::array<size_t, 4> grid_size,
                           ctype x_extent = 2.)
-        // The azimuthal angle phi in [0,2pi) has a smooth 2pi-periodic integrand; the periodic trapezoidal
-        // rule integrates it with spectral (exponential) accuracy, unlike Gauss-Legendre.
-        : Base(quadrature_provider, grid_size, {0, 0, -1, 0}, {std::sqrt(x_extent), 1, 1, 2 * M_PI},
-               {QuadratureType::legendre, QuadratureType::chebyshev2, QuadratureType::legendre,
-                QuadratureType::trapezoidal}),
-          x_extent(x_extent), k(1.)
+        : Integrator_p2_4D_3ang(quadrature_provider, grid_size, x_extent,
+                                internal::PhiRule(kernel_is_phi_even<KERNEL>, grid_size[3]))
     {
     }
 
@@ -196,18 +230,30 @@ namespace DiFfRG
     void set_x_extent(ctype x_extent)
     {
       this->x_extent = x_extent;
-      Base::set_grid_extents({0, 0, -1, 0}, {std::sqrt(x_extent) * k, 1, 1, 2 * M_PI});
+      Base::set_grid_extents({0, 0, -1, 0}, {std::sqrt(x_extent) * k, 1, 1, phi_end});
     }
 
     /// Set the RG scale \f$k\f$, which moves the upper limit \f$q_\text{max} = \sqrt{x_\text{extent}}\, k\f$.
     void set_k(ctype k)
     {
       this->k = k;
-      Base::set_grid_extents({0, 0, -1, 0}, {std::sqrt(x_extent) * k, 1, 1, 2 * M_PI});
+      Base::set_grid_extents({0, 0, -1, 0}, {std::sqrt(x_extent) * k, 1, 1, phi_end});
     }
 
   private:
+    // The azimuthal angle phi in [0,2pi) has a smooth 2pi-periodic integrand; the periodic trapezoidal rule integrates
+    // it with spectral (exponential) accuracy, unlike Gauss-Legendre. phi_even kernels: folded onto [0, pi].
+    Integrator_p2_4D_3ang(QuadratureProvider &quadrature_provider, const std::array<size_t, 4> grid_size,
+                          ctype x_extent, const internal::PhiRule phi)
+        : Base(quadrature_provider, {grid_size[0], grid_size[1], grid_size[2], phi.nodes}, {0, 0, -1, 0},
+               {std::sqrt(x_extent), 1, 1, static_cast<ctype>(phi.end)},
+               {QuadratureType::legendre, QuadratureType::chebyshev2, QuadratureType::legendre, phi.type}),
+          x_extent(x_extent), k(1.), phi_end(phi.end)
+    {
+    }
+
     ctype x_extent;
     ctype k;
+    ctype phi_end;
   };
 } // namespace DiFfRG
