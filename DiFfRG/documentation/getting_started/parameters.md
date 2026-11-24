@@ -135,9 +135,9 @@ Read by the momentum integrators when they are constructed.
 | `cos1_order`, `cos2_order`, `phi_order` | uint | 8 *(warns)* | Quadrature orders of the angular integrals, for integrators that have them. |
 | `x_extent_tolerance` | double | 1e-5 *(warns)* | Relative tolerance for choosing the upper end of the radial integral, beyond which the regulator insertion is negligible. |
 | `jacobian_quadrature_factor` | double | 0.8 | Factor on all orders for the AD (Jacobian) evaluations. |
-| `vacuum_quad_size` | uint | 64 | Size of the frequency quadrature in vacuum integrals. |
-| `matsubara_precision_factor` | double | 1 | Accuracy factor for numerical Matsubara sums. |
-| `min_matsubara_size`, `max_matsubara_size` | uint | 8, 128 | Bounds on the number of Matsubara terms summed explicitly. |
+| `vacuum_quad_size` | uint | 64 | Size of the frequency quadrature in vacuum integrals, and of the integrated tail of the hybrid rule. |
+| `matsubara_precision_factor` | double | 1 | Accuracy factor for numerical Matsubara sums: multiplies the reach of the Monien rule and the number of exactly summed modes of the hybrid rule. |
+| `min_matsubara_size`, `max_matsubara_size` | uint | 8, 128 | Bounds on the number of frequency nodes. Beyond `max_matsubara_size` the sum is replaced by the T = 0 integral if the summand's lightest scale (`set_light_E()`, default k) is at least 30 T, and otherwise by the hybrid rule: the lowest modes summed exactly, the rest integrated. |
 | `force_exact_matsubara_sum` | bool | kernel's choice | Allow (`true`) or forbid (`false`) the exact frequency sum, overriding the generated kernel. |
 | `matsubara_extent_margin` | double | 1 | Factor on the frequency cutoff of the exact sum. |
 | `map_quantum`, `map_verbose` | double, bool | 0, false | Distribution of `map()` over MPI ranks, see [MPI](mpi.md). |

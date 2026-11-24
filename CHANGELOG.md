@@ -291,6 +291,16 @@
 
 ### Fixed
 
+- Finite-T frequency sums no longer lose the thermal content of a light scale when the node budget runs out.
+  Beyond `max_matsubara_size` the integrators replaced the Matsubara sum by the T = 0 integral, judged only by
+  the heavy scale `typical_E`, so a summand with a scale below T next to one far above it (k << T << typical_E,
+  or a mode near convexity restoration) was off by up to O(1). They now ask for the lightest scale as well
+  (new `set_light_E()`, default k; `all_set_light_E()` and the generated flows classes forward it): the T = 0
+  integral is used only if that scale is at least 30 T, and otherwise the new hybrid rule
+  (`MatsubaraQuadrature::reinit_hybrid`), which sums the lowest modes exactly and integrates the rest, with
+  Euler-Maclaurin corrections at the junction (relative error ~2e-10, within the node budget). Within the
+  budget, and for summands whose light and heavy scales agree, the rule is unchanged.
+  Test: `tests/physics/integration/finiteT/matsubara_two_scale.cc`.
 - The KT assembler's per-dof absolute tolerances (`Model::abs_tolerances`) also work with distributed vectors.
   An MPI build silently fell back to the uniform `abs_tol`; the reconstruction now reads a replica of the state
   (`SolutionView`).
